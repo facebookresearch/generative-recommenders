@@ -20,6 +20,7 @@ import sys
 import time
 
 import torch
+import torch.distributed as dist
 import torch.nn.functional as F
 from torch.utils.tensorboard import SummaryWriter
 
@@ -80,7 +81,6 @@ def eval_metrics_v2_from_tensors(
     min_positive_rating: int = 4,
     target_ratings: Optional[torch.Tensor] = None,  # [B, 1]
     epoch: Optional[str] = None,
-    include_full_matrices: bool = False,
     filter_invalid_ids: bool = True,
     user_max_batch_size: Optional[int] = None,
     dtype: Optional[torch.dtype] = None,
@@ -92,8 +92,6 @@ def eval_metrics_v2_from_tensors(
             seen in the past (historical_ids, target_ids). This is consistent with
             papers like SASRec and TDM but may not be fair in practice as retrieval
             modules don't have access to read state during the initial fetch stage.
-        item_max_batch_size: int. maximum number of items (*not* users - i.e., M/R
-            not B) to eval per batch.
         filter_invalid_ids: bool. If true, filters seen ids by default.
     Returns:
         keyed metric -> list of values for each example.
@@ -130,11 +128,6 @@ def eval_metrics_v2_from_tensors(
             query_embeddings=shared_input_embeddings[mb * user_max_batch_size: (mb + 1) * user_max_batch_size, ...],
             top_k_module=eval_state.top_k_module,
             k=k,
-            #policy_fn=lambda ids, embeddings: model.interaction(
-            #    input_embeddings=shared_input_embeddings,
-            #    target_ids=ids,
-            #    target_embeddings=embeddings,
-            #),
             invalid_ids=seq_features.past_ids[
                 mb * user_max_batch_size: (mb + 1) * user_max_batch_size, :
             ] if filter_invalid_ids else None,
@@ -159,37 +152,41 @@ def eval_metrics_v2_from_tensors(
         dim=1,
     )
     eval_ranks = torch.where(eval_rank_indices == k, MAX_K + 1, eval_rank_indices + 1)
-    # print(f"eval_ranks.min()={eval_ranks.min()}, eval_ranks.max()={eval_ranks.max()}")
 
     output = {
         "ndcg@1": torch.where(
             eval_ranks <= 1,
             1.0 / torch.log2(eval_ranks + 1),
             torch.zeros(1, dtype=torch.float32, device=device),
-        ).tolist(),
+        ),
         "ndcg@10": torch.where(
             eval_ranks <= 10,
             1.0 / torch.log2(eval_ranks + 1),
             torch.zeros(1, dtype=torch.float32, device=device),
-        ).tolist(),
+        ),
         "ndcg@50": torch.where(
             eval_ranks <= 50,
             1.0 / torch.log2(eval_ranks + 1),
             torch.zeros(1, dtype=torch.float32, device=device),
-        ).tolist(),
+        ),
+        "ndcg@100": torch.where(
+            eval_ranks <= 100,
+            1.0 / torch.log2(eval_ranks + 1),
+            torch.zeros(1, dtype=torch.float32, device=device),
+        ),
         "ndcg@200": torch.where(
             eval_ranks <= 200,
             1.0 / torch.log2(eval_ranks + 1),
             torch.zeros(1, dtype=torch.float32, device=device),
-        ).tolist(),
-        "hr@1": (eval_ranks <= 1).tolist(),
-        "hr@10": (eval_ranks <= 10).tolist(),
-        "hr@50": (eval_ranks <= 50).tolist(),
-        "hr@200": (eval_ranks <= 200).tolist(),
-        "hr@500": (eval_ranks <= 500).tolist(),
-        "hr@1000": (eval_ranks <= 1000).tolist(),
-        "hr@5000": (eval_ranks <= 5000).tolist(),
-        "mrr": (1.0 / eval_ranks).tolist(),
+        ),
+        "hr@1": (eval_ranks <= 1),
+        "hr@10": (eval_ranks <= 10),
+        "hr@50": (eval_ranks <= 50),
+        "hr@100": (eval_ranks <= 100),
+        "hr@200": (eval_ranks <= 200),
+        "hr@500": (eval_ranks <= 500),
+        "hr@1000": (eval_ranks <= 1000),
+        "mrr": (1.0 / eval_ranks),
     }
     if target_ratings is not None:
         target_ratings = target_ratings.squeeze(1)  # [B]
@@ -197,20 +194,17 @@ def eval_metrics_v2_from_tensors(
             eval_ranks[target_ratings >= 4] <= 10,
             1.0 / torch.log2(eval_ranks[target_ratings >= 4] + 1),
             torch.zeros(1, dtype=torch.float32, device=device),
-        ).tolist()
+        )
         output[f"hr@10_>={min_positive_rating}"] = (
             eval_ranks[target_ratings >= min_positive_rating] <= 10
-        ).tolist()
+        )
         output[f"hr@50_>={min_positive_rating}"] = (
             eval_ranks[target_ratings >= min_positive_rating] <= 50
-        ).tolist()
+        )
         output[f"mrr_>={min_positive_rating}"] = (
             1.0 / eval_ranks[target_ratings >= min_positive_rating]
-        ).tolist()
+        )
 
-    if include_full_matrices:
-        output["raw_eval_logits"] = raw_eval_logits - 1
-        # print(output["raw_eval_logits"].sum(-1))
     return output
 
 
@@ -218,7 +212,6 @@ def eval_recall_metrics_from_tensors(
     eval_state: EvalState,
     model: NDPModule,
     seq_features: SequentialFeatures,
-    include_full_matrices: bool = False,
     user_max_batch_size: Optional[int] = None,
     dtype: Optional[torch.dtype] = None,
 ) -> Dict[str, List[float]]:
@@ -240,12 +233,23 @@ def eval_recall_metrics_from_tensors(
     )
 
 
-def add_to_summary_writer(writer: SummaryWriter, batch_id: int, metrics: Dict[str, List[float]], prefix: str) -> None:
-    if writer is None:
-        logging.warn("Writer is None. Skipping logging.")
-        return
+def _avg(x: torch.Tensor, world_size: int) -> float:
+    _sum_and_numel = torch.tensor([x.sum(), x.numel()], dtype=torch.float32, device=x.device)
+    if world_size > 1:
+        dist.all_reduce(_sum_and_numel, op=dist.ReduceOp.SUM)
+    return _sum_and_numel[0] / _sum_and_numel[1]
+
+
+def add_to_summary_writer(
+    writer: SummaryWriter,
+    batch_id: int,
+    metrics: Dict[str, torch.Tensor],
+    prefix: str,
+    world_size: int,
+) -> None:
     for key, values in metrics.items():
-        avg_value = sum(values) / len(values)
-        writer.add_scalar(f"{prefix}/{key}", avg_value, batch_id)
+        avg_value = _avg(values, world_size)
+        if writer is not None:
+            writer.add_scalar(f"{prefix}/{key}", avg_value, batch_id)
 
 

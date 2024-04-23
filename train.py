@@ -43,7 +43,7 @@ from torch.utils.tensorboard import SummaryWriter
 from fvcore.nn import FlopCountAnalysis, flop_count_str, ActivationCountAnalysis
 
 from data.reco_dataset import get_reco_dataset
-from data.eval import get_eval_state, eval_metrics_v2_from_tensors, add_to_summary_writer
+from data.eval import _avg, get_eval_state, eval_metrics_v2_from_tensors, add_to_summary_writer
 from indexing.utils import get_top_k_module
 from modeling.sequential.autoregressive_losses import InBatchNegativesSampler, LocalNegativesSampler, SampledSoftmaxLoss, BCELoss
 from modeling.sequential.encoder_utils import get_sequential_encoder
@@ -76,10 +76,6 @@ def setup(rank: int, world_size: int, master_port: int) -> None:
 
 def cleanup():
     dist.destroy_process_group()
-
-
-def _avg(x) -> float:
-      return sum(x) / len(x)
 
 
 def profile_fvcore(
@@ -334,13 +330,13 @@ def train_fn(
                     user_max_batch_size=eval_user_max_batch_size,
                     dtype=torch.bfloat16 if main_module_bf16 else None,
                 )
-                if rank == 0:
-                    add_to_summary_writer(writer, batch_id, eval_dict, prefix="eval")
+                add_to_summary_writer(writer, batch_id, eval_dict, prefix="eval", world_size=world_size)
                 logging.info(
                     f"rank {rank}:  batch-stat (eval): iter {batch_id} (epoch {epoch}): " +
-                    f"NDCG@10 {_avg(eval_dict['ndcg@10']):.4f}, "
-                    f"HR@10 {_avg(eval_dict['hr@10']):.4f}, HR@50 {_avg(eval_dict['hr@50']):.4f}, " +
-                    f"MRR {_avg(eval_dict['mrr']):.4f} ")
+                    f"NDCG@10 {_avg(eval_dict['ndcg@10'], world_size):.4f}, "
+                    f"HR@10 {_avg(eval_dict['hr@10'], world_size):.4f}, "
+                    f"HR@50 {_avg(eval_dict['hr@50'], world_size):.4f}, " +
+                    f"MRR {_avg(eval_dict['mrr'], world_size):.4f} ")
                 model.train()
 
             # TODO: consider separating this out?
@@ -432,36 +428,40 @@ def train_fn(
             eval_dict = eval_metrics_v2_from_tensors(
                 eval_state, model.module, seq_features, target_ids=target_ids, target_ratings=target_ratings,
                 user_max_batch_size=eval_user_max_batch_size,
-                include_full_matrices=False,
                 dtype=torch.bfloat16 if main_module_bf16 else None,
             )
 
             if eval_dict_all is None:
-                eval_dict_all = eval_dict
-            else:
+                eval_dict_all = {}
                 for k, v in eval_dict.items():
-                    eval_dict_all[k] = eval_dict_all[k] + v
-                del eval_dict
+                    eval_dict_all[k] = []
+
+            for k, v in eval_dict.items():
+                eval_dict_all[k] = eval_dict_all[k] + [v]
+            del eval_dict
 
             if (eval_iter + 1 >= partial_eval_num_iters) and (not is_full_eval(epoch)):
                 logging.info(f"Truncating epoch {epoch} eval to {eval_iter + 1} iters to save cost..")
                 break
-        ndcg_10 = _avg(eval_dict_all["ndcg@10"])
-        ndcg_50 = _avg(eval_dict_all["ndcg@50"])
-        hr_10 = _avg(eval_dict_all["hr@10"])
-        hr_50 = _avg(eval_dict_all["hr@50"])
-        mrr = _avg(eval_dict_all["mrr"])
-        if rank == 0:
-            add_to_summary_writer(writer, batch_id=epoch, metrics=eval_dict_all, prefix="eval_epoch")
-            if full_eval_every_n > 1 and is_full_eval(epoch):
-                add_to_summary_writer(writer, batch_id=epoch, metrics=eval_dict_all, prefix="eval_epoch_full")
-            if epoch > 0 and (epoch % save_ckpt_every_n) == 0:
-                # saves partial checkpoint.
-                torch.save({
-                    'epoch': epoch,
-                    'model_state_dict': model.state_dict(),
-                    'optimizer_state_dict': opt.state_dict(),
-                }, f"./ckpts/{model_desc}_ep{epoch}")
+
+        for k, v in eval_dict_all.items():
+            eval_dict_all[k] = torch.cat(v, dim=-1)
+
+        ndcg_10 = _avg(eval_dict_all["ndcg@10"], world_size=world_size)
+        ndcg_50 = _avg(eval_dict_all["ndcg@50"], world_size=world_size)
+        hr_10 = _avg(eval_dict_all["hr@10"], world_size=world_size)
+        hr_50 = _avg(eval_dict_all["hr@50"], world_size=world_size)
+        mrr = _avg(eval_dict_all["mrr"], world_size=world_size)
+
+        add_to_summary_writer(writer, batch_id=epoch, metrics=eval_dict_all, prefix="eval_epoch", world_size=world_size)
+        if full_eval_every_n > 1 and is_full_eval(epoch):
+            add_to_summary_writer(writer, batch_id=epoch, metrics=eval_dict_all, prefix="eval_epoch_full", world_size=world_size)
+        if epoch > 0 and (epoch % save_ckpt_every_n) == 0:
+            torch.save({
+                'epoch': epoch,
+                'model_state_dict': model.state_dict(),
+                'optimizer_state_dict': opt.state_dict(),
+            }, f"./ckpts/{model_desc}_ep{epoch}")
 
         logging.info(f"rank {rank}: eval @ epoch {epoch} in {time.time() - eval_start_time:.2f}s: "
                      f"NDCG@10 {ndcg_10:.4f}, NDCG@50 {ndcg_50:.4f}, HR@10 {hr_10:.4f}, HR@50 {hr_50:.4f}, MRR {mrr:.4f}")
