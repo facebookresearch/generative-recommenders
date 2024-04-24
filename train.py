@@ -16,8 +16,7 @@
 Main entry point for model training. Please refer to README.md for usage instructions.
 """
 
-import math
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Optional
 import logging
 import random
 
@@ -27,34 +26,26 @@ os.environ['TF_CPP_MIN_LOG_LEVEL'] = '1'  # Hide excessive tensorflow debug mess
 import sys
 import time
 import gin
-import pandas as pd
-import fbgemm_gpu
+import fbgemm_gpu  # noqa: F401, E402
 
 from absl import app, flags
 
 import torch
 import torch.distributed as dist
-import torch.nn.functional as F
 import torch.multiprocessing as mp
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.tensorboard import SummaryWriter
-
-# profiling
-from fvcore.nn import FlopCountAnalysis, flop_count_str, ActivationCountAnalysis
 
 from data.reco_dataset import get_reco_dataset
 from data.eval import _avg, get_eval_state, eval_metrics_v2_from_tensors, add_to_summary_writer
 from indexing.utils import get_top_k_module
 from modeling.sequential.autoregressive_losses import InBatchNegativesSampler, LocalNegativesSampler, SampledSoftmaxLoss, BCELoss
 from modeling.sequential.encoder_utils import get_sequential_encoder
-from modeling.sequential.embedding_modules import EmbeddingModule, CategoricalEmbeddingModule, LocalEmbeddingModule
-from modeling.sequential.input_features_preprocessors import InputFeaturesPreprocessorModule, LearnablePositionalEmbeddingInputFeaturesPreprocessor
+from modeling.sequential.embedding_modules import EmbeddingModule, LocalEmbeddingModule
+from modeling.sequential.input_features_preprocessors import LearnablePositionalEmbeddingInputFeaturesPreprocessor
 from modeling.sequential.output_postprocessors import L2NormEmbeddingPostprocessor, LayerNormEmbeddingPostprocessor
-from modeling.sequential.sasrec import SASRec
-from modeling.sequential.hstu import HSTU
-from modeling.sequential.features import movielens_seq_features_from_row, SequentialFeatures
+from modeling.sequential.features import movielens_seq_features_from_row
 from modeling.similarity_utils import get_similarity_function
-from modeling.initialization import init_mlp_xavier_weights_zero_bias
 from trainer.data_loader import create_data_loader
 
 logging.basicConfig(stream=sys.stdout, level=logging.INFO)
@@ -76,19 +67,6 @@ def setup(rank: int, world_size: int, master_port: int) -> None:
 
 def cleanup():
     dist.destroy_process_group()
-
-
-def profile_fvcore(
-    model: torch.nn.Module,
-    example_inputs: Tuple[Any, ...],
-    detailed: bool,
-) -> None:
-    fca = FlopCountAnalysis(model, example_inputs)
-    aca = ActivationCountAnalysis(model, example_inputs)
-    if detailed:
-        fcs = flop_count_str(fca)
-        print(f'flop_count_str: {fcs}')
-    print(f'FLOPS: fca.total()={fca.total()}, activations: aca.total()={aca.total()}')
 
 
 @gin.configurable
@@ -163,13 +141,7 @@ def train_fn(
     )
 
     model_debug_str = main_module
-    if embedding_module_type == "categorical":
-        embedding_module: EmbeddingModule = CategoricalEmbeddingModule(
-            num_items=dataset.max_item_id,
-            item_embedding_dim=item_embedding_dim,
-            item_id_to_category_id=id_to_category,
-        )
-    elif embedding_module_type == "local":
+    if embedding_module_type == "local":
         embedding_module: EmbeddingModule = LocalEmbeddingModule(
             num_items=dataset.max_item_id,
             item_embedding_dim=item_embedding_dim,
@@ -322,7 +294,7 @@ def train_fn(
                         item_embeddings=item_embeddings,
                         item_ids=item_ids,
                     ),
-                    device=device, 
+                    device=device,
                     float_dtype=torch.bfloat16 if main_module_bf16 else None,
                 )
                 eval_dict = eval_metrics_v2_from_tensors(
@@ -419,10 +391,9 @@ def train_fn(
                 item_embeddings=item_embeddings,
                 item_ids=item_ids,
             ),
-            device=device, 
+            device=device,
             float_dtype=torch.bfloat16 if main_module_bf16 else None,
         )
-        raw_eval_logits = []
         for eval_iter, row in enumerate(iter(eval_data_loader)):
             seq_features, target_ids, target_ratings = movielens_seq_features_from_row(row, device=device, max_output_length=gr_output_length + 1)
             eval_dict = eval_metrics_v2_from_tensors(
