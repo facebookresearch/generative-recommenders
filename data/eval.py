@@ -17,26 +17,17 @@ from typing import Callable, Dict, List, Optional, Set
 
 import logging
 import sys
-import time
 
 import torch
 import torch.distributed as dist
-import torch.nn.functional as F
 from torch.utils.tensorboard import SummaryWriter
 
 from indexing.candidate_index import CandidateIndex, TopKModule
 from modeling.ndp_module import NDPModule
-from modeling.sequential.features import SequentialFeatures, movielens_seq_features_from_row
-from modeling.sequential.utils import get_current_embeddings
+from modeling.sequential.features import SequentialFeatures
 
 
 logging.basicConfig(stream=sys.stdout, level=logging.INFO)
-
-
-@dataclass
-class EvalState:
-    candidate_index: CandidateIndex
-    top_k_module: TopKModule
 
 
 @dataclass
@@ -104,7 +95,6 @@ def eval_metrics_v2_from_tensors(
         if target_id not in eval_state.all_item_ids:
             print(f"missing target_id {target_id}")
 
-    start_time = time.time()
     # computes ro- part exactly once.
     shared_input_embeddings = model.encode(
         past_lengths=seq_features.past_lengths,
@@ -214,7 +204,7 @@ def eval_recall_metrics_from_tensors(
     seq_features: SequentialFeatures,
     user_max_batch_size: Optional[int] = None,
     dtype: Optional[torch.dtype] = None,
-) -> Dict[str, List[float]]:
+) -> Dict[str, torch.Tensor]:
     target_ids = seq_features.past_ids[:, -1].unsqueeze(1)
     filtered_past_ids = seq_features.past_ids.detach().clone()
     filtered_past_ids[:, -1] = torch.zeros_like(target_ids.squeeze(1))
@@ -251,5 +241,3 @@ def add_to_summary_writer(
         avg_value = _avg(values, world_size)
         if writer is not None:
             writer.add_scalar(f"{prefix}/{key}", avg_value, batch_id)
-
-
