@@ -11,7 +11,6 @@ train_fn.dataset_name = "amzn-books"
 train_fn.max_sequence_length = 50
 train_fn.local_batch_size = 128
 train_fn.eval_batch_size = 128
-train_fn.item_feature_embedding_dim = 0
 
 train_fn.main_module = "SASRec"
 train_fn.dropout_rate = 0.5

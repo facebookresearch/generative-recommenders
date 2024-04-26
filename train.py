@@ -427,7 +427,7 @@ def train_fn(
         add_to_summary_writer(writer, batch_id=epoch, metrics=eval_dict_all, prefix="eval_epoch", world_size=world_size)
         if full_eval_every_n > 1 and is_full_eval(epoch):
             add_to_summary_writer(writer, batch_id=epoch, metrics=eval_dict_all, prefix="eval_epoch_full", world_size=world_size)
-        if epoch > 0 and (epoch % save_ckpt_every_n) == 0:
+        if rank == 0 and epoch > 0 and (epoch % save_ckpt_every_n) == 0:
             torch.save({
                 'epoch': epoch,
                 'model_state_dict': model.state_dict(),
