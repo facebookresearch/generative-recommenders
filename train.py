@@ -249,10 +249,8 @@ def train_fn(
     if positional_sampling_ratio is not None and positional_sampling_ratio < 1:
         model_desc += f"-d{positional_sampling_ratio}"
     # creates subfolders.
-    if not os.path.exists(f"./exps/{model_subfolder}"):
-        os.makedirs(f"./exps/{model_subfolder}")
-    if not os.path.exists(f"./ckpts/{model_subfolder}"):
-        os.makedirs(f"./ckpts/{model_subfolder}")
+    os.makedirs(f"./exps/{model_subfolder}", exist_ok=True)
+    os.makedirs(f"./ckpts/{model_subfolder}", exist_ok=True)
     log_dir = f"./exps/{model_desc}"
     if rank == 0:
         writer = SummaryWriter(log_dir=log_dir)
