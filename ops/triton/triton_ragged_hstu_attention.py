@@ -275,7 +275,7 @@ def _ragged_hstu_attn_fwd_one_block(  # noqa: C901
             if HAS_MULTIPLE_TARGETS:
                 pos_offs_m = offs_m
                 pos_offs_n = offs_n + start_n
-                if INVALID_MASK_TYPE == "lower_triangular":
+                if INVALID_MASK_TYPE == "lower_triangular" or INVALID_MASK_TYPE == "none_lower_triangular":
                     pos_offs_m = tl.where(
                         pos_offs_m < seq_len - n_targets,
                         pos_offs_m,
@@ -286,7 +286,7 @@ def _ragged_hstu_attn_fwd_one_block(  # noqa: C901
                         pos_offs_n,
                         seq_len - n_targets,
                     )
-                else:
+                elif INVALID_MASK_TYPE == "upper_triangular" or INVALID_MASK_TYPE == "none_upper_triangular":
                     pos_offs_m = tl.where(
                         pos_offs_m > n_targets - 1, pos_offs_m, n_targets - 1
                     )
@@ -322,18 +322,20 @@ def _ragged_hstu_attn_fwd_one_block(  # noqa: C901
         invalid_mask = offs_m[:, None] >= (start_n + offs_n[None, :])
     elif INVALID_MASK_TYPE == "upper_triangular":
         invalid_mask = offs_m[:, None] <= (start_n + offs_n[None, :])
+    else:
+        invalid_mask = tl.full([BLOCK_M, BLOCK_N], 1, dtype=tl.int1)
     if HAS_MULTIPLE_TARGETS:
-        if INVALID_MASK_TYPE == "lower_triangular":
+        if INVALID_MASK_TYPE == "lower_triangular" or INVALID_MASK_TYPE == "none_lower_triangular":
             invalid_mask = invalid_mask and (
                 (start_n + offs_n[None, :] < seq_len - n_targets)
                 or (start_n + offs_n[None, :] == offs_m[:, None])
             )
-        else:
+        elif INVALID_MASK_TYPE == "upper_triangular" or INVALID_MASK_TYPE == "none_upper_triangular":
             invalid_mask = invalid_mask and (
                 (start_n + offs_n[None, :] >= n_targets)
                 or (start_n + offs_n[None, :] == offs_m[:, None])
             )
-    # pyre-ignore[61]
+
     silu = tl.where(invalid_mask, silu, 0)
     if HAS_ATTN_SCALE:
         silu = silu * attn_scale[:, None]
@@ -504,8 +506,10 @@ def _ragged_hstu_attn_fwd(  # noqa C901
             high = seq_len
             K_block_ptr = tl.advance(K_block_ptr, (0, low))
             V_block_ptr = tl.advance(V_block_ptr, (low, 0))
+        else:
+            low = 0
+            high = seq_len
 
-    # pyre-ignore[61]
     for start_n in range(low, high, BLOCK_N):
         acc += _ragged_hstu_attn_fwd_one_block(
             start_n=start_n,
@@ -660,7 +664,12 @@ class _RaggedAttentionFunction(torch.autograd.Function):
         seq2_offsets: Optional[torch.Tensor],
         attn_scale: Optional[torch.Tensor],
     ) -> torch.Tensor:
-        assert invalid_attn_mask_type in ["lower_triangular", "upper_triangular"]
+        assert invalid_attn_mask_type in [
+            "lower_triangular",
+            "upper_triangular",
+            "none_lower_triangular",
+            "none_upper_triangular",
+        ]
         Z = seq_offsets.numel() - 1
         L, H, DimQ = q.shape
         _, _, DimV = v.shape
