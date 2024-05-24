@@ -40,7 +40,7 @@ def _get_fw_configs() -> List[triton.Config]:  # noqa: C901
     if torch.version.hip:
         for BLOCK_M in [32, 64]:
             for BLOCK_N in [32, 64]:
-                for num_stages in [0]:
+                for num_stages in [0, 1]:
                     for num_warps in [4, 8]:
                         for matrix_instr_nonkdim in [16, 32]:
                             for waves_per_eu in [0, 2]:
