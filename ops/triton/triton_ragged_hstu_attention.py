@@ -417,6 +417,8 @@ def _ragged_hstu_attn_fwd(  # noqa C901
     BLOCK_M: tl.constexpr,
     BLOCK_N: tl.constexpr,
     MAX_SEQ_LEN_GLOBAL: tl.constexpr,
+    block_idx_0,
+    block_idx_1,
 ):
     # M_CTX == N_CTX
     off_hz = tl.program_id(1)
@@ -479,8 +481,8 @@ def _ragged_hstu_attn_fwd(  # noqa C901
     )
     mask_m = offs_m < seq_len
     if ATTN_BIAS_TYPE == "fused" and USE_TIME_BIAS:
-        ts_0_ptrs = TS + off_z * stride_ts + offs_m
-        ts_1_ptrs = TS + off_z * stride_ts + offs_n
+        ts_0_ptrs = TS + off_z * stride_ts + offs_m + seq_len * block_idx_0
+        ts_1_ptrs = TS + off_z * stride_ts + offs_n + seq_len * block_idx_1
         if CAUSAL:
             ts_0 = tl.load(ts_0_ptrs + 1, mask=mask_m)
         else:
