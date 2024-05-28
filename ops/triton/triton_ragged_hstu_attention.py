@@ -239,6 +239,7 @@ def _ragged_hstu_attn_fwd_one_block(  # noqa: C901
     ALLOW_TF32: tl.constexpr,
     BLOCK_M: tl.constexpr,
     BLOCK_N: tl.constexpr,
+    MAX_SEQ_LEN_GLOBAL: tl.constexpr,
 ):
     start_n = tl.multiple_of(start_n, BLOCK_N)
     mask_n = offs_n < seq_len - start_n
@@ -316,7 +317,7 @@ def _ragged_hstu_attn_fwd_one_block(  # noqa: C901
             other=0.0,
         )
         qk = qk + attn_bias
-    silu = fast_dividef(qk, 1.0 + tl.exp(-qk)) * (1.0 / MAX_SEQ_LEN)
+    silu = fast_dividef(qk, 1.0 + tl.exp(-qk)) * (1.0 / MAX_SEQ_LEN_GLOBAL)
     # masking
     if INVALID_MASK_TYPE == "lower_triangular":
         invalid_mask = offs_m[:, None] >= (start_n + offs_n[None, :])
@@ -412,6 +413,7 @@ def _ragged_hstu_attn_fwd(  # noqa C901
     BLOCK_D_V: tl.constexpr,
     BLOCK_M: tl.constexpr,
     BLOCK_N: tl.constexpr,
+    MAX_SEQ_LEN_GLOBAL: tl.constexpr,
 ):
     # M_CTX == N_CTX
     off_hz = tl.program_id(1)
@@ -431,6 +433,9 @@ def _ragged_hstu_attn_fwd(  # noqa C901
         return
     if HAS_MULTIPLE_TARGETS:
         n_targets = tl.load(num_targets + off_z)
+
+    if MAX_SEQ_LEN_GLOBAL == 0:
+        MAX_SEQ_LEN_GLOBAL = MAX_SEQ_LEN
 
     # initialize offsets
     offs_m = start_m + tl.arange(0, BLOCK_M)
@@ -556,6 +561,7 @@ def _ragged_hstu_attn_fwd(  # noqa C901
             ALLOW_TF32=ALLOW_TF32,
             BLOCK_M=BLOCK_M,
             BLOCK_N=BLOCK_N,
+            MAX_SEQ_LEN_GLOBAL=MAX_SEQ_LEN_GLOBAL,
         )
         K_block_ptr = tl.advance(K_block_ptr, (0, BLOCK_N))
         V_block_ptr = tl.advance(V_block_ptr, (BLOCK_N, 0))
@@ -618,6 +624,7 @@ def _ragged_hstu_attn_fwd(  # noqa C901
                     ALLOW_TF32=ALLOW_TF32,
                     BLOCK_M=BLOCK_M,
                     BLOCK_N=BLOCK_N,
+                    MAX_SEQ_LEN_GLOBAL=MAX_SEQ_LEN_GLOBAL,
                 )
                 K_block_ptr = tl.advance(K_block_ptr, (0, BLOCK_N))
                 V_block_ptr = tl.advance(V_block_ptr, (BLOCK_N, 0))
@@ -743,6 +750,7 @@ class _RaggedAttentionFunction(torch.autograd.Function):
             ALLOW_TF32=torch.backends.cuda.matmul.allow_tf32,
             BLOCK_D_Q=DimQ,
             BLOCK_D_V=DimV,
+            MAX_SEQ_LEN_GLOBAL=N,
         )
         return out
 
@@ -846,5 +854,6 @@ class _RaggedAttentionRelativeBiasFunction(torch.autograd.Function):
             ALLOW_TF32=torch.backends.cuda.matmul.allow_tf32,
             BLOCK_D_Q=DimQ,
             BLOCK_D_V=DimV,
+            MAX_SEQ_LEN_GLOBAL=N,
         )
         return out
