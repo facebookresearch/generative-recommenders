@@ -647,204 +647,195 @@ def _ragged_hstu_attn_fwd(  # noqa C901
         tl.store(out_ptrs, acc, mask=(offs_m < seq_len)[:, None])
 
 
-class _RaggedAttentionFunction(torch.autograd.Function):
-    @staticmethod
-    # pyre-ignore[14]
-    def forward(
-        ctx,
-        N: int,
-        alpha: float,
-        q: torch.Tensor,
-        k: torch.Tensor,
-        v: torch.Tensor,
-        seq_offsets: torch.Tensor,
-        invalid_attn_mask_type: str,
-        num_targets: Optional[torch.Tensor],
-        attn_bias: Optional[torch.Tensor],
-        seq2_offsets: Optional[torch.Tensor],
-        attn_scale: Optional[torch.Tensor],
-    ) -> torch.Tensor:
-        assert invalid_attn_mask_type in [
-            "lower_triangular",
-            "upper_triangular",
-            "none_lower_triangular",
-            "none_upper_triangular",
-        ]
-        Z = seq_offsets.numel() - 1
-        L, H, DimQ = q.shape
-        _, _, DimV = v.shape
+def triton_ragged_attention(
+    N: int,
+    alpha: float,
+    q: torch.Tensor,
+    k: torch.Tensor,
+    v: torch.Tensor,
+    seq_offsets: torch.Tensor,
+    invalid_attn_mask_type: str,
+    num_targets: Optional[torch.Tensor],
+    attn_bias: Optional[torch.Tensor],
+    seq2_offsets: Optional[torch.Tensor],
+    attn_scale: Optional[torch.Tensor],
+) -> torch.Tensor:
+    assert invalid_attn_mask_type in [
+        "lower_triangular",
+        "upper_triangular",
+        "none_lower_triangular",
+        "none_upper_triangular",
+    ]
+    Z = seq_offsets.numel() - 1
+    L, H, DimQ = q.shape
+    _, _, DimV = v.shape
 
-        out = torch.empty_like(v)
-        has_multiple_targets = num_targets is not None
-        has_attn_bias = attn_bias is not None
-        has_attn_scale = attn_scale is not None
+    out = torch.empty_like(v)
+    has_multiple_targets = num_targets is not None
+    has_attn_bias = attn_bias is not None
+    has_attn_scale = attn_scale is not None
 
-        grid = lambda meta: (  # noqa E731
-            triton.cdiv(N, meta["BLOCK_M"]),
-            Z * H,
-        )
+    grid = lambda meta: (  # noqa E731
+        triton.cdiv(N, meta["BLOCK_M"]),
+        Z * H,
+    )
 
-        stride_sz = 0
-        stride_sm = 0
-        if attn_scale is not None:
-            if attn_scale.dim() == 1:
-                stride_sm = attn_scale.stride(0)
-            else:
-                stride_sz = attn_scale.stride(0)
-                stride_sm = attn_scale.stride(1)
+    stride_sz = 0
+    stride_sm = 0
+    if attn_scale is not None:
+        if attn_scale.dim() == 1:
+            stride_sm = attn_scale.stride(0)
+        else:
+            stride_sz = attn_scale.stride(0)
+            stride_sm = attn_scale.stride(1)
 
-        _ragged_hstu_attn_fwd[grid](
-            Q=q,
-            K=k,
-            V=v,
-            seq_offsets=seq_offsets,
-            TS=None,
-            TW=None,
-            PW=None,
-            Bias=attn_bias,
-            seq2_offsets=seq2_offsets,
-            delta_x_offsets=None,
-            num_targets=num_targets,
-            Scale=attn_scale,
-            Out=out,
-            stride_qm=q.stride(0),
-            stride_qh=q.stride(1),
-            stride_kn=k.stride(0),
-            stride_kh=k.stride(1),
-            stride_vn=v.stride(0),
-            stride_vh=v.stride(1),
-            stride_sz=stride_sz,
-            stride_sm=stride_sm,
-            stride_ts=None,
-            stride_om=out.stride(0),
-            stride_oh=out.stride(1),
-            alpha=alpha,
-            Z=Z,
-            H=H,
-            MAX_SEQ_LEN=N,
-            DimQ=DimQ,
-            DimV=DimV,
-            DeltaSize=0,
-            num_buckets=None,
-            max_pos_ind=None,
-            time_bucket_incr=None,
-            time_bucket_div=None,
-            time_delta=None,
-            INVALID_MASK_TYPE=invalid_attn_mask_type,
-            CAUSAL=None,
-            BUCKET_FN="none",
-            ATTN_BIAS_TYPE="separate" if has_attn_bias else "none",
-            USE_TIME_BIAS=False,
-            USE_POS_BIAS=False,
-            HAS_MAX_POS_IND=False,
-            HAS_MULTIPLE_TARGETS=has_multiple_targets,
-            HAS_ATTN_SCALE=has_attn_scale,
-            IS_DELTA_Q=False,
-            ALLOW_TF32=torch.backends.cuda.matmul.allow_tf32,
-            BLOCK_D_Q=DimQ,
-            BLOCK_D_V=DimV,
-        )
-        return out
+    _ragged_hstu_attn_fwd[grid](
+        Q=q,
+        K=k,
+        V=v,
+        seq_offsets=seq_offsets,
+        TS=None,
+        TW=None,
+        PW=None,
+        Bias=attn_bias,
+        seq2_offsets=seq2_offsets,
+        delta_x_offsets=None,
+        num_targets=num_targets,
+        Scale=attn_scale,
+        Out=out,
+        stride_qm=q.stride(0),
+        stride_qh=q.stride(1),
+        stride_kn=k.stride(0),
+        stride_kh=k.stride(1),
+        stride_vn=v.stride(0),
+        stride_vh=v.stride(1),
+        stride_sz=stride_sz,
+        stride_sm=stride_sm,
+        stride_ts=None,
+        stride_om=out.stride(0),
+        stride_oh=out.stride(1),
+        alpha=alpha,
+        Z=Z,
+        H=H,
+        MAX_SEQ_LEN=N,
+        DimQ=DimQ,
+        DimV=DimV,
+        DeltaSize=0,
+        num_buckets=None,
+        max_pos_ind=None,
+        time_bucket_incr=None,
+        time_bucket_div=None,
+        time_delta=None,
+        INVALID_MASK_TYPE=invalid_attn_mask_type,
+        CAUSAL=None,
+        BUCKET_FN="none",
+        ATTN_BIAS_TYPE="separate" if has_attn_bias else "none",
+        USE_TIME_BIAS=False,
+        USE_POS_BIAS=False,
+        HAS_MAX_POS_IND=False,
+        HAS_MULTIPLE_TARGETS=has_multiple_targets,
+        HAS_ATTN_SCALE=has_attn_scale,
+        IS_DELTA_Q=False,
+        ALLOW_TF32=torch.backends.cuda.matmul.allow_tf32,
+        BLOCK_D_Q=DimQ,
+        BLOCK_D_V=DimV,
+    )
+    return out
 
 
-class _RaggedAttentionRelativeBiasFunction(torch.autograd.Function):
-    @staticmethod
-    # pyre-ignore[14]
-    def forward(
-        ctx,
-        N: int,
-        alpha: float,
-        q: torch.Tensor,
-        k: torch.Tensor,
-        v: torch.Tensor,
-        seq_offsets: torch.Tensor,
-        invalid_attn_mask_type: str,
-        timestamps: torch.Tensor,
-        ts_weights: torch.Tensor,
-        pos_weights: torch.Tensor,
-        causal: bool,
-        num_buckets: int,
-        time_bucket_fn: str,
-        time_bucket_incr: float,
-        time_bucket_div: float,
-        time_delta: float,
-        max_pos_ind: Optional[int],
-        num_targets: Optional[torch.Tensor],
-        attn_scale: Optional[torch.Tensor],
-        relative_bias_type: str,
-    ) -> torch.Tensor:
-        Z = timestamps.size(0)
-        N = timestamps.size(1) - 1
-        has_attn_scale = attn_scale is not None
-        has_multiple_targets = num_targets is not None
-        has_max_pos_id = max_pos_ind is not None
-        _, H, DimQ = q.shape
-        _, _, DimV = v.shape
-        out = torch.empty_like(v)
-        grid = lambda meta: (  # noqa E731
-            triton.cdiv(N, meta["BLOCK_M"]),
-            Z * H,
-        )
-        stride_sz = 0
-        stride_sm = 0
-        if attn_scale is not None:
-            if attn_scale.dim() == 1:
-                stride_sm = attn_scale.stride(0)
-            else:
-                stride_sz = attn_scale.stride(0)
-                stride_sm = attn_scale.stride(1)
-        use_time_bias = relative_bias_type == "TIME" or relative_bias_type == "ALL"
-        use_pos_bias = relative_bias_type == "POSITION" or relative_bias_type == "ALL"
+def triton_ragged_attention_relative_bias(
+    alpha: float,
+    q: torch.Tensor,
+    k: torch.Tensor,
+    v: torch.Tensor,
+    seq_offsets: torch.Tensor,
+    invalid_attn_mask_type: str,
+    timestamps: torch.Tensor,
+    ts_weights: torch.Tensor,
+    pos_weights: torch.Tensor,
+    causal: bool,
+    num_buckets: int,
+    time_bucket_fn: str,
+    time_bucket_incr: float,
+    time_bucket_div: float,
+    time_delta: float,
+    max_pos_ind: Optional[int],
+    num_targets: Optional[torch.Tensor],
+    attn_scale: Optional[torch.Tensor],
+    relative_bias_type: str,
+) -> torch.Tensor:
+    Z = timestamps.size(0)
+    N = timestamps.size(1) - 1
+    has_attn_scale = attn_scale is not None
+    has_multiple_targets = num_targets is not None
+    has_max_pos_id = max_pos_ind is not None
+    _, H, DimQ = q.shape
+    _, _, DimV = v.shape
+    out = torch.empty_like(v)
+    grid = lambda meta: (  # noqa E731
+        triton.cdiv(N, meta["BLOCK_M"]),
+        Z * H,
+    )
+    stride_sz = 0
+    stride_sm = 0
+    if attn_scale is not None:
+        if attn_scale.dim() == 1:
+            stride_sm = attn_scale.stride(0)
+        else:
+            stride_sz = attn_scale.stride(0)
+            stride_sm = attn_scale.stride(1)
+    use_time_bias = relative_bias_type == "TIME" or relative_bias_type == "ALL"
+    use_pos_bias = relative_bias_type == "POSITION" or relative_bias_type == "ALL"
 
-        _ragged_hstu_attn_fwd[grid](
-            Q=q,
-            K=k,
-            V=v,
-            seq_offsets=seq_offsets,
-            TS=timestamps,
-            TW=ts_weights,
-            PW=pos_weights,
-            Bias=None,
-            seq2_offsets=None,
-            delta_x_offsets=None,
-            num_targets=num_targets,
-            Scale=attn_scale,
-            Out=out,
-            stride_qm=q.stride(0),
-            stride_qh=q.stride(1),
-            stride_kn=k.stride(0),
-            stride_kh=k.stride(1),
-            stride_vn=v.stride(0),
-            stride_vh=v.stride(1),
-            stride_sz=stride_sz,
-            stride_sm=stride_sm,
-            stride_ts=timestamps.stride(0),
-            stride_om=out.stride(0),
-            stride_oh=out.stride(1),
-            alpha=alpha,
-            Z=Z,
-            H=H,
-            MAX_SEQ_LEN=N,
-            DimQ=DimQ,
-            DimV=DimV,
-            DeltaSize=0,
-            num_buckets=num_buckets,
-            max_pos_ind=max_pos_ind,
-            time_bucket_incr=time_bucket_incr,
-            time_bucket_div=time_bucket_div,
-            time_delta=time_delta,
-            INVALID_MASK_TYPE=invalid_attn_mask_type,
-            CAUSAL=causal,
-            BUCKET_FN=time_bucket_fn,
-            ATTN_BIAS_TYPE="fused",
-            USE_TIME_BIAS=use_time_bias,
-            USE_POS_BIAS=use_pos_bias,
-            HAS_MAX_POS_IND=has_max_pos_id,
-            HAS_MULTIPLE_TARGETS=has_multiple_targets,
-            HAS_ATTN_SCALE=has_attn_scale,
-            IS_DELTA_Q=False,
-            ALLOW_TF32=torch.backends.cuda.matmul.allow_tf32,
-            BLOCK_D_Q=DimQ,
-            BLOCK_D_V=DimV,
-        )
-        return out
+    _ragged_hstu_attn_fwd[grid](
+        Q=q,
+        K=k,
+        V=v,
+        seq_offsets=seq_offsets,
+        TS=timestamps,
+        TW=ts_weights,
+        PW=pos_weights,
+        Bias=None,
+        seq2_offsets=None,
+        delta_x_offsets=None,
+        num_targets=num_targets,
+        Scale=attn_scale,
+        Out=out,
+        stride_qm=q.stride(0),
+        stride_qh=q.stride(1),
+        stride_kn=k.stride(0),
+        stride_kh=k.stride(1),
+        stride_vn=v.stride(0),
+        stride_vh=v.stride(1),
+        stride_sz=stride_sz,
+        stride_sm=stride_sm,
+        stride_ts=timestamps.stride(0),
+        stride_om=out.stride(0),
+        stride_oh=out.stride(1),
+        alpha=alpha,
+        Z=Z,
+        H=H,
+        MAX_SEQ_LEN=N,
+        DimQ=DimQ,
+        DimV=DimV,
+        DeltaSize=0,
+        num_buckets=num_buckets,
+        max_pos_ind=max_pos_ind,
+        time_bucket_incr=time_bucket_incr,
+        time_bucket_div=time_bucket_div,
+        time_delta=time_delta,
+        INVALID_MASK_TYPE=invalid_attn_mask_type,
+        CAUSAL=causal,
+        BUCKET_FN=time_bucket_fn,
+        ATTN_BIAS_TYPE="fused",
+        USE_TIME_BIAS=use_time_bias,
+        USE_POS_BIAS=use_pos_bias,
+        HAS_MAX_POS_IND=has_max_pos_id,
+        HAS_MULTIPLE_TARGETS=has_multiple_targets,
+        HAS_ATTN_SCALE=has_attn_scale,
+        IS_DELTA_Q=False,
+        ALLOW_TF32=torch.backends.cuda.matmul.allow_tf32,
+        BLOCK_D_Q=DimQ,
+        BLOCK_D_V=DimV,
+    )
+    return out

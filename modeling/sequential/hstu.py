@@ -13,7 +13,7 @@
 # limitations under the License.
 
 """
-Implements HSTU (Hierarchical Sequential Transduction Unit) in 
+Implements HSTU (Hierarchical Sequential Transduction Unit) in
 Actions Speak Louder than Words: Trillion-Parameter Sequential Transducers for Generative Recommendations
 (https://arxiv.org/abs/2402.17152).
 """
@@ -132,6 +132,80 @@ class RelativeBucketedTimeAndPositionBasedBias(RelativeAttentionBiasModule):
 HSTUCacheState = Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]
 
 
+def _hstu_attention_maybe_from_cache(
+    num_heads: int,
+    attention_dim: int,
+    linear_dim: int,
+    q: torch.Tensor,
+    k: torch.Tensor,
+    v: torch.Tensor,
+    cached_q: Optional[torch.Tensor],
+    cached_k: Optional[torch.Tensor],
+    delta_x_offsets: Optional[Tuple[torch.Tensor, torch.Tensor]],
+    x_offsets: torch.Tensor,
+    all_timestamps: Optional[torch.Tensor],
+    invalid_attn_mask: torch.Tensor,
+    rel_attn_bias: RelativeAttentionBiasModule,
+):
+    B: int = x_offsets.size(0) - 1
+    n: int = invalid_attn_mask.size(-1)
+    if delta_x_offsets is not None:
+        padded_q, padded_k = cached_q, cached_k
+        flattened_offsets = delta_x_offsets[1] + torch.arange(
+            start=0,
+            end=B * n,
+            step=n,
+            device=delta_x_offsets[1].device,
+            dtype=delta_x_offsets[1].dtype,
+        )
+        padded_q = (
+            padded_q.view(B * n, -1)
+            .index_copy_(
+                dim=0,
+                index=flattened_offsets,
+                source=q,
+            )
+            .view(B, n, -1)
+        )
+        padded_k = (
+            padded_k.view(B * n, -1)
+            .index_copy_(
+                dim=0,
+                index=flattened_offsets,
+                source=k,
+            )
+            .view(B, n, -1)
+        )
+    else:
+        padded_q = torch.ops.fbgemm.jagged_to_padded_dense(
+            values=q, offsets=[x_offsets], max_lengths=[n], padding_value=0.0
+        )
+        padded_k = torch.ops.fbgemm.jagged_to_padded_dense(
+            values=k, offsets=[x_offsets], max_lengths=[n], padding_value=0.0
+        )
+
+    qk_attn = torch.einsum(
+        "bnhd,bmhd->bhnm",
+        padded_q.view(B, n, num_heads, attention_dim),
+        padded_k.view(B, n, num_heads, attention_dim),
+    )
+    if all_timestamps is not None:
+        qk_attn = qk_attn + rel_attn_bias(all_timestamps).unsqueeze(1)
+    qk_attn = F.silu(qk_attn) / n
+    qk_attn = qk_attn * invalid_attn_mask.unsqueeze(0).unsqueeze(0)
+    attn_output = torch.ops.fbgemm.dense_to_jagged(
+        torch.einsum(
+            "bhnm,bmhd->bnhd",
+            qk_attn,
+            torch.ops.fbgemm.jagged_to_padded_dense(v, [x_offsets], [n]).reshape(
+                B, n, num_heads, linear_dim
+            ),
+        ).reshape(B, n, num_heads * linear_dim),
+        [x_offsets],
+    )[0]
+    return attn_output, padded_q, padded_k
+
+
 class SequentialTransductionUnitJagged(torch.nn.Module):
     def __init__(
         self,
@@ -202,6 +276,8 @@ class SequentialTransductionUnitJagged(torch.nn.Module):
             x' = f(x), (\sum_i N_i, D) x float.
         """
         n: int = invalid_attn_mask.size(-1)
+        cached_q = None
+        cached_k = None
         if delta_x_offsets is not None:
             # In this case, for all the following code, x, u, v, q, k become restricted to
             # [delta_x_offsets[0], :].
@@ -230,40 +306,21 @@ class SequentialTransductionUnitJagged(torch.nn.Module):
 
         B: int = x_offsets.size(0) - 1
         if self._normalization == "rel_bias" or self._normalization == "hstu_rel_bias":
-            if delta_x_offsets is not None:
-                padded_q, padded_k = cached_q, cached_k
-                flattened_offsets = delta_x_offsets[1] + torch.arange(start=0, end=B * n, step=n, device=delta_x_offsets[1].device, dtype=delta_x_offsets[1].dtype)
-                padded_q = padded_q.view(B * n, -1).index_copy_(
-                    dim=0, index=flattened_offsets, source=q,
-                ).view(B, n, -1)
-                padded_k = padded_k.view(B * n, -1).index_copy_(
-                    dim=0, index=flattened_offsets, source=k,
-                ).view(B, n, -1)
-            else:
-                padded_q = torch.ops.fbgemm.jagged_to_padded_dense(
-                    values=q, offsets=[x_offsets], max_lengths=[n], padding_value=0.0
-                )
-                padded_k = torch.ops.fbgemm.jagged_to_padded_dense(
-                    values=k, offsets=[x_offsets], max_lengths=[n], padding_value=0.0
-                )
-
-            qk_attn = torch.einsum(
-                "bnhd,bmhd->bhnm",
-                padded_q.view(B, n, self._num_heads, self._attention_dim),
-                padded_k.view(B, n, self._num_heads, self._attention_dim),
+            attn_output, padded_q, padded_k = _hstu_attention_maybe_from_cache(
+                num_heads=self._num_heads,
+                attention_dim=self._attention_dim,
+                linear_dim=self._linear_dim,
+                q=q,
+                k=k,
+                v=v,
+                cached_q=cached_q,
+                cached_k=cached_k,
+                delta_x_offsets=delta_x_offsets,
+                x_offsets=x_offsets,
+                all_timestamps=all_timestamps,
+                invalid_attn_mask=invalid_attn_mask,
+                rel_attn_bias=self._rel_attn_bias,
             )
-            if all_timestamps is not None:
-                qk_attn = qk_attn + self._rel_attn_bias(all_timestamps).unsqueeze(1)
-            qk_attn = F.silu(qk_attn) / n
-            qk_attn = qk_attn * invalid_attn_mask.unsqueeze(0).unsqueeze(0)
-            attn_output = torch.ops.fbgemm.dense_to_jagged(
-                torch.einsum(
-                    "bhnm,bmhd->bnhd",
-                    qk_attn,
-                    torch.ops.fbgemm.jagged_to_padded_dense(v, [x_offsets], [n]).reshape(B, n, self._num_heads, self._linear_dim)
-                ).reshape(B, n, self._num_heads * self._linear_dim),
-                [x_offsets],
-            )[0]
         elif self._normalization == "softmax_rel_bias":
             if delta_x_offsets is not None:
                 B = x_offsets.size() - 1
@@ -416,7 +473,7 @@ class HSTUJagged(torch.nn.Module):
 
 class HSTU(GeneralizedInteractionModule):
     """
-    Implements HSTU (Hierarchical Sequential Transduction Unit) in 
+    Implements HSTU (Hierarchical Sequential Transduction Unit) in
     Actions Speak Louder than Words: Trillion-Parameter Sequential Transducers for Generative Recommendations,
     https://arxiv.org/abs/2402.17152.
 
