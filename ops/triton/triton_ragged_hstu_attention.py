@@ -236,7 +236,7 @@ def _ragged_hstu_attn_fwd_one_block(  # noqa: C901
     HAS_MULTIPLE_TARGETS: tl.constexpr,
     HAS_ATTN_SCALE: tl.constexpr,
     IS_DELTA_Q: tl.constexpr,
-    ALLOW_TF32: tl.constexpr,
+    INPUT_PRECISION: tl.constexpr,
     BLOCK_M: tl.constexpr,
     BLOCK_N: tl.constexpr,
 ):
@@ -244,7 +244,7 @@ def _ragged_hstu_attn_fwd_one_block(  # noqa: C901
     mask_n = offs_n < seq_len - start_n
     # -- compute qk ----
     k = tl.load(K_block_ptr, boundary_check=(1,), padding_option="zero")
-    qk = tl.dot(q, k, allow_tf32=ALLOW_TF32) * alpha
+    qk = tl.dot(q, k, input_precision=INPUT_PRECISION) * alpha
     if ATTN_BIAS_TYPE == "fused":
         attn_bias = tl.zeros([BLOCK_M, BLOCK_N], dtype=tl.float32)
         if USE_TIME_BIAS:
@@ -342,7 +342,7 @@ def _ragged_hstu_attn_fwd_one_block(  # noqa: C901
 
     v = tl.load(V_block_ptr, boundary_check=(0,), padding_option="zero")
     silu = silu.to(v.dtype)
-    return tl.dot(silu, v, allow_tf32=ALLOW_TF32)
+    return tl.dot(silu, v, input_precision=INPUT_PRECISION)
 
 
 @triton.autotune(
@@ -407,7 +407,7 @@ def _ragged_hstu_attn_fwd(  # noqa C901
     HAS_MULTIPLE_TARGETS: tl.constexpr,
     HAS_ATTN_SCALE: tl.constexpr,
     IS_DELTA_Q: tl.constexpr,
-    ALLOW_TF32: tl.constexpr,
+    INPUT_PRECISION: tl.constexpr,
     BLOCK_D_Q: tl.constexpr,
     BLOCK_D_V: tl.constexpr,
     BLOCK_M: tl.constexpr,
@@ -553,7 +553,7 @@ def _ragged_hstu_attn_fwd(  # noqa C901
             HAS_MULTIPLE_TARGETS=HAS_MULTIPLE_TARGETS,
             HAS_ATTN_SCALE=HAS_ATTN_SCALE,
             IS_DELTA_Q=IS_DELTA_Q,
-            ALLOW_TF32=ALLOW_TF32,
+            INPUT_PRECISION=INPUT_PRECISION,
             BLOCK_M=BLOCK_M,
             BLOCK_N=BLOCK_N,
         )
@@ -615,7 +615,7 @@ def _ragged_hstu_attn_fwd(  # noqa C901
                     HAS_MULTIPLE_TARGETS=HAS_MULTIPLE_TARGETS,
                     HAS_ATTN_SCALE=HAS_ATTN_SCALE,
                     IS_DELTA_Q=IS_DELTA_Q,
-                    ALLOW_TF32=ALLOW_TF32,
+                    INPUT_PRECISION=INPUT_PRECISION,
                     BLOCK_M=BLOCK_M,
                     BLOCK_N=BLOCK_N,
                 )
@@ -689,6 +689,11 @@ def triton_ragged_attention(
             stride_sz = attn_scale.stride(0)
             stride_sm = attn_scale.stride(1)
 
+    if torch.backends.cuda.matmul.allow_tf32:
+        INPUT_PRECISION = "tf32" if torch.version.hip else "tf32x3"
+    else:
+        INPUT_PRECISION = "ieee"
+
     _ragged_hstu_attn_fwd[grid](
         Q=q,
         K=k,
@@ -736,7 +741,7 @@ def triton_ragged_attention(
         HAS_MULTIPLE_TARGETS=has_multiple_targets,
         HAS_ATTN_SCALE=has_attn_scale,
         IS_DELTA_Q=False,
-        ALLOW_TF32=torch.backends.cuda.matmul.allow_tf32,
+        INPUT_PRECISION=INPUT_PRECISION,
         BLOCK_D_Q=DimQ,
         BLOCK_D_V=DimV,
     )
@@ -786,6 +791,10 @@ def triton_ragged_attention_relative_bias(
             stride_sm = attn_scale.stride(1)
     use_time_bias = relative_bias_type == "TIME" or relative_bias_type == "ALL"
     use_pos_bias = relative_bias_type == "POSITION" or relative_bias_type == "ALL"
+    if torch.backends.cuda.matmul.allow_tf32:
+        INPUT_PRECISION = "tf32" if torch.version.hip else "tf32x3"
+    else:
+        INPUT_PRECISION = "ieee"
 
     _ragged_hstu_attn_fwd[grid](
         Q=q,
@@ -834,7 +843,7 @@ def triton_ragged_attention_relative_bias(
         HAS_MULTIPLE_TARGETS=has_multiple_targets,
         HAS_ATTN_SCALE=has_attn_scale,
         IS_DELTA_Q=False,
-        ALLOW_TF32=torch.backends.cuda.matmul.allow_tf32,
+        INPUT_PRECISION=INPUT_PRECISION,
         BLOCK_D_Q=DimQ,
         BLOCK_D_V=DimV,
     )
