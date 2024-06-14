@@ -26,34 +26,56 @@ import triton
 # @manual=//triton:triton
 import triton.language as tl
 
+ENABLE_FULL_TURNING_SPACE = False
+
+
 def get_mm_configs() -> List[triton.Config]:
     if torch.version.hip:
-        configs = []
-        block_mn_range = [32, 64, 128, 256]
-        block_k_range = [32]
-        num_warps_range = [2, 4]
-        group_m_range = [8]
-        matrix_instr_nonkdim_range = [16, 32]
+        if ENABLE_FULL_TURNING_SPACE:
+            block_m_range = [32, 64, 128, 256]
+            block_n_range = [32, 64, 128, 256]
+            block_k_range = [32, 64]
+            group_m_range = [4, 8]
+            matrix_instr_nonkdim_range = [16]
+            waves_per_eu_range = [0]
+            kpack_range = [1, 2]
+            num_warps_range = [4, 8]
+            num_stage_range = [0]
+        else:
+            block_m_range = [256]
+            block_n_range = [256]
+            block_k_range = [32]
+            group_m_range = [8]
+            matrix_instr_nonkdim_range = [16]
+            waves_per_eu_range = [0]
+            kpack_range = [2]
+            num_warps_range = [8]
+            num_stage_range = [0]
 
-        for block_m in block_mn_range:
-            for block_n in block_mn_range:
-                for block_k in block_k_range:
-                    for num_warps in num_warps_range:
-                        for group_m in group_m_range:
-                            for matrix_instr_nonkdim in matrix_instr_nonkdim_range:
-                                configs.append(
-                                    triton.Config(
-                                        {
-                                            "BLOCK_M": block_m,
-                                            "BLOCK_N": block_n,
-                                            "BLOCK_K": block_k,
-                                            "GROUP_M": group_m,
-                                            "matrix_instr_nonkdim": matrix_instr_nonkdim,
-                                        },
-                                        num_warps=num_warps,
-                                    )
-                                )
-        return configs
+        return [
+            triton.Config(
+                {
+                    "BLOCK_M": block_m,
+                    "BLOCK_N": block_n,
+                    "BLOCK_K": block_k,
+                    "GROUP_M": group_m,
+                    "matrix_instr_nonkdim": matrix_instr_nonkdim,
+                    "waves_per_eu": waves_per_eu,
+                    "kpack": kpack,
+                },
+                num_stages=num_stages,
+                num_warps=num_warps,
+            )
+            for block_m in block_m_range
+            for block_n in block_n_range
+            for block_k in block_k_range
+            for group_m in group_m_range
+            for matrix_instr_nonkdim in matrix_instr_nonkdim_range
+            for waves_per_eu in waves_per_eu_range
+            for kpack in kpack_range
+            for num_stages in num_stage_range
+            for num_warps in num_warps_range
+        ]
     else:
         return [
             triton.Config(
@@ -137,7 +159,8 @@ def get_mm_configs() -> List[triton.Config]:
                 num_warps=2,
             ),
         ]
-        
+
+
 @triton.autotune(
     configs=get_mm_configs(),
     key=["N", "K"],
@@ -205,6 +228,7 @@ def _addmm_fwd(
     z_ptr += pid_n.to(tl.int64) * BLOCK_N * stride_zn
     z_ptrs = z_ptr + stride_zm * offs_m[:, None] + stride_zn * offs_n[None, :]
     tl.store(z_ptrs, z, mask=z_mask)
+
 
 class _AddMmFunction(torch.autograd.Function):
     @staticmethod
