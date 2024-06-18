@@ -419,11 +419,11 @@ def _ragged_hstu_attn_fwd(  # noqa C901
     off_h = off_hz % H
     seq_start = tl.load(seq_offsets + off_z)
     seq_end = tl.load(seq_offsets + off_z + 1)
-    seq_len = (seq_end - seq_start).to(tl.int32)
+    seq_len = seq_end - seq_start
     if IS_DELTA_Q:
         start_m_delta = tl.program_id(0) * BLOCK_M
         delta_start = tl.load(delta_x_offsets + off_z * DeltaSize)
-        start_m = (start_m_delta + delta_start - seq_start).to(tl.int32)
+        start_m = (start_m_delta + delta_start - seq_start)
     else:
         start_m_delta = 0
         start_m = tl.program_id(0) * BLOCK_M
@@ -494,9 +494,10 @@ def _ragged_hstu_attn_fwd(  # noqa C901
         # pyre-ignore[61]
         uih_end = (seq_len - n_targets + BLOCK_N - 1) // BLOCK_N * BLOCK_N
         if uih_end < start_m:
-            high = seq_len - n_targets.to(tl.int32)
+            # pyre-ignore[61]
+            high = (seq_len - n_targets).to(tl.int32)
         else:
-            high = start_m + BLOCK_M
+            high = start_m.to(tl.int32) + BLOCK_M
     else:
         if INVALID_MASK_TYPE == "lower_triangular":
             low = 0
