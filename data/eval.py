@@ -12,19 +12,18 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import logging
+import sys
 from dataclasses import dataclass
 from typing import Callable, Dict, List, Optional, Set
 
-import logging
-import sys
-
 import torch
 import torch.distributed as dist
-from torch.utils.tensorboard import SummaryWriter
 
 from indexing.candidate_index import CandidateIndex, TopKModule
 from modeling.ndp_module import NDPModule
 from modeling.sequential.features import SequentialFeatures
+from torch.utils.tensorboard import SummaryWriter
 
 
 logging.basicConfig(stream=sys.stdout, level=logging.INFO)
@@ -59,7 +58,7 @@ def get_eval_state(
     return EvalState(
         all_item_ids=set(all_item_ids),
         candidate_index=candidates,
-        top_k_module=top_k_module_fn(eval_negative_embeddings, eval_negatives_ids)
+        top_k_module=top_k_module_fn(eval_negative_embeddings, eval_negatives_ids),
     )
 
 
@@ -109,19 +108,27 @@ def eval_metrics_v2_from_tensors(
     k = min(MAX_K, eval_state.candidate_index.ids.size(1))
     user_max_batch_size = user_max_batch_size or shared_input_embeddings.size(0)
     num_batches = (
-        (shared_input_embeddings.size(0) + user_max_batch_size - 1) // user_max_batch_size
-    )
+        shared_input_embeddings.size(0) + user_max_batch_size - 1
+    ) // user_max_batch_size
     eval_top_k_ids_all = []
     eval_top_k_prs_all = []
     for mb in range(num_batches):
-        eval_top_k_ids, eval_top_k_prs, _ = eval_state.candidate_index.get_top_k_outputs(
-            query_embeddings=shared_input_embeddings[mb * user_max_batch_size: (mb + 1) * user_max_batch_size, ...],
-            top_k_module=eval_state.top_k_module,
-            k=k,
-            invalid_ids=seq_features.past_ids[
-                mb * user_max_batch_size: (mb + 1) * user_max_batch_size, :
-            ] if filter_invalid_ids else None,
-            return_embeddings=False,
+        eval_top_k_ids, eval_top_k_prs, _ = (
+            eval_state.candidate_index.get_top_k_outputs(
+                query_embeddings=shared_input_embeddings[
+                    mb * user_max_batch_size : (mb + 1) * user_max_batch_size, ...
+                ],
+                top_k_module=eval_state.top_k_module,
+                k=k,
+                invalid_ids=(
+                    seq_features.past_ids[
+                        mb * user_max_batch_size : (mb + 1) * user_max_batch_size, :
+                    ]
+                    if filter_invalid_ids
+                    else None
+                ),
+                return_embeddings=False,
+            )
         )
         eval_top_k_ids_all.append(eval_top_k_ids)
         eval_top_k_prs_all.append(eval_top_k_prs)
@@ -138,7 +145,8 @@ def eval_metrics_v2_from_tensors(
         torch.cat(
             [eval_top_k_ids, target_ids],
             dim=1,
-        ) == target_ids,
+        )
+        == target_ids,
         dim=1,
     )
     eval_ranks = torch.where(eval_rank_indices == k, MAX_K + 1, eval_rank_indices + 1)
@@ -224,7 +232,9 @@ def eval_recall_metrics_from_tensors(
 
 
 def _avg(x: torch.Tensor, world_size: int) -> float:
-    _sum_and_numel = torch.tensor([x.sum(), x.numel()], dtype=torch.float32, device=x.device)
+    _sum_and_numel = torch.tensor(
+        [x.sum(), x.numel()], dtype=torch.float32, device=x.device
+    )
     if world_size > 1:
         dist.all_reduce(_sum_and_numel, op=dist.ReduceOp.SUM)
     return _sum_and_numel[0] / _sum_and_numel[1]

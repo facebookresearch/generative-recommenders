@@ -13,12 +13,9 @@
 # limitations under the License.
 
 import abc
-from typing import Callable, Optional, Tuple
-
-import numpy as np
+from typing import Optional, Tuple
 
 import torch
-import torch.nn.functional as F
 
 from modeling.sequential.utils import batch_gather_embeddings
 
@@ -97,15 +94,17 @@ class CandidateIndex(object):
         # if self._ids.size(0) == 1 and X <= 100000:
         if self._ids.size(0) == 1:
             # ((1, X, 1) == (B, 1, N)) -> (B, X)
-            invalid_mask, _ = (
-                self._ids.unsqueeze(2) == invalid_ids.unsqueeze(1)
-            ).max(dim=2)
+            invalid_mask, _ = (self._ids.unsqueeze(2) == invalid_ids.unsqueeze(1)).max(
+                dim=2
+            )
             lengths = (~invalid_mask).int().sum(-1)  # (B,)
             valid_1d_mask = (~invalid_mask).view(-1)
             B: int = lengths.size(0)
             D: int = self._embeddings.size(-1)
             jagged_ids = self._ids.expand(B, -1).reshape(-1)[valid_1d_mask]
-            jagged_embeddings = self._embeddings.expand(B, -1, -1).reshape(-1, D)[valid_1d_mask]
+            jagged_embeddings = self._embeddings.expand(B, -1, -1).reshape(-1, D)[
+                valid_1d_mask
+            ]
             X_prime: int = lengths.max(-1)[0].item()
             jagged_offsets = torch.ops.fbgemm.asynchronous_complete_cumsum(lengths)
             return CandidateIndex(
@@ -164,7 +163,9 @@ class CandidateIndex(object):
             max_num_invalid_ids = invalid_ids.size(1)
 
         k_prime = min(k + max_num_invalid_ids, self.num_objects)
-        top_k_prime_scores, top_k_prime_ids = top_k_module(query_embeddings=query_embeddings, k=k_prime)
+        top_k_prime_scores, top_k_prime_ids = top_k_module(
+            query_embeddings=query_embeddings, k=k_prime
+        )
         """
         B: int = candidate_logits.size(0)
         candidate_logits, debug_info = policy_fn(self.ids, self.embeddings)  # (B, X,)
@@ -190,25 +191,41 @@ class CandidateIndex(object):
         """
         # Masks out invalid items rowwise.
         if invalid_ids is not None:
-            id_is_valid = ~((top_k_prime_ids.unsqueeze(2) == invalid_ids.unsqueeze(1)).max(2)[0])  # [B, K + N_0]
-            id_is_valid = torch.logical_and(id_is_valid, torch.cumsum(id_is_valid.int(), dim=1) <= k)
+            id_is_valid = ~(
+                (top_k_prime_ids.unsqueeze(2) == invalid_ids.unsqueeze(1)).max(2)[0]
+            )  # [B, K + N_0]
+            id_is_valid = torch.logical_and(
+                id_is_valid, torch.cumsum(id_is_valid.int(), dim=1) <= k
+            )
             # [[1, 0, 1, 0], [0, 1, 1, 1]], k=2 -> [[0, 2], [1, 2]]
-            top_k_rowwise_offsets = torch.nonzero(id_is_valid, as_tuple=True)[1].view(-1, k)
-            top_k_scores = torch.gather(top_k_prime_scores, dim=1, index=top_k_rowwise_offsets)
-            top_k_ids = torch.gather(top_k_prime_ids, dim=1, index=top_k_rowwise_offsets)
+            top_k_rowwise_offsets = torch.nonzero(id_is_valid, as_tuple=True)[1].view(
+                -1, k
+            )
+            top_k_scores = torch.gather(
+                top_k_prime_scores, dim=1, index=top_k_rowwise_offsets
+            )
+            top_k_ids = torch.gather(
+                top_k_prime_ids, dim=1, index=top_k_rowwise_offsets
+            )
         else:
-            #id_is_valid = torch.ones_like(top_k_prime_indices, dtype=torch.bool, device=expanded_ids.device)
+            # id_is_valid = torch.ones_like(top_k_prime_indices, dtype=torch.bool, device=expanded_ids.device)
             top_k_scores = top_k_prime_scores
             top_k_ids = top_k_prime_ids
 
-        #top_k_indices = torch.gather(top_k_prime_indices, dim=1, index=top_k_rowwise_offsets)
-        #top_k_prs = torch.gather(top_k_prime_prs, dim=1, index=top_k_rowwise_offsets)
-        #top_k_ids = torch.gather(expanded_ids, dim=1, index=top_k_indices)   # [B * r, k]
+        # top_k_indices = torch.gather(top_k_prime_indices, dim=1, index=top_k_rowwise_offsets)
+        # top_k_prs = torch.gather(top_k_prime_prs, dim=1, index=top_k_rowwise_offsets)
+        # top_k_ids = torch.gather(expanded_ids, dim=1, index=top_k_indices)   # [B * r, k]
         # TODO: this should be decoupled from candidate_index.
         if return_embeddings:
             # TODO: get rid of repeat_interleave in the final version.
-            expanded_embeddings = self.embeddings.repeat_interleave(r, dim=0) if r > 1 else self.embeddings
-            top_k_embeddings = batch_gather_embeddings(rowwise_indices=top_k_indices, embeddings=expanded_embeddings)
+            expanded_embeddings = (
+                self.embeddings.repeat_interleave(r, dim=0)
+                if r > 1
+                else self.embeddings
+            )
+            top_k_embeddings = batch_gather_embeddings(
+                rowwise_indices=top_k_indices, embeddings=expanded_embeddings
+            )
         else:
             top_k_embeddings = None
         return top_k_ids, top_k_scores, top_k_embeddings

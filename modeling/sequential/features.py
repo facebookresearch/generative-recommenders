@@ -14,8 +14,6 @@
 
 from typing import Dict, NamedTuple, Optional, Tuple
 
-import abc
-
 import torch
 
 
@@ -29,7 +27,6 @@ class SequentialFeatures(NamedTuple):
     # Implementation-specific payloads.
     # e.g., past timestamps, past event_types (e.g., clicks, likes), etc.
     past_payloads: Dict[str, torch.Tensor]
-
 
 
 def movielens_seq_features_from_row(
@@ -46,18 +43,37 @@ def movielens_seq_features_from_row(
     target_timestamps = row["target_timestamps"].to(device).unsqueeze(1)
     if max_output_length > 0:
         B = historical_lengths.size(0)
-        historical_ids = torch.cat([
-            historical_ids,
-            torch.zeros((B, max_output_length), dtype=historical_ids.dtype, device=device),
-        ], dim=1)
-        historical_ratings = torch.cat([
-            historical_ratings,
-            torch.zeros((B, max_output_length), dtype=historical_ratings.dtype, device=device),
-        ], dim=1)
-        historical_timestamps = torch.cat([
-            historical_timestamps,
-            torch.zeros((B, max_output_length), dtype=historical_timestamps.dtype, device=device),
-        ], dim=1)
+        historical_ids = torch.cat(
+            [
+                historical_ids,
+                torch.zeros(
+                    (B, max_output_length), dtype=historical_ids.dtype, device=device
+                ),
+            ],
+            dim=1,
+        )
+        historical_ratings = torch.cat(
+            [
+                historical_ratings,
+                torch.zeros(
+                    (B, max_output_length),
+                    dtype=historical_ratings.dtype,
+                    device=device,
+                ),
+            ],
+            dim=1,
+        )
+        historical_timestamps = torch.cat(
+            [
+                historical_timestamps,
+                torch.zeros(
+                    (B, max_output_length),
+                    dtype=historical_timestamps.dtype,
+                    device=device,
+                ),
+            ],
+            dim=1,
+        )
         historical_timestamps.scatter_(
             dim=1,
             index=historical_lengths.view(-1, 1),

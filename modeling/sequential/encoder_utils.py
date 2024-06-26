@@ -13,13 +13,15 @@
 # limitations under the License.
 
 import gin
-
-from modeling.similarity_module import InteractionModule, GeneralizedInteractionModule
 from modeling.sequential.embedding_modules import EmbeddingModule
-from modeling.sequential.input_features_preprocessors import InputFeaturesPreprocessorModule
+from modeling.sequential.hstu import HSTU
+from modeling.sequential.input_features_preprocessors import (
+    InputFeaturesPreprocessorModule,
+)
 from modeling.sequential.output_postprocessors import OutputPostprocessorModule
 from modeling.sequential.sasrec import SASRec
-from modeling.sequential.hstu import HSTU
+
+from modeling.similarity_module import GeneralizedInteractionModule, InteractionModule
 
 
 @gin.configurable
@@ -51,7 +53,7 @@ def sasrec_encoder(
         similarity_module=interaction_module,
         input_features_preproc_module=input_preproc_module,
         output_postproc_module=output_postproc_module,
-	    activation_checkpoint=activation_checkpoint,
+        activation_checkpoint=activation_checkpoint,
         verbose=verbose,
     )
 
@@ -121,7 +123,7 @@ def get_sequential_encoder(
             interaction_module=interaction_module,
             input_preproc_module=input_preproc_module,
             output_postproc_module=output_postproc_module,
-	        activation_checkpoint=activation_checkpoint,
+            activation_checkpoint=activation_checkpoint,
             verbose=verbose,
         )
     elif module_type == "HSTU":
@@ -132,7 +134,7 @@ def get_sequential_encoder(
             interaction_module=interaction_module,
             input_preproc_module=input_preproc_module,
             output_postproc_module=output_postproc_module,
-	        activation_checkpoint=activation_checkpoint,
+            activation_checkpoint=activation_checkpoint,
             verbose=verbose,
         )
     else:

@@ -22,23 +22,19 @@ better than SASRec? (https://arxiv.org/abs/2309.07602, RecSys'23), where the aut
 sampled softmax loss to significantly improved SASRec model quality.
 """
 
-import abc
-from collections import OrderedDict
-from typing import Any, Callable, Dict, Optional, Tuple
+from typing import Dict, Optional, Tuple
 
-from dataclasses import dataclass
-import math
 import torch
 import torch.nn.functional as F
-from torch.utils.checkpoint import checkpoint
 
-from modeling.initialization import truncated_normal
 from modeling.ndp_module import NDPModule
-from modeling.similarity_module import GeneralizedInteractionModule
 from modeling.sequential.embedding_modules import EmbeddingModule
-from modeling.sequential.utils import get_current_embeddings
-from modeling.sequential.input_features_preprocessors import InputFeaturesPreprocessorModule
+from modeling.sequential.input_features_preprocessors import (
+    InputFeaturesPreprocessorModule,
+)
 from modeling.sequential.output_postprocessors import OutputPostprocessorModule
+from modeling.sequential.utils import get_current_embeddings
+from modeling.similarity_module import GeneralizedInteractionModule
 
 
 class StandardAttentionFF(torch.nn.Module):
@@ -51,8 +47,9 @@ class StandardAttentionFF(torch.nn.Module):
     ) -> None:
         super().__init__()
 
-        assert activation_fn == "relu" or activation_fn == "gelu", \
-            f"Invalid activation_fn {activation_fn}"
+        assert (
+            activation_fn == "relu" or activation_fn == "gelu"
+        ), f"Invalid activation_fn {activation_fn}"
 
         self._conv1d = torch.nn.Sequential(
             torch.nn.Conv1d(
@@ -109,7 +106,9 @@ class SASRec(GeneralizedInteractionModule):
         self._embedding_dim: int = embedding_dim
         self._item_embedding_dim: int = embedding_module.item_embedding_dim
         self._max_sequence_length: int = max_sequence_len + max_output_len
-        self._input_features_preproc: InputFeaturesPreprocessorModule = input_features_preproc_module
+        self._input_features_preproc: InputFeaturesPreprocessorModule = (
+            input_features_preproc_module
+        )
         self._output_postproc: OutputPostprocessorModule = output_postproc_module
         self._activation_checkpoint: bool = activation_checkpoint
         self._verbose: bool = verbose
@@ -124,10 +123,12 @@ class SASRec(GeneralizedInteractionModule):
 
         for _ in range(num_blocks):
             self.attention_layers.append(
-                torch.nn.MultiheadAttention(embed_dim=self._embedding_dim,
-                                            num_heads=num_heads,
-                                            dropout=ffn_dropout_rate,
-                                            batch_first=True)
+                torch.nn.MultiheadAttention(
+                    embed_dim=self._embedding_dim,
+                    num_heads=num_heads,
+                    dropout=ffn_dropout_rate,
+                    batch_first=True,
+                )
             )
             self.forward_layers.append(
                 StandardAttentionFF(
@@ -141,22 +142,31 @@ class SASRec(GeneralizedInteractionModule):
         self.register_buffer(
             "_attn_mask",
             torch.triu(
-                torch.ones((self._max_sequence_length, self._max_sequence_length), dtype=torch.bool),
+                torch.ones(
+                    (self._max_sequence_length, self._max_sequence_length),
+                    dtype=torch.bool,
+                ),
                 diagonal=1,
-            )
+            ),
         )
         self.reset_state()
 
     def reset_state(self) -> None:
         for name, params in self.named_parameters():
-            if "_input_features_preproc" in name or "_embedding_module" in name or "_output_postproc" in name:
+            if (
+                "_input_features_preproc" in name
+                or "_embedding_module" in name
+                or "_output_postproc" in name
+            ):
                 if self._verbose:
                     print(f"Skipping initialization for {name}")
                 continue
             try:
                 torch.nn.init.xavier_normal_(params.data)
                 if self._verbose:
-                    print(f"Initialize {name} as xavier normal: {params.data.size()} params")
+                    print(
+                        f"Initialize {name} as xavier normal: {params.data.size()} params"
+                    )
             except:
                 if self._verbose:
                     print(f"Failed to initialize {name}: {params.data.size()} params")
@@ -167,8 +177,10 @@ class SASRec(GeneralizedInteractionModule):
     def debug_str(self) -> str:
         return (
             f"SASRec-d{self._item_embedding_dim}-b{self._num_blocks}-h{self._num_heads}"
-            + "-" + self._input_features_preproc.debug_str()
-            + "-" + self._output_postproc.debug_str()
+            + "-"
+            + self._input_features_preproc.debug_str()
+            + "-"
+            + self._output_postproc.debug_str()
             + f"-ffn{self._ffn_hidden_dim}-{self._ffn_activation_fn}-d{self._ffn_dropout_rate}"
             + f"{'-ac' if self._activation_checkpoint else ''}"
         )
@@ -180,7 +192,9 @@ class SASRec(GeneralizedInteractionModule):
         valid_mask: torch.Tensor,
     ) -> torch.Tensor:
         Q = F.layer_norm(
-            user_embeddings, normalized_shape=(self._embedding_dim,), eps=1e-8,
+            user_embeddings,
+            normalized_shape=(self._embedding_dim,),
+            eps=1e-8,
         )
         mha_outputs, _ = self.attention_layers[i](
             query=Q,
@@ -222,7 +236,10 @@ class SASRec(GeneralizedInteractionModule):
         for i in range(len(self.attention_layers)):
             if self._activation_checkpoint:
                 user_embeddings = torch.utils.checkpoint.checkpoint(
-                    self._run_one_layer, i, user_embeddings, valid_mask,
+                    self._run_one_layer,
+                    i,
+                    user_embeddings,
+                    valid_mask,
                     use_reentrant=False,
                 )
             else:
@@ -263,8 +280,12 @@ class SASRec(GeneralizedInteractionModule):
         past_embeddings: torch.Tensor,
         past_payloads: Dict[str, torch.Tensor],
     ) -> torch.Tensor:
-        encoded_seq_embeddings = self.generate_user_embeddings(past_lengths, past_ids, past_embeddings, past_payloads)  # [B, N, D]
-        return get_current_embeddings(lengths=past_lengths, encoded_embeddings=encoded_seq_embeddings)
+        encoded_seq_embeddings = self.generate_user_embeddings(
+            past_lengths, past_ids, past_embeddings, past_payloads
+        )  # [B, N, D]
+        return get_current_embeddings(
+            lengths=past_lengths, encoded_embeddings=encoded_seq_embeddings
+        )
 
     def predict(
         self,

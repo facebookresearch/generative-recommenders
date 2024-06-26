@@ -23,19 +23,28 @@ def batch_gather_embeddings(
     Args:
         rowwise_indices: (B, N) x int, where each entry is in [0, X).
         embeddings: (B, X, D,) x float.
-    
+
     Returns:
         (B, N, D,) x float, embeddings corresponding to rowwise_indices.
     """
-    _, N = rowwise_indices.size() 
+    _, N = rowwise_indices.size()
     B, X, D = embeddings.size()
     flattened_indices = (
         rowwise_indices
         + torch.arange(
-            start=0, end=B, step=1, dtype=rowwise_indices.dtype, device=rowwise_indices.device
-        ).unsqueeze(1).expand(-1, N) * X
+            start=0,
+            end=B,
+            step=1,
+            dtype=rowwise_indices.dtype,
+            device=rowwise_indices.device,
+        )
+        .unsqueeze(1)
+        .expand(-1, N)
+        * X
     )
-    return embeddings.view(-1, D)[flattened_indices, :].reshape(rowwise_indices.size() + (D,))
+    return embeddings.view(-1, D)[flattened_indices, :].reshape(
+        rowwise_indices.size() + (D,)
+    )
 
 
 def batch_scatter_embeddings(
@@ -50,11 +59,12 @@ def batch_scatter_embeddings(
         source_embeddings: (B, D,) x float.
     """
     B, N, D = dst_embeddings.size()
-    flattened_indices = (
-        rowwise_indices
-        + torch.arange(
-            start=0, end=B * N, step=N, dtype=rowwise_indices.dtype, device=rowwise_indices.device
-        )
+    flattened_indices = rowwise_indices + torch.arange(
+        start=0,
+        end=B * N,
+        step=N,
+        dtype=rowwise_indices.dtype,
+        device=rowwise_indices.device,
     )
     dst_embeddings.view(B * N, D)[flattened_indices, :] = src_embeddings
 
@@ -72,16 +82,15 @@ def get_current_embeddings(
         (B, D,) x float, where [i, :] == encoded_embeddings[i, lengths[i] - 1, :]
     """
     B, N, D = encoded_embeddings.size()
-    flattened_offsets = (
-        (lengths - 1)
-        + torch.arange(
-            start=0, end=B, step=1, dtype=lengths.dtype, device=lengths.device
-        ) * N
-    )
+    flattened_offsets = (lengths - 1) + torch.arange(
+        start=0, end=B, step=1, dtype=lengths.dtype, device=lengths.device
+    ) * N
     return encoded_embeddings.reshape(-1, D)[flattened_offsets, :].reshape(B, D)
 
 
-def jagged_or_dense_repeat_interleave_dim0(x: torch.Tensor, lengths: torch.Tensor, repeats: int) -> torch.Tensor:
+def jagged_or_dense_repeat_interleave_dim0(
+    x: torch.Tensor, lengths: torch.Tensor, repeats: int
+) -> torch.Tensor:
     if len(x.size()) == 3:
         return x.repeat_interleave(repeats, dim=0)
     else:
@@ -90,7 +99,7 @@ def jagged_or_dense_repeat_interleave_dim0(x: torch.Tensor, lengths: torch.Tenso
             values=x,
             offsets=[torch.ops.fbgemm.asynchronous_complete_cumsum(lengths)],
             max_lengths=[lengths.max()],
-            padding_value=0.0
+            padding_value=0.0,
         )
         lengths = lengths.repeat_interleave(repeats, dim=0)
         return torch.ops.fbgemm.dense_to_jagged(
@@ -99,7 +108,9 @@ def jagged_or_dense_repeat_interleave_dim0(x: torch.Tensor, lengths: torch.Tenso
         )[0]
 
 
-def jagged_or_dense_index_select_dim0(x: torch.Tensor, lengths: torch.Tensor, indices: torch.Tensor) -> torch.Tensor:
+def jagged_or_dense_index_select_dim0(
+    x: torch.Tensor, lengths: torch.Tensor, indices: torch.Tensor
+) -> torch.Tensor:
     if len(x.size()) == 3:
         return x[indices, :, :]
     else:

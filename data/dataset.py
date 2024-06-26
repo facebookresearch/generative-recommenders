@@ -14,7 +14,6 @@
 
 from typing import Dict, List, Optional, Tuple
 
-import numpy as np
 import pandas as pd
 import torch
 
@@ -71,7 +70,13 @@ class DatasetV2(torch.utils.data.Dataset):
                 y_list = y_list[:-ignore_last_n]
             return y_list
 
-        def eval_int_list(x, target_len: int, ignore_last_n: int, shift_id_by: int, sampling_kept_mask: Optional[List[bool]]) -> Tuple[List[int], int]:
+        def eval_int_list(
+            x,
+            target_len: int,
+            ignore_last_n: int,
+            shift_id_by: int,
+            sampling_kept_mask: Optional[List[bool]],
+        ) -> Tuple[List[int], int]:
             y = eval_as_list(x, ignore_last_n=ignore_last_n)
             if sampling_kept_mask is not None:
                 y = [x for x, kept in zip(y, sampling_kept_mask) if kept]
@@ -83,23 +88,43 @@ class DatasetV2(torch.utils.data.Dataset):
 
         if self._sample_ratio < 1.0:
             raw_length = len(eval_as_list(data.sequence_item_ids, self._ignore_last_n))
-            sampling_kept_mask = (torch.rand((raw_length,), dtype=torch.float32) < self._sample_ratio).tolist()
+            sampling_kept_mask = (
+                torch.rand((raw_length,), dtype=torch.float32) < self._sample_ratio
+            ).tolist()
         else:
             sampling_kept_mask = None
 
         movie_history, movie_history_len = eval_int_list(
-            data.sequence_item_ids, self._padding_length, self._ignore_last_n, shift_id_by=self._shift_id_by, sampling_kept_mask=sampling_kept_mask
+            data.sequence_item_ids,
+            self._padding_length,
+            self._ignore_last_n,
+            shift_id_by=self._shift_id_by,
+            sampling_kept_mask=sampling_kept_mask,
         )
         movie_history_ratings, ratings_len = eval_int_list(
-            data.sequence_ratings, self._padding_length, self._ignore_last_n, 0, sampling_kept_mask=sampling_kept_mask
+            data.sequence_ratings,
+            self._padding_length,
+            self._ignore_last_n,
+            0,
+            sampling_kept_mask=sampling_kept_mask,
         )
         movie_timestamps, timestamps_len = eval_int_list(
-            data.sequence_timestamps, self._padding_length, self._ignore_last_n, 0, sampling_kept_mask=sampling_kept_mask
+            data.sequence_timestamps,
+            self._padding_length,
+            self._ignore_last_n,
+            0,
+            sampling_kept_mask=sampling_kept_mask,
         )
-        assert movie_history_len == timestamps_len, f"history len {movie_history_len} differs from timestamp len {timestamps_len}."
-        assert movie_history_len == ratings_len, f"history len {movie_history_len} differs from ratings len {ratings_len}."
-        
-        def _truncate_or_pad_seq(y: List[int], target_len: int, chronological: bool) -> List[int]:
+        assert (
+            movie_history_len == timestamps_len
+        ), f"history len {movie_history_len} differs from timestamp len {timestamps_len}."
+        assert (
+            movie_history_len == ratings_len
+        ), f"history len {movie_history_len} differs from ratings len {ratings_len}."
+
+        def _truncate_or_pad_seq(
+            y: List[int], target_len: int, chronological: bool
+        ) -> List[int]:
             y_len = len(y)
             if y_len < target_len:
                 y = y + [0] * (target_len - y_len)
@@ -125,13 +150,19 @@ class DatasetV2(torch.utils.data.Dataset):
         max_seq_len = self._padding_length - 1
         history_length = min(len(historical_ids), max_seq_len)
         historical_ids = _truncate_or_pad_seq(
-            historical_ids, max_seq_len, self._chronological,
+            historical_ids,
+            max_seq_len,
+            self._chronological,
         )
         historical_ratings = _truncate_or_pad_seq(
-            historical_ratings, max_seq_len, self._chronological,
+            historical_ratings,
+            max_seq_len,
+            self._chronological,
         )
         historical_timestamps = _truncate_or_pad_seq(
-            historical_timestamps, max_seq_len, self._chronological,
+            historical_timestamps,
+            max_seq_len,
+            self._chronological,
         )
         # moved to features.py
         # if self._chronological:
@@ -143,7 +174,9 @@ class DatasetV2(torch.utils.data.Dataset):
             "user_id": user_id,
             "historical_ids": torch.tensor(historical_ids, dtype=torch.int64),
             "historical_ratings": torch.tensor(historical_ratings, dtype=torch.int64),
-            "historical_timestamps": torch.tensor(historical_timestamps, dtype=torch.int64),
+            "historical_timestamps": torch.tensor(
+                historical_timestamps, dtype=torch.int64
+            ),
             "history_lengths": history_length,
             "target_ids": target_ids,
             "target_ratings": target_ratings,
