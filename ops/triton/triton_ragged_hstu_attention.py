@@ -59,6 +59,11 @@ def _get_fw_configs() -> List[triton.Config]:  # noqa: C901
     else:
         configs = [
             triton.Config(
+                {"BLOCK_M": 16, "BLOCK_N": 32},
+                num_stages=2,
+                num_warps=2,
+            ),
+            triton.Config(
                 {"BLOCK_M": 32, "BLOCK_N": 32},
                 num_stages=2,
                 num_warps=2,
