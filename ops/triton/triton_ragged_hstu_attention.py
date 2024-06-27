@@ -435,7 +435,9 @@ def _ragged_hstu_attn_fwd(  # noqa C901
     if start_m >= seq_len:
         return
     if HAS_MULTIPLE_TARGETS:
-        n_targets = tl.load(num_targets + off_z)
+        n_targets = tl.load(num_targets + off_z).to(tl.int32)
+    else:
+        n_targets = None
 
     # initialize offsets
     offs_m = start_m + tl.arange(0, BLOCK_M)
@@ -496,10 +498,9 @@ def _ragged_hstu_attn_fwd(  # noqa C901
     acc = tl.zeros([BLOCK_M, BLOCK_D_V], dtype=tl.float32)
     if HAS_MULTIPLE_TARGETS and INVALID_MASK_TYPE == "lower_triangular":
         low = 0
-        # pyre-ignore[61]
         uih_end = (seq_len - n_targets + BLOCK_N - 1) // BLOCK_N * BLOCK_N
         if uih_end < start_m:
-            high = seq_len - n_targets.to(tl.int32)
+            high = seq_len - n_targets
         else:
             high = start_m + BLOCK_M
     else:
@@ -525,7 +526,6 @@ def _ragged_hstu_attn_fwd(  # noqa C901
             q=q,
             K_block_ptr=K_block_ptr,
             V_block_ptr=V_block_ptr,
-            # pyre-ignore[61]
             n_targets=n_targets if HAS_MULTIPLE_TARGETS else None,
             ts_1_ptrs=(
                 # pyre-ignore[61]
@@ -583,7 +583,6 @@ def _ragged_hstu_attn_fwd(  # noqa C901
                     q=q,
                     K_block_ptr=K_block_ptr,
                     V_block_ptr=V_block_ptr,
-                    # pyre-ignore[61]
                     n_targets=n_targets if HAS_MULTIPLE_TARGETS else None,
                     ts_1_ptrs=(
                         # pyre-ignore[61]
