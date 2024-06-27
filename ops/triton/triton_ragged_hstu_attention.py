@@ -280,7 +280,7 @@ def _ragged_hstu_attn_fwd_one_block(  # noqa: C901
             if HAS_MULTIPLE_TARGETS:
                 pos_offs_m = offs_m
                 pos_offs_n = offs_n + start_n
-                if INVALID_MASK_TYPE == "lower_triangular" or INVALID_MASK_TYPE == "none_lower_triangular":
+                if INVALID_MASK_TYPE == "lower_triangular":
                     pos_offs_m = tl.where(
                         pos_offs_m < seq_len - n_targets,
                         pos_offs_m,
@@ -291,7 +291,7 @@ def _ragged_hstu_attn_fwd_one_block(  # noqa: C901
                         pos_offs_n,
                         seq_len - n_targets,
                     )
-                elif INVALID_MASK_TYPE == "upper_triangular" or INVALID_MASK_TYPE == "none_upper_triangular":
+                elif INVALID_MASK_TYPE == "upper_triangular":
                     pos_offs_m = tl.where(
                         pos_offs_m > n_targets - 1, pos_offs_m, n_targets - 1
                     )
@@ -330,12 +330,12 @@ def _ragged_hstu_attn_fwd_one_block(  # noqa: C901
     else:
         invalid_mask = tl.full([BLOCK_M, BLOCK_N], 1, dtype=tl.int1)
     if HAS_MULTIPLE_TARGETS:
-        if INVALID_MASK_TYPE == "lower_triangular" or INVALID_MASK_TYPE == "none_lower_triangular":
+        if INVALID_MASK_TYPE == "lower_triangular":
             invalid_mask = invalid_mask and (
                 (start_n + offs_n[None, :] < seq_len - n_targets)
                 or (start_n + offs_n[None, :] == offs_m[:, None])
             )
-        elif INVALID_MASK_TYPE == "upper_triangular" or INVALID_MASK_TYPE == "none_upper_triangular":
+        elif INVALID_MASK_TYPE == "upper_triangular":
             invalid_mask = invalid_mask and (
                 (start_n + offs_n[None, :] >= n_targets)
                 or (start_n + offs_n[None, :] == offs_m[:, None])
@@ -667,8 +667,6 @@ def triton_ragged_attention(
     assert invalid_attn_mask_type in [
         "lower_triangular",
         "upper_triangular",
-        "none_lower_triangular",
-        "none_upper_triangular",
     ]
     Z = seq_offsets.numel() - 1
     L, H, DimQ = q.shape
