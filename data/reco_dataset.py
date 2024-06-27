@@ -13,8 +13,9 @@
 # limitations under the License.
 
 from dataclasses import dataclass
-import pandas as pd
 from typing import List
+
+import pandas as pd
 
 import torch
 
@@ -69,9 +70,7 @@ def get_reco_dataset(
             ignore_last_n=0,
             chronological=chronological,
         )
-    elif (
-        dataset_name == "amzn-books"
-    ):
+    elif dataset_name == "amzn-books":
         dp = get_common_preprocessors()[dataset_name]
         train_dataset = DatasetV2(
             ratings_file=dp.output_format_csv(),
@@ -94,7 +93,7 @@ def get_reco_dataset(
         items = pd.read_csv(dp.processed_item_csv(), delimiter=",")
         max_jagged_dimension = 16
         item_features: ItemFeatures = ItemFeatures(
-            max_ind_range = [63, 16383, 511],
+            max_ind_range=[63, 16383, 511],
             num_items=dp.expected_max_item_id() + 1,
             max_jagged_dimension=max_jagged_dimension,
             lengths=[
@@ -103,14 +102,23 @@ def get_reco_dataset(
                 torch.zeros((dp.expected_max_item_id() + 1,), dtype=torch.int64),
             ],
             values=[
-                torch.zeros((dp.expected_max_item_id() + 1, max_jagged_dimension), dtype=torch.int64),
-                torch.zeros((dp.expected_max_item_id() + 1, max_jagged_dimension), dtype=torch.int64),
-                torch.zeros((dp.expected_max_item_id() + 1, max_jagged_dimension), dtype=torch.int64),
+                torch.zeros(
+                    (dp.expected_max_item_id() + 1, max_jagged_dimension),
+                    dtype=torch.int64,
+                ),
+                torch.zeros(
+                    (dp.expected_max_item_id() + 1, max_jagged_dimension),
+                    dtype=torch.int64,
+                ),
+                torch.zeros(
+                    (dp.expected_max_item_id() + 1, max_jagged_dimension),
+                    dtype=torch.int64,
+                ),
             ],
         )
         all_item_ids = []
         for df_index, row in items.iterrows():
-            #print(f"index {df_index}: {row}")
+            # print(f"index {df_index}: {row}")
             movie_id = int(row["movie_id"])
             genres = row["genres"].split("|")
             titles = row["cleaned_title"].split(" ")
@@ -118,9 +126,15 @@ def get_reco_dataset(
             genres_vector = [hash(x) % item_features.max_ind_range[0] for x in genres]
             titles_vector = [hash(x) % item_features.max_ind_range[1] for x in titles]
             years_vector = [hash(row["year"]) % item_features.max_ind_range[2]]
-            item_features.lengths[0][movie_id] = min(len(genres_vector), max_jagged_dimension)
-            item_features.lengths[1][movie_id] = min(len(titles_vector), max_jagged_dimension)
-            item_features.lengths[2][movie_id] = min(len(years_vector), max_jagged_dimension)
+            item_features.lengths[0][movie_id] = min(
+                len(genres_vector), max_jagged_dimension
+            )
+            item_features.lengths[1][movie_id] = min(
+                len(titles_vector), max_jagged_dimension
+            )
+            item_features.lengths[2][movie_id] = min(
+                len(years_vector), max_jagged_dimension
+            )
             for f, f_values in enumerate([genres_vector, titles_vector, years_vector]):
                 for j in range(min(len(f_values), max_jagged_dimension)):
                     item_features.values[f][movie_id][j] = f_values[j]

@@ -16,36 +16,53 @@
 Main entry point for model training. Please refer to README.md for usage instructions.
 """
 
-from typing import Optional
 import logging
+import os
 import random
 
 from datetime import date
-import os
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '1'  # Hide excessive tensorflow debug messages
+from typing import Optional
+
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "1"  # Hide excessive tensorflow debug messages
 import sys
 import time
-import gin
-import fbgemm_gpu  # noqa: F401, E402
 
-from absl import app, flags
+import fbgemm_gpu  # noqa: F401, E402
+import gin
 
 import torch
 import torch.distributed as dist
 import torch.multiprocessing as mp
-from torch.nn.parallel import DistributedDataParallel as DDP
-from torch.utils.tensorboard import SummaryWriter
+
+from absl import app, flags
+from data.eval import (
+    _avg,
+    add_to_summary_writer,
+    eval_metrics_v2_from_tensors,
+    get_eval_state,
+)
 
 from data.reco_dataset import get_reco_dataset
-from data.eval import _avg, get_eval_state, eval_metrics_v2_from_tensors, add_to_summary_writer
 from indexing.utils import get_top_k_module
-from modeling.sequential.autoregressive_losses import InBatchNegativesSampler, LocalNegativesSampler, SampledSoftmaxLoss, BCELoss
-from modeling.sequential.encoder_utils import get_sequential_encoder
+from modeling.sequential.autoregressive_losses import (
+    BCELoss,
+    InBatchNegativesSampler,
+    LocalNegativesSampler,
+    SampledSoftmaxLoss,
+)
 from modeling.sequential.embedding_modules import EmbeddingModule, LocalEmbeddingModule
-from modeling.sequential.input_features_preprocessors import LearnablePositionalEmbeddingInputFeaturesPreprocessor
-from modeling.sequential.output_postprocessors import L2NormEmbeddingPostprocessor, LayerNormEmbeddingPostprocessor
+from modeling.sequential.encoder_utils import get_sequential_encoder
 from modeling.sequential.features import movielens_seq_features_from_row
+from modeling.sequential.input_features_preprocessors import (
+    LearnablePositionalEmbeddingInputFeaturesPreprocessor,
+)
+from modeling.sequential.output_postprocessors import (
+    L2NormEmbeddingPostprocessor,
+    LayerNormEmbeddingPostprocessor,
+)
 from modeling.similarity_utils import get_similarity_function
+from torch.nn.parallel import DistributedDataParallel as DDP
+from torch.utils.tensorboard import SummaryWriter
 from trainer.data_loader import create_data_loader
 
 logging.basicConfig(stream=sys.stdout, level=logging.INFO)
@@ -58,8 +75,8 @@ FLAGS = flags.FLAGS
 
 
 def setup(rank: int, world_size: int, master_port: int) -> None:
-    os.environ['MASTER_ADDR'] = 'localhost'
-    os.environ['MASTER_PORT'] = str(master_port)
+    os.environ["MASTER_ADDR"] = "localhost"
+    os.environ["MASTER_PORT"] = str(master_port)
 
     # initialize the process group
     dist.init_process_group("nccl", rank=rank, world_size=world_size)
@@ -156,13 +173,16 @@ def train_fn(
         item_embedding_dim=item_embedding_dim,
     )
 
-    assert user_embedding_norm == "l2_norm" or user_embedding_norm == "layer_norm", \
-        f"Not implemented for {user_embedding_norm}"
+    assert (
+        user_embedding_norm == "l2_norm" or user_embedding_norm == "layer_norm"
+    ), f"Not implemented for {user_embedding_norm}"
     output_postproc_module = (
         L2NormEmbeddingPostprocessor(
             embedding_dim=item_embedding_dim,
             eps=1e-6,
-        ) if user_embedding_norm == "l2_norm" else LayerNormEmbeddingPostprocessor(
+        )
+        if user_embedding_norm == "l2_norm"
+        else LayerNormEmbeddingPostprocessor(
             embedding_dim=item_embedding_dim,
             eps=1e-6,
         )
@@ -201,7 +221,9 @@ def train_fn(
             model=model,
             activation_checkpoint=loss_activation_checkpoint,
         )
-        loss_debug_str += f"-n{num_negatives}{'-ac' if loss_activation_checkpoint else ''}"
+        loss_debug_str += (
+            f"-n{num_negatives}{'-ac' if loss_activation_checkpoint else ''}"
+        )
     else:
         raise ValueError(f"Unrecognized loss module {loss_module}.")
 
@@ -212,7 +234,9 @@ def train_fn(
             l2_norm_eps=l2_norm_eps,
             dedup_embeddings=True,
         )
-        sampling_debug_str = f"in-batch{f'-l2-eps{l2_norm_eps}' if item_l2_norm else ''}-dedup"
+        sampling_debug_str = (
+            f"in-batch{f'-l2-eps{l2_norm_eps}' if item_l2_norm else ''}-dedup"
+        )
     elif sampling_strategy == "local":
         negatives_sampler = LocalNegativesSampler(
             num_items=dataset.max_item_id,
@@ -235,14 +259,19 @@ def train_fn(
     model = DDP(model, device_ids=[rank], broadcast_buffers=False)
 
     # TODO: wrap in create_optimizer.
-    opt = torch.optim.AdamW(model.parameters(), lr=learning_rate, betas=(0.9, 0.98), weight_decay=weight_decay)
+    opt = torch.optim.AdamW(
+        model.parameters(),
+        lr=learning_rate,
+        betas=(0.9, 0.98),
+        weight_decay=weight_decay,
+    )
 
     date_str = date.today().strftime("%Y-%m-%d")
     model_subfolder = f"{dataset_name}-l{max_sequence_length}"
     model_desc = (
-        f"{model_subfolder}" +
-        f"/{model_debug_str}_{interaction_module_debug_str}_{sampling_debug_str}_{loss_debug_str}" +
-        f"{f'-ddp{world_size}' if world_size > 1 else ''}-b{local_batch_size}-lr{learning_rate}-wu{num_warmup_steps}-wd{weight_decay}{'' if enable_tf32 else '-notf32'}-{date_str}"
+        f"{model_subfolder}"
+        + f"/{model_debug_str}_{interaction_module_debug_str}_{sampling_debug_str}_{loss_debug_str}"
+        + f"{f'-ddp{world_size}' if world_size > 1 else ''}-b{local_batch_size}-lr{learning_rate}-wu{num_warmup_steps}-wd{weight_decay}{'' if enable_tf32 else '-notf32'}-{date_str}"
     )
     if full_eval_every_n > 1:
         model_desc += f"-fe{full_eval_every_n}"
@@ -271,16 +300,20 @@ def train_fn(
         model.train()
         for row in iter(train_data_loader):
             seq_features, target_ids, target_ratings = movielens_seq_features_from_row(
-                row, device=device, max_output_length=gr_output_length + 1,
+                row,
+                device=device,
+                max_output_length=gr_output_length + 1,
             )
 
             if (batch_id % eval_interval) == 0:
                 model.eval()
 
-                seq_features, target_ids, target_ratings = movielens_seq_features_from_row(
-                    row,
-                    device=device,
-                    max_output_length=gr_output_length + 1,
+                seq_features, target_ids, target_ratings = (
+                    movielens_seq_features_from_row(
+                        row,
+                        device=device,
+                        max_output_length=gr_output_length + 1,
+                    )
                 )
                 eval_state = get_eval_state(
                     model=model.module,
@@ -296,23 +329,32 @@ def train_fn(
                     float_dtype=torch.bfloat16 if main_module_bf16 else None,
                 )
                 eval_dict = eval_metrics_v2_from_tensors(
-                    eval_state, model.module, seq_features, target_ids=target_ids, target_ratings=target_ratings,
+                    eval_state,
+                    model.module,
+                    seq_features,
+                    target_ids=target_ids,
+                    target_ratings=target_ratings,
                     user_max_batch_size=eval_user_max_batch_size,
                     dtype=torch.bfloat16 if main_module_bf16 else None,
                 )
-                add_to_summary_writer(writer, batch_id, eval_dict, prefix="eval", world_size=world_size)
+                add_to_summary_writer(
+                    writer, batch_id, eval_dict, prefix="eval", world_size=world_size
+                )
                 logging.info(
-                    f"rank {rank}:  batch-stat (eval): iter {batch_id} (epoch {epoch}): " +
-                    f"NDCG@10 {_avg(eval_dict['ndcg@10'], world_size):.4f}, "
+                    f"rank {rank}:  batch-stat (eval): iter {batch_id} (epoch {epoch}): "
+                    + f"NDCG@10 {_avg(eval_dict['ndcg@10'], world_size):.4f}, "
                     f"HR@10 {_avg(eval_dict['hr@10'], world_size):.4f}, "
-                    f"HR@50 {_avg(eval_dict['hr@50'], world_size):.4f}, " +
-                    f"MRR {_avg(eval_dict['mrr'], world_size):.4f} ")
+                    f"HR@50 {_avg(eval_dict['hr@50'], world_size):.4f}, "
+                    + f"MRR {_avg(eval_dict['mrr'], world_size):.4f} "
+                )
                 model.train()
 
             # TODO: consider separating this out?
             B, N = seq_features.past_ids.shape
             seq_features.past_ids.scatter_(
-                dim=1, index=seq_features.past_lengths.view(-1, 1), src=target_ids.view(-1, 1),
+                dim=1,
+                index=seq_features.past_lengths.view(-1, 1),
+                src=target_ids.view(-1, 1),
             )
 
             opt.zero_grad()
@@ -353,16 +395,18 @@ def train_fn(
 
             # Optional linear warmup.
             if batch_id < num_warmup_steps:
-                lr_scalar = min(1., float(batch_id + 1) / num_warmup_steps)
+                lr_scalar = min(1.0, float(batch_id + 1) / num_warmup_steps)
                 for pg in opt.param_groups:
-                    pg['lr'] = lr_scalar * learning_rate
+                    pg["lr"] = lr_scalar * learning_rate
                 lr = lr_scalar * learning_rate
             else:
                 lr = learning_rate
 
             if (batch_id % eval_interval) == 0:
-                logging.info(f" rank: {rank}, batch-stat (train): step {batch_id} "
-                             f"(epoch {epoch} in {time.time() - last_training_time:.2f}s): {loss:.6f}")
+                logging.info(
+                    f" rank: {rank}, batch-stat (train): step {batch_id} "
+                    f"(epoch {epoch} in {time.time() - last_training_time:.2f}s): {loss:.6f}"
+                )
                 last_training_time = time.time()
                 if rank == 0:
                     writer.add_scalar("loss/train", loss, batch_id)
@@ -393,9 +437,15 @@ def train_fn(
             float_dtype=torch.bfloat16 if main_module_bf16 else None,
         )
         for eval_iter, row in enumerate(iter(eval_data_loader)):
-            seq_features, target_ids, target_ratings = movielens_seq_features_from_row(row, device=device, max_output_length=gr_output_length + 1)
+            seq_features, target_ids, target_ratings = movielens_seq_features_from_row(
+                row, device=device, max_output_length=gr_output_length + 1
+            )
             eval_dict = eval_metrics_v2_from_tensors(
-                eval_state, model.module, seq_features, target_ids=target_ids, target_ratings=target_ratings,
+                eval_state,
+                model.module,
+                seq_features,
+                target_ids=target_ids,
+                target_ratings=target_ratings,
                 user_max_batch_size=eval_user_max_batch_size,
                 dtype=torch.bfloat16 if main_module_bf16 else None,
             )
@@ -410,7 +460,9 @@ def train_fn(
             del eval_dict
 
             if (eval_iter + 1 >= partial_eval_num_iters) and (not is_full_eval(epoch)):
-                logging.info(f"Truncating epoch {epoch} eval to {eval_iter + 1} iters to save cost..")
+                logging.info(
+                    f"Truncating epoch {epoch} eval to {eval_iter + 1} iters to save cost.."
+                )
                 break
 
         for k, v in eval_dict_all.items():
@@ -422,18 +474,35 @@ def train_fn(
         hr_50 = _avg(eval_dict_all["hr@50"], world_size=world_size)
         mrr = _avg(eval_dict_all["mrr"], world_size=world_size)
 
-        add_to_summary_writer(writer, batch_id=epoch, metrics=eval_dict_all, prefix="eval_epoch", world_size=world_size)
+        add_to_summary_writer(
+            writer,
+            batch_id=epoch,
+            metrics=eval_dict_all,
+            prefix="eval_epoch",
+            world_size=world_size,
+        )
         if full_eval_every_n > 1 and is_full_eval(epoch):
-            add_to_summary_writer(writer, batch_id=epoch, metrics=eval_dict_all, prefix="eval_epoch_full", world_size=world_size)
+            add_to_summary_writer(
+                writer,
+                batch_id=epoch,
+                metrics=eval_dict_all,
+                prefix="eval_epoch_full",
+                world_size=world_size,
+            )
         if rank == 0 and epoch > 0 and (epoch % save_ckpt_every_n) == 0:
-            torch.save({
-                'epoch': epoch,
-                'model_state_dict': model.state_dict(),
-                'optimizer_state_dict': opt.state_dict(),
-            }, f"./ckpts/{model_desc}_ep{epoch}")
+            torch.save(
+                {
+                    "epoch": epoch,
+                    "model_state_dict": model.state_dict(),
+                    "optimizer_state_dict": opt.state_dict(),
+                },
+                f"./ckpts/{model_desc}_ep{epoch}",
+            )
 
-        logging.info(f"rank {rank}: eval @ epoch {epoch} in {time.time() - eval_start_time:.2f}s: "
-                     f"NDCG@10 {ndcg_10:.4f}, NDCG@50 {ndcg_50:.4f}, HR@10 {hr_10:.4f}, HR@50 {hr_50:.4f}, MRR {mrr:.4f}")
+        logging.info(
+            f"rank {rank}: eval @ epoch {epoch} in {time.time() - eval_start_time:.2f}s: "
+            f"NDCG@10 {ndcg_10:.4f}, NDCG@50 {ndcg_50:.4f}, HR@10 {hr_10:.4f}, HR@50 {hr_50:.4f}, MRR {mrr:.4f}"
+        )
         last_training_time = time.time()
 
     if rank == 0:
@@ -441,11 +510,14 @@ def train_fn(
             writer.flush()
             writer.close()
 
-        torch.save({
-            'epoch': epoch,
-            'model_state_dict': model.state_dict(),
-            'optimizer_state_dict': opt.state_dict(),
-        }, f"./ckpts/{model_desc}_ep{epoch}")
+        torch.save(
+            {
+                "epoch": epoch,
+                "model_state_dict": model.state_dict(),
+                "optimizer_state_dict": opt.state_dict(),
+            },
+            f"./ckpts/{model_desc}_ep{epoch}",
+        )
 
     cleanup()
 
@@ -467,11 +539,13 @@ def mp_train_fn(
 def main(argv):
     world_size = torch.cuda.device_count()
 
-    mp.set_start_method('forkserver')
-    mp.spawn(mp_train_fn,
-             args=(world_size, FLAGS.master_port, FLAGS.gin_config_file),
-             nprocs=world_size,
-             join=True)
+    mp.set_start_method("forkserver")
+    mp.spawn(
+        mp_train_fn,
+        args=(world_size, FLAGS.master_port, FLAGS.gin_config_file),
+        nprocs=world_size,
+        join=True,
+    )
 
 
 if __name__ == "__main__":

@@ -13,10 +13,9 @@
 # limitations under the License.
 
 import abc
+
 import torch
 import torch.nn.functional as F
-
-from modeling.initialization import init_mlp_xavier_weights_zero_bias
 
 
 class OutputPostprocessorModule(torch.nn.Module):
@@ -51,7 +50,7 @@ class L2NormEmbeddingPostprocessor(OutputPostprocessorModule):
         self,
         output_embeddings: torch.Tensor,
     ) -> torch.Tensor:
-        output_embeddings = output_embeddings[..., :self._embedding_dim]
+        output_embeddings = output_embeddings[..., : self._embedding_dim]
         return output_embeddings / torch.clamp(
             torch.linalg.norm(output_embeddings, ord=None, dim=-1, keepdim=True),
             min=self._eps,
@@ -76,7 +75,7 @@ class LayerNormEmbeddingPostprocessor(OutputPostprocessorModule):
         self,
         output_embeddings: torch.Tensor,
     ) -> torch.Tensor:
-        output_embeddings = output_embeddings[..., :self._embedding_dim]
+        output_embeddings = output_embeddings[..., : self._embedding_dim]
         return F.layer_norm(
             output_embeddings,
             normalized_shape=(self._embedding_dim,),

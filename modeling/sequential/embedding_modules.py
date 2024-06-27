@@ -45,7 +45,9 @@ class LocalEmbeddingModule(EmbeddingModule):
         super().__init__()
 
         self._item_embedding_dim: int = item_embedding_dim
-        self._item_emb = torch.nn.Embedding(num_items + 1, item_embedding_dim, padding_idx=0)
+        self._item_emb = torch.nn.Embedding(
+            num_items + 1, item_embedding_dim, padding_idx=0
+        )
         self.reset_params()
 
     def debug_str(self) -> str:
@@ -53,8 +55,10 @@ class LocalEmbeddingModule(EmbeddingModule):
 
     def reset_params(self):
         for name, params in self.named_parameters():
-            if '_item_emb' in name:
-                print(f"Initialize {name} as truncated normal: {params.data.size()} params")
+            if "_item_emb" in name:
+                print(
+                    f"Initialize {name} as truncated normal: {params.data.size()} params"
+                )
                 truncated_normal(params, mean=0.0, std=0.02)
             else:
                 print(f"Skipping initializing params {name} - not configured")
@@ -78,7 +82,9 @@ class CategoricalEmbeddingModule(EmbeddingModule):
         super().__init__()
 
         self._item_embedding_dim: int = item_embedding_dim
-        self._item_emb: torch.nn.Embedding = torch.nn.Embedding(num_items + 1, item_embedding_dim, padding_idx=0)
+        self._item_emb: torch.nn.Embedding = torch.nn.Embedding(
+            num_items + 1, item_embedding_dim, padding_idx=0
+        )
         self.register_buffer("_item_id_to_category_id", item_id_to_category_id)
         self.reset_params()
 
@@ -88,7 +94,9 @@ class CategoricalEmbeddingModule(EmbeddingModule):
     def reset_params(self):
         for name, params in self.named_parameters():
             if "_item_emb" in name:
-                print(f"Initialize {name} as truncated normal: {params.data.size()} params")
+                print(
+                    f"Initialize {name} as truncated normal: {params.data.size()} params"
+                )
                 truncated_normal(params, mean=0.0, std=0.02)
             else:
                 print(f"Skipping initializing params {name} - not configured")
