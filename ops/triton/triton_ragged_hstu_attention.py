@@ -214,6 +214,7 @@ def _ragged_hstu_attn_fwd_one_block(  # noqa: C901
     offs_m,
     offs_n,
     mask_m,
+    mask_n,
     q,
     K_block_ptr,
     V_block_ptr,
@@ -246,10 +247,25 @@ def _ragged_hstu_attn_fwd_one_block(  # noqa: C901
     BLOCK_N: tl.constexpr,
 ):
     start_n = tl.multiple_of(start_n, BLOCK_N)
-    mask_n = offs_n < seq_len - start_n
     # -- compute qk ----
     k = tl.load(K_block_ptr, boundary_check=(1,), padding_option="zero")
     qk = tl.dot(q, k, allow_tf32=ALLOW_TF32) * alpha
+    invalid_mask = offs_m[:, None] == offs_n[None, :]
+    if HAS_MULTIPLE_TARGETS:
+        if INVALID_MASK_TYPE == "lower_triangular":
+            offs_m = tl.where(
+                offs_m < seq_len - n_targets,
+                offs_m,
+                seq_len - n_targets,
+            )
+            offs_n = tl.where(
+                offs_n < seq_len - n_targets,
+                offs_n,
+                seq_len - n_targets,
+            )
+        elif INVALID_MASK_TYPE == "upper_triangular":
+            offs_m = tl.where(offs_m > n_targets - 1, offs_m, n_targets - 1)
+            offs_n = tl.where(offs_n > n_targets - 1, offs_n, n_targets - 1)
     if ATTN_BIAS_TYPE == "fused":
         attn_bias = tl.zeros([BLOCK_M, BLOCK_N], dtype=tl.float32)
         if USE_TIME_BIAS:
@@ -275,31 +291,8 @@ def _ragged_hstu_attn_fwd_one_block(  # noqa: C901
             )
             attn_bias = attn_bias + ts_w
         if USE_POS_BIAS:
-            pos_offs_m = offs_m
-            pos_offs_n = offs_n + start_n
-            if HAS_MULTIPLE_TARGETS:
-                pos_offs_m = offs_m
-                pos_offs_n = offs_n + start_n
-                if INVALID_MASK_TYPE == "lower_triangular":
-                    pos_offs_m = tl.where(
-                        pos_offs_m < seq_len - n_targets,
-                        pos_offs_m,
-                        seq_len - n_targets,
-                    )
-                    pos_offs_n = tl.where(
-                        pos_offs_n < seq_len - n_targets,
-                        pos_offs_n,
-                        seq_len - n_targets,
-                    )
-                elif INVALID_MASK_TYPE == "upper_triangular":
-                    pos_offs_m = tl.where(
-                        pos_offs_m > n_targets - 1, pos_offs_m, n_targets - 1
-                    )
-                    pos_offs_n = tl.where(
-                        pos_offs_n > n_targets - 1, pos_offs_n, n_targets - 1
-                    )
             if HAS_MAX_POS_IND:
-                offs_pos_w = pos_offs_n[None, :] - pos_offs_m[:, None] + max_pos_ind - 1
+                offs_pos_w = offs_n[None, :] - offs_m[:, None] + max_pos_ind - 1
                 offs_pos_w = tl.where(offs_pos_w > 0, offs_pos_w, 0)
                 offs_pos_w = tl.where(
                     offs_pos_w < 2 * max_pos_ind - 2,
@@ -307,7 +300,7 @@ def _ragged_hstu_attn_fwd_one_block(  # noqa: C901
                     2 * max_pos_ind - 2,
                 )
             else:
-                offs_pos_w = pos_offs_n[None, :] - pos_offs_m[:, None] + MAX_SEQ_LEN - 1
+                offs_pos_w = offs_n[None, :] - offs_m[:, None] + MAX_SEQ_LEN - 1
             pos_w = tl.load(
                 PW + offs_pos_w,
                 mask=mask_m[:, None] and mask_n[None, :],
@@ -324,22 +317,9 @@ def _ragged_hstu_attn_fwd_one_block(  # noqa: C901
     silu = fast_dividef(qk, 1.0 + tl.exp(-qk)) * (1.0 / MAX_SEQ_LEN)
     # masking
     if INVALID_MASK_TYPE == "lower_triangular":
-        invalid_mask = offs_m[:, None] >= (start_n + offs_n[None, :])
+        invalid_mask = invalid_mask or (offs_m[:, None] > offs_n[None, :])
     elif INVALID_MASK_TYPE == "upper_triangular":
-        invalid_mask = offs_m[:, None] <= (start_n + offs_n[None, :])
-    else:
-        invalid_mask = tl.full([BLOCK_M, BLOCK_N], 1, dtype=tl.int1)
-    if HAS_MULTIPLE_TARGETS:
-        if INVALID_MASK_TYPE == "lower_triangular":
-            invalid_mask = invalid_mask and (
-                (start_n + offs_n[None, :] < seq_len - n_targets)
-                or (start_n + offs_n[None, :] == offs_m[:, None])
-            )
-        elif INVALID_MASK_TYPE == "upper_triangular":
-            invalid_mask = invalid_mask and (
-                (start_n + offs_n[None, :] >= n_targets)
-                or (start_n + offs_n[None, :] == offs_m[:, None])
-            )
+        invalid_mask = invalid_mask or (offs_m[:, None] < offs_n[None, :])
 
     silu = tl.where(invalid_mask, silu, 0)
     if HAS_ATTN_SCALE:
@@ -512,17 +492,18 @@ def _ragged_hstu_attn_fwd(  # noqa C901
             high = seq_len
             K_block_ptr = tl.advance(K_block_ptr, (0, low))
             V_block_ptr = tl.advance(V_block_ptr, (low, 0))
-        else:
-            low = 0
-            high = seq_len
 
+    # pyre-ignore[61]
     for start_n in range(low, high, BLOCK_N):
+        cur_offs_n = offs_n + start_n
+        mask_n = cur_offs_n < seq_len
         acc += _ragged_hstu_attn_fwd_one_block(
             start_n=start_n,
             seq_len=seq_len,
             offs_m=offs_m,
-            offs_n=offs_n,
+            offs_n=cur_offs_n,
             mask_m=mask_m,
+            mask_n=mask_n,
             q=q,
             K_block_ptr=K_block_ptr,
             V_block_ptr=V_block_ptr,
@@ -574,12 +555,15 @@ def _ragged_hstu_attn_fwd(  # noqa C901
             K_block_ptr = tl.advance(K_block_ptr, (0, offset))
             V_block_ptr = tl.advance(V_block_ptr, (offset, 0))
             for start_delta in range(low_delta, high_delta, BLOCK_N):
+                cur_offs_n = offs_n + start_delta
+                mask_n = cur_offs_n < seq_len
                 acc += _ragged_hstu_attn_fwd_one_block(
                     start_n=start_delta,
                     seq_len=seq_len,
                     offs_m=offs_m,
-                    offs_n=offs_n,
+                    offs_n=cur_offs_n,
                     mask_m=mask_m,
+                    mask_n=mask_n,
                     q=q,
                     K_block_ptr=K_block_ptr,
                     V_block_ptr=V_block_ptr,
