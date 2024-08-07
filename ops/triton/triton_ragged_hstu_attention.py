@@ -30,9 +30,15 @@ try:
     # @manual=//triton:triton
     from triton.language.extra.cuda.libdevice import fast_dividef
 except ImportError:
-    # pyre-ignore: Undefined import [21]
-    # @manual=//triton:triton
-    from triton.language.math import fast_dividef
+    try:
+        # pyre-ignore: Undefined import [21]
+        # @manual=//triton:triton
+        from triton.language.math import fast_dividef
+    except ImportError:
+        # mtia
+        # pyre-ignore: Undefined import [21]
+        # @manual=//triton:triton
+        from triton.language.extra.libdevice import fast_dividef
 
 
 def _get_fw_configs() -> List[triton.Config]:  # noqa: C901
