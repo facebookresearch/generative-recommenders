@@ -19,9 +19,9 @@ import pandas as pd
 
 import torch
 
-from data.dataset import DatasetV2
-from data.item_features import ItemFeatures
-from data.preprocessor import get_common_preprocessors
+from generative_recommenders.data.dataset import DatasetV2
+from generative_recommenders.data.item_features import ItemFeatures
+from generative_recommenders.data.preprocessor import get_common_preprocessors
 
 
 @dataclass
@@ -92,26 +92,28 @@ def get_reco_dataset(
     if dataset_name == "ml-1m" or dataset_name == "ml-20m":
         items = pd.read_csv(dp.processed_item_csv(), delimiter=",")
         max_jagged_dimension = 16
+        expected_max_item_id = dp.expected_max_item_id()
+        assert expected_max_item_id is not None
         item_features: ItemFeatures = ItemFeatures(
             max_ind_range=[63, 16383, 511],
-            num_items=dp.expected_max_item_id() + 1,
+            num_items=expected_max_item_id + 1,
             max_jagged_dimension=max_jagged_dimension,
             lengths=[
-                torch.zeros((dp.expected_max_item_id() + 1,), dtype=torch.int64),
-                torch.zeros((dp.expected_max_item_id() + 1,), dtype=torch.int64),
-                torch.zeros((dp.expected_max_item_id() + 1,), dtype=torch.int64),
+                torch.zeros((expected_max_item_id + 1,), dtype=torch.int64),
+                torch.zeros((expected_max_item_id + 1,), dtype=torch.int64),
+                torch.zeros((expected_max_item_id + 1,), dtype=torch.int64),
             ],
             values=[
                 torch.zeros(
-                    (dp.expected_max_item_id() + 1, max_jagged_dimension),
+                    (expected_max_item_id + 1, max_jagged_dimension),
                     dtype=torch.int64,
                 ),
                 torch.zeros(
-                    (dp.expected_max_item_id() + 1, max_jagged_dimension),
+                    (expected_max_item_id + 1, max_jagged_dimension),
                     dtype=torch.int64,
                 ),
                 torch.zeros(
-                    (dp.expected_max_item_id() + 1, max_jagged_dimension),
+                    (expected_max_item_id + 1, max_jagged_dimension),
                     dtype=torch.int64,
                 ),
             ],
@@ -145,13 +147,13 @@ def get_reco_dataset(
     else:
         # expected_max_item_id and item_features are not set for Amazon datasets.
         item_features = None
-        all_item_ids = [x + 1 for x in range(dp.expected_num_unique_items())]
         max_item_id = dp.expected_num_unique_items()
+        all_item_ids = [x + 1 for x in range(max_item_id)]  # pyre-ignore [6]
 
     return RecoDataset(
         max_sequence_length=max_sequence_length,
-        num_unique_items=dp.expected_num_unique_items(),
-        max_item_id=max_item_id,
+        num_unique_items=dp.expected_num_unique_items(),  # pyre-ignore [6]
+        max_item_id=max_item_id,  # pyre-ignore [6]
         all_item_ids=all_item_ids,
         train_dataset=train_dataset,
         eval_dataset=eval_dataset,

@@ -16,7 +16,7 @@ from typing import Tuple
 
 import torch
 
-from indexing.candidate_index import TopKModule
+from generative_recommenders.indexing.candidate_index import TopKModule
 
 
 class MIPSTopKModule(TopKModule):
@@ -49,7 +49,9 @@ class MIPSBruteForceTopK(MIPSTopKModule):
             item_ids=item_ids,
         )
         del self._item_embeddings
-        self._item_embeddings_t: torch.Tensor = item_embeddings.permute(2, 1, 0).squeeze(2)
+        self._item_embeddings_t: torch.Tensor = item_embeddings.permute(
+            2, 1, 0
+        ).squeeze(2)
 
     def forward(
         self,
@@ -69,6 +71,10 @@ class MIPSBruteForceTopK(MIPSTopKModule):
         # (B, X,)
         all_logits = torch.mm(query_embeddings, self._item_embeddings_t)
         top_k_logits, top_k_indices = torch.topk(
-            all_logits, dim=1, k=k, sorted=sorted, largest=True,
+            all_logits,
+            dim=1,
+            k=k,
+            sorted=sorted,
+            largest=True,
         )  # (B, k,)
         return top_k_logits, self._item_ids.squeeze(0)[top_k_indices]

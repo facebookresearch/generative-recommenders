@@ -12,66 +12,56 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""
-Main entry point for model training. Please refer to README.md for usage instructions.
-"""
-
 import logging
 import os
 import random
 
+import time
+
 from datetime import date
 from typing import Optional
 
-os.environ["TF_CPP_MIN_LOG_LEVEL"] = "1"  # Hide excessive tensorflow debug messages
-import sys
-import time
-
-import fbgemm_gpu  # noqa: F401, E402
 import gin
 
 import torch
 import torch.distributed as dist
-import torch.multiprocessing as mp
 
-from absl import app, flags
-from data.eval import (
+from generative_recommenders.data.eval import (
     _avg,
     add_to_summary_writer,
     eval_metrics_v2_from_tensors,
     get_eval_state,
 )
 
-from data.reco_dataset import get_reco_dataset
-from indexing.utils import get_top_k_module
-from modeling.sequential.autoregressive_losses import (
+from generative_recommenders.data.reco_dataset import get_reco_dataset
+from generative_recommenders.indexing.utils import get_top_k_module
+from generative_recommenders.modeling.sequential.autoregressive_losses import (
     BCELoss,
     InBatchNegativesSampler,
     LocalNegativesSampler,
     SampledSoftmaxLoss,
 )
-from modeling.sequential.embedding_modules import EmbeddingModule, LocalEmbeddingModule
-from modeling.sequential.encoder_utils import get_sequential_encoder
-from modeling.sequential.features import movielens_seq_features_from_row
-from modeling.sequential.input_features_preprocessors import (
+from generative_recommenders.modeling.sequential.embedding_modules import (
+    EmbeddingModule,
+    LocalEmbeddingModule,
+)
+from generative_recommenders.modeling.sequential.encoder_utils import (
+    get_sequential_encoder,
+)
+from generative_recommenders.modeling.sequential.features import (
+    movielens_seq_features_from_row,
+)
+from generative_recommenders.modeling.sequential.input_features_preprocessors import (
     LearnablePositionalEmbeddingInputFeaturesPreprocessor,
 )
-from modeling.sequential.output_postprocessors import (
+from generative_recommenders.modeling.sequential.output_postprocessors import (
     L2NormEmbeddingPostprocessor,
     LayerNormEmbeddingPostprocessor,
 )
-from modeling.similarity_utils import get_similarity_function
+from generative_recommenders.modeling.similarity_utils import get_similarity_function
+from generative_recommenders.trainer.data_loader import create_data_loader
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.tensorboard import SummaryWriter
-from trainer.data_loader import create_data_loader
-
-logging.basicConfig(stream=sys.stdout, level=logging.INFO)
-
-flags.DEFINE_string("gin_config_file", None, "Path to the config file.")
-flags.DEFINE_integer("master_port", 12355, "Master port.")
-
-
-FLAGS = flags.FLAGS
 
 
 def setup(rank: int, world_size: int, master_port: int) -> None:
@@ -82,7 +72,7 @@ def setup(rank: int, world_size: int, master_port: int) -> None:
     dist.init_process_group("nccl", rank=rank, world_size=world_size)
 
 
-def cleanup():
+def cleanup() -> None:
     dist.destroy_process_group()
 
 
@@ -292,6 +282,7 @@ def train_fn(
     torch.autograd.set_detect_anomaly(True)
 
     batch_id = 0
+    epoch = 0
     for epoch in range(num_epochs):
         if train_data_sampler is not None:
             train_data_sampler.set_epoch(epoch)
@@ -389,6 +380,7 @@ def train_fn(
                 negatives_sampler=negatives_sampler,
             )  # [B, N]
             if rank == 0:
+                assert writer is not None
                 writer.add_scalar("losses/ar_loss", loss, batch_id)
 
             loss.backward()
@@ -409,6 +401,7 @@ def train_fn(
                 )
                 last_training_time = time.time()
                 if rank == 0:
+                    assert writer is not None
                     writer.add_scalar("loss/train", loss, batch_id)
                     writer.add_scalar("lr", lr, batch_id)
 
@@ -465,6 +458,7 @@ def train_fn(
                 )
                 break
 
+        assert eval_dict_all is not None
         for k, v in eval_dict_all.items():
             eval_dict_all[k] = torch.cat(v, dim=-1)
 
@@ -520,33 +514,3 @@ def train_fn(
         )
 
     cleanup()
-
-
-def mp_train_fn(
-    rank: int,
-    world_size: int,
-    master_port: int,
-    gin_config_file: Optional[str],
-) -> None:
-    if gin_config_file is not None:
-        # Hack as absl doesn't support flag parsing inside multiprocessing.
-        logging.info(f"Rank {rank}: loading gin config from {gin_config_file}")
-        gin.parse_config_file(gin_config_file)
-
-    train_fn(rank, world_size, master_port)
-
-
-def main(argv):
-    world_size = torch.cuda.device_count()
-
-    mp.set_start_method("forkserver")
-    mp.spawn(
-        mp_train_fn,
-        args=(world_size, FLAGS.master_port, FLAGS.gin_config_file),
-        nprocs=world_size,
-        join=True,
-    )
-
-
-if __name__ == "__main__":
-    app.run(main)

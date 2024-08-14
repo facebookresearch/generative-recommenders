@@ -17,7 +17,7 @@ import logging
 import os
 import sys
 import tarfile
-from typing import Optional
+from typing import Dict, Optional, Union
 
 from urllib.request import urlretrieve
 from zipfile import ZipFile
@@ -415,8 +415,10 @@ class AmazonDataProcessor(DataProcessor):
         return num_unique_items
 
 
-def get_common_preprocessors():
-    ml_1m_dp = MovielensDataProcessor(
+def get_common_preprocessors() -> (
+    Dict[str, Union[AmazonDataProcessor, MovielensDataProcessor]]
+):
+    ml_1m_dp = MovielensDataProcessor(  # pyre-ignore [45]
         "http://files.grouplens.org/datasets/movielens/ml-1m.zip",
         "tmp/movielens1m.zip",
         prefix="ml-1m",
@@ -424,7 +426,7 @@ def get_common_preprocessors():
         expected_num_unique_items=3706,
         expected_max_item_id=3952,
     )
-    ml_20m_dp = MovielensDataProcessor(
+    ml_20m_dp = MovielensDataProcessor(  # pyre-ignore [45]
         "http://files.grouplens.org/datasets/movielens/ml-20m.zip",
         "tmp/movielens20m.zip",
         prefix="ml-20m",
@@ -432,13 +434,13 @@ def get_common_preprocessors():
         expected_num_unique_items=26744,
         expected_max_item_id=131262,
     )
-    ml_1b_dp = MovielensDataProcessor(
+    ml_1b_dp = MovielensDataProcessor(  # pyre-ignore [45]
         "https://files.grouplens.org/datasets/movielens/ml-20mx16x32.tar",
         "tmp/movielens1b.tar",
         prefix="ml-20mx16x32",
         convert_timestamp=False,
     )
-    amzn_books_dp = AmazonDataProcessor(
+    amzn_books_dp = AmazonDataProcessor(  # pyre-ignore [45]
         "http://snap.stanford.edu/data/amazon/productGraph/categoryFiles/ratings_Books.csv",
         "tmp/ratings_Books.csv",
         prefix="amzn_books",

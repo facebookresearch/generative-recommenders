@@ -17,7 +17,7 @@ from typing import Optional, Tuple
 
 import torch
 
-from modeling.sequential.utils import batch_gather_embeddings
+from generative_recommenders.modeling.sequential.utils import batch_gather_embeddings
 
 
 class TopKModule(torch.nn.Module):
@@ -224,7 +224,7 @@ class CandidateIndex(object):
                 else self.embeddings
             )
             top_k_embeddings = batch_gather_embeddings(
-                rowwise_indices=top_k_indices, embeddings=expanded_embeddings
+                rowwise_indices=top_k_indices, embeddings=expanded_embeddings  # pyre-ignore[10]
             )
         else:
             top_k_embeddings = None

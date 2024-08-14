@@ -24,15 +24,21 @@ from typing import Callable, Dict, List, Optional, Tuple, Union
 
 import torch
 import torch.nn.functional as F
-from modeling.ndp_module import NDPModule
+from generative_recommenders.modeling.ndp_module import NDPModule
 
-from modeling.sequential.embedding_modules import EmbeddingModule
-from modeling.sequential.input_features_preprocessors import (
+from generative_recommenders.modeling.sequential.embedding_modules import (
+    EmbeddingModule,
+)
+from generative_recommenders.modeling.sequential.input_features_preprocessors import (
     InputFeaturesPreprocessorModule,
 )
-from modeling.sequential.output_postprocessors import OutputPostprocessorModule
-from modeling.sequential.utils import get_current_embeddings
-from modeling.similarity_module import GeneralizedInteractionModule
+from generative_recommenders.modeling.sequential.output_postprocessors import (
+    OutputPostprocessorModule,
+)
+from generative_recommenders.modeling.sequential.utils import get_current_embeddings
+from generative_recommenders.modeling.similarity_module import (
+    GeneralizedInteractionModule,
+)
 
 
 TIMESTAMPS_KEY = "timestamps"
@@ -153,7 +159,7 @@ def _hstu_attention_maybe_from_cache(
     all_timestamps: Optional[torch.Tensor],
     invalid_attn_mask: torch.Tensor,
     rel_attn_bias: RelativeAttentionBiasModule,
-):
+) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     B: int = x_offsets.size(0) - 1
     n: int = invalid_attn_mask.size(-1)
     if delta_x_offsets is not None:
@@ -165,6 +171,8 @@ def _hstu_attention_maybe_from_cache(
             device=delta_x_offsets[1].device,
             dtype=delta_x_offsets[1].dtype,
         )
+        assert isinstance(padded_q, torch.Tensor)
+        assert isinstance(padded_k, torch.Tensor)
         padded_q = (
             padded_q.view(B * n, -1)
             .index_copy_(
@@ -243,7 +251,7 @@ class SequentialTransductionUnitJagged(torch.nn.Module):
         self._normalization: str = normalization
         self._linear_config: str = linear_config
         if self._linear_config == "uvqk":
-            self._uvqk = torch.nn.Parameter(
+            self._uvqk: torch.nn.Parameter = torch.nn.Parameter(
                 torch.empty(
                     (
                         embedding_dim,
@@ -271,7 +279,7 @@ class SequentialTransductionUnitJagged(torch.nn.Module):
             x, normalized_shape=[self._linear_dim * self._num_heads], eps=self._eps
         )
 
-    def forward(
+    def forward(  # pyre-ignore [3]
         self,
         x: torch.Tensor,
         x_offsets: torch.Tensor,
@@ -280,7 +288,7 @@ class SequentialTransductionUnitJagged(torch.nn.Module):
         delta_x_offsets: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
         cache: Optional[HSTUCacheState] = None,
         return_cache_states: bool = False,
-    ) -> torch.Tensor:
+    ):
         """
         Args:
             x: (\sum_i N_i, D) x float.
@@ -331,6 +339,7 @@ class SequentialTransductionUnitJagged(torch.nn.Module):
 
         B: int = x_offsets.size(0) - 1
         if self._normalization == "rel_bias" or self._normalization == "hstu_rel_bias":
+            assert self._rel_attn_bias is not None
             attn_output, padded_q, padded_k = _hstu_attention_maybe_from_cache(
                 num_heads=self._num_heads,
                 attention_dim=self._attention_dim,
@@ -348,7 +357,7 @@ class SequentialTransductionUnitJagged(torch.nn.Module):
             )
         elif self._normalization == "softmax_rel_bias":
             if delta_x_offsets is not None:
-                B = x_offsets.size() - 1
+                B = x_offsets.size(0) - 1
                 padded_q, padded_k = cached_q, cached_k
                 flattened_offsets = delta_x_offsets[1] + torch.arange(
                     start=0,
@@ -357,6 +366,8 @@ class SequentialTransductionUnitJagged(torch.nn.Module):
                     device=delta_x_offsets[1].device,
                     dtype=delta_x_offsets[1].dtype,
                 )
+                assert padded_q is not None
+                assert padded_k is not None
                 padded_q = (
                     padded_q.view(B * n, -1)
                     .index_copy_(
@@ -436,14 +447,14 @@ class HSTUJagged(torch.nn.Module):
     def __init__(
         self,
         modules: List[SequentialTransductionUnitJagged],
-        autocast_dtype: torch.dtype,
+        autocast_dtype: Optional[torch.dtype],
     ) -> None:
         super().__init__()
 
         self._attention_layers: torch.nn.ModuleList = torch.nn.ModuleList(
             modules=modules
         )
-        self._autocast_dtype: torch.dtype = autocast_dtype
+        self._autocast_dtype: Optional[torch.dtype] = autocast_dtype
 
     def jagged_forward(
         self,
@@ -627,7 +638,7 @@ class HSTU(GeneralizedInteractionModule):
         self._verbose: bool = verbose
         self.reset_params()
 
-    def reset_params(self):
+    def reset_params(self) -> None:
         for name, params in self.named_parameters():
             if ("_hstu" in name) or ("_embedding_module" in name):
                 if self._verbose:
@@ -643,8 +654,8 @@ class HSTU(GeneralizedInteractionModule):
                 if self._verbose:
                     print(f"Failed to initialize {name}: {params.data.size()} params")
 
-    def get_item_embeddings(self, ids: torch.Tensor) -> torch.Tensor:
-        return self._embedding_module.get_item_embeddings(ids)
+    def get_item_embeddings(self, item_ids: torch.Tensor) -> torch.Tensor:
+        return self._embedding_module.get_item_embeddings(item_ids)
 
     def debug_str(self) -> str:
         debug_str = (

@@ -15,14 +15,14 @@
 import logging
 import sys
 from dataclasses import dataclass
-from typing import Callable, Dict, List, Optional, Set
+from typing import Callable, Dict, List, Optional, Set, Union
 
 import torch
 import torch.distributed as dist
 
-from indexing.candidate_index import CandidateIndex, TopKModule
-from modeling.ndp_module import NDPModule
-from modeling.sequential.features import SequentialFeatures
+from generative_recommenders.indexing.candidate_index import CandidateIndex, TopKModule
+from generative_recommenders.modeling.ndp_module import NDPModule
+from generative_recommenders.modeling.sequential.features import SequentialFeatures
 from torch.utils.tensorboard import SummaryWriter
 
 
@@ -39,9 +39,9 @@ class EvalState:
 def get_eval_state(
     model: NDPModule,
     all_item_ids: List[int],  # [X]
-    negatives_sampler,
+    negatives_sampler: torch.nn.Module,
     top_k_module_fn: Callable[[torch.Tensor, torch.Tensor], TopKModule],
-    device: torch.device,
+    device: int,
     float_dtype: Optional[torch.dtype] = None,
 ) -> EvalState:
     # Exhaustively eval all items (incl. seen ids).
@@ -62,7 +62,7 @@ def get_eval_state(
     )
 
 
-@torch.inference_mode
+@torch.inference_mode  # pyre-ignore [56]
 def eval_metrics_v2_from_tensors(
     eval_state: EvalState,
     model: NDPModule,
@@ -74,7 +74,7 @@ def eval_metrics_v2_from_tensors(
     filter_invalid_ids: bool = True,
     user_max_batch_size: Optional[int] = None,
     dtype: Optional[torch.dtype] = None,
-) -> Dict[str, List[float]]:
+) -> Dict[str, Union[float, torch.Tensor]]:
     """
     Args:
         eval_negatives_ids: Optional[Tensor]. If not present, defaults to eval over
@@ -154,27 +154,27 @@ def eval_metrics_v2_from_tensors(
     output = {
         "ndcg@1": torch.where(
             eval_ranks <= 1,
-            1.0 / torch.log2(eval_ranks + 1),
+            torch.div(1.0, torch.log2(eval_ranks + 1)),
             torch.zeros(1, dtype=torch.float32, device=device),
         ),
         "ndcg@10": torch.where(
             eval_ranks <= 10,
-            1.0 / torch.log2(eval_ranks + 1),
+            torch.div(1.0, torch.log2(eval_ranks + 1)),
             torch.zeros(1, dtype=torch.float32, device=device),
         ),
         "ndcg@50": torch.where(
             eval_ranks <= 50,
-            1.0 / torch.log2(eval_ranks + 1),
+            torch.div(1.0, torch.log2(eval_ranks + 1)),
             torch.zeros(1, dtype=torch.float32, device=device),
         ),
         "ndcg@100": torch.where(
             eval_ranks <= 100,
-            1.0 / torch.log2(eval_ranks + 1),
+            torch.div(1.0, torch.log2(eval_ranks + 1)),
             torch.zeros(1, dtype=torch.float32, device=device),
         ),
         "ndcg@200": torch.where(
             eval_ranks <= 200,
-            1.0 / torch.log2(eval_ranks + 1),
+            torch.div(1.0, torch.log2(eval_ranks + 1)),
             torch.zeros(1, dtype=torch.float32, device=device),
         ),
         "hr@1": (eval_ranks <= 1),
@@ -184,13 +184,13 @@ def eval_metrics_v2_from_tensors(
         "hr@200": (eval_ranks <= 200),
         "hr@500": (eval_ranks <= 500),
         "hr@1000": (eval_ranks <= 1000),
-        "mrr": (1.0 / eval_ranks),
+        "mrr": torch.div(1.0, eval_ranks),
     }
     if target_ratings is not None:
         target_ratings = target_ratings.squeeze(1)  # [B]
         output["ndcg@10_>=4"] = torch.where(
             eval_ranks[target_ratings >= 4] <= 10,
-            1.0 / torch.log2(eval_ranks[target_ratings >= 4] + 1),
+            torch.div(1.0, torch.log2(eval_ranks[target_ratings >= 4] + 1)),
             torch.zeros(1, dtype=torch.float32, device=device),
         )
         output[f"hr@10_>={min_positive_rating}"] = (
@@ -199,11 +199,11 @@ def eval_metrics_v2_from_tensors(
         output[f"hr@50_>={min_positive_rating}"] = (
             eval_ranks[target_ratings >= min_positive_rating] <= 50
         )
-        output[f"mrr_>={min_positive_rating}"] = (
-            1.0 / eval_ranks[target_ratings >= min_positive_rating]
+        output[f"mrr_>={min_positive_rating}"] = torch.div(
+            1.0, eval_ranks[target_ratings >= min_positive_rating]
         )
 
-    return output
+    return output  # pyre-ignore [7]
 
 
 def eval_recall_metrics_from_tensors(
@@ -231,7 +231,7 @@ def eval_recall_metrics_from_tensors(
     )
 
 
-def _avg(x: torch.Tensor, world_size: int) -> float:
+def _avg(x: torch.Tensor, world_size: int) -> torch.Tensor:
     _sum_and_numel = torch.tensor(
         [x.sum(), x.numel()], dtype=torch.float32, device=x.device
     )
@@ -241,7 +241,7 @@ def _avg(x: torch.Tensor, world_size: int) -> float:
 
 
 def add_to_summary_writer(
-    writer: SummaryWriter,
+    writer: Optional[SummaryWriter],
     batch_id: int,
     metrics: Dict[str, torch.Tensor],
     prefix: str,

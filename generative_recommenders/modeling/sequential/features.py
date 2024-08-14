@@ -30,8 +30,8 @@ class SequentialFeatures(NamedTuple):
 
 
 def movielens_seq_features_from_row(
-    row,
-    device: torch.device,
+    row: Dict[str, torch.Tensor],
+    device: int,
     max_output_length: int,
 ) -> Tuple[SequentialFeatures, torch.Tensor, torch.Tensor]:
     historical_lengths = row["history_lengths"].to(device)  # [B]

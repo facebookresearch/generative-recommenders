@@ -14,11 +14,11 @@
 
 import abc
 import math
-from typing import Dict
+from typing import Dict, Tuple
 
 import torch
 
-from modeling.initialization import truncated_normal
+from generative_recommenders.modeling.initialization import truncated_normal
 
 
 class InputFeaturesPreprocessorModule(torch.nn.Module):
@@ -34,7 +34,7 @@ class InputFeaturesPreprocessorModule(torch.nn.Module):
         past_ids: torch.Tensor,
         past_embeddings: torch.Tensor,
         past_payloads: Dict[str, torch.Tensor],
-    ) -> torch.Tensor:
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         pass
 
 
@@ -62,7 +62,7 @@ class LearnablePositionalEmbeddingInputFeaturesPreprocessor(
     def debug_str(self) -> str:
         return f"posi_d{self._dropout_rate}"
 
-    def reset_state(self):
+    def reset_state(self) -> None:
         truncated_normal(
             self._pos_emb.weight.data,
             mean=0.0,
@@ -75,7 +75,7 @@ class LearnablePositionalEmbeddingInputFeaturesPreprocessor(
         past_ids: torch.Tensor,
         past_embeddings: torch.Tensor,
         past_payloads: Dict[str, torch.Tensor],
-    ) -> torch.Tensor:
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         B, N = past_ids.size()
         D = past_embeddings.size(-1)
 
@@ -119,7 +119,7 @@ class LearnablePositionalEmbeddingRatedInputFeaturesPreprocessor(
     def debug_str(self) -> str:
         return f"posir_d{self._dropout_rate}"
 
-    def reset_state(self):
+    def reset_state(self) -> None:
         truncated_normal(
             self._pos_emb.weight.data,
             mean=0.0,
@@ -137,9 +137,8 @@ class LearnablePositionalEmbeddingRatedInputFeaturesPreprocessor(
         past_ids: torch.Tensor,
         past_embeddings: torch.Tensor,
         past_payloads: Dict[str, torch.Tensor],
-    ) -> torch.Tensor:
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         B, N = past_ids.size()
-        D = past_embeddings.size(-1)
 
         user_embeddings = torch.cat(
             [past_embeddings, self._rating_emb(past_payloads["ratings"].int())],
@@ -234,7 +233,7 @@ class CombinedItemAndRatingInputFeaturesPreprocessor(InputFeaturesPreprocessorMo
         past_ids: torch.Tensor,
         past_embeddings: torch.Tensor,
         past_payloads: Dict[str, torch.Tensor],
-    ) -> torch.Tensor:
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         B, N = past_ids.size()
         D = past_embeddings.size(-1)
 
