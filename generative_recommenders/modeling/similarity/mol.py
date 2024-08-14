@@ -16,14 +16,14 @@
 Implements MoL (Mixture-of-Logits) in 
 Revisiting Neural Retrieval on Accelerators (https://arxiv.org/abs/2306.04039, KDD'23).
 """
-from typing import Callable, Dict, List, Optional, Tuple
-
-import math
+from typing import Callable, Dict, Optional, Tuple
 
 import torch
 import torch.nn.functional as F
 
-from modeling.initialization import init_mlp_xavier_weights_zero_bias
+from generative_recommenders.modeling.initialization import (
+    init_mlp_xavier_weights_zero_bias,
+)
 
 
 class SoftmaxDropout(torch.nn.Module):
@@ -39,7 +39,9 @@ class SoftmaxDropout(torch.nn.Module):
         self._dropout: torch.nn.Module = torch.nn.Dropout(p=dropout_rate)
         self._eps = eps
 
-    def forward(self, x: torch.Tensor, tau: Optional[torch.Tensor] = None) -> torch.Tensor:
+    def forward(
+        self, x: torch.Tensor, tau: Optional[torch.Tensor] = None
+    ) -> torch.Tensor:
         if tau is not None:
             x = x / tau
         x = self._dropout(self._softmax(x))
@@ -56,7 +58,9 @@ class SoftmaxDropoutCombiner(torch.nn.Module):
     ) -> None:
         super().__init__()
 
-        self._softmax_dropout: torch.nn.Module = SoftmaxDropout(dropout_rate=dropout_rate, eps=eps)
+        self._softmax_dropout: torch.nn.Module = SoftmaxDropout(
+            dropout_rate=dropout_rate, eps=eps
+        )
         self._keep_debug_info: bool = keep_debug_info
 
     def forward(
@@ -88,16 +92,16 @@ class IdentityMLPProjectionFn(torch.nn.Module):
         self._output_num_features = output_num_features
         self._output_dim = output_dim
         if output_num_features > 1:
-            self._proj_mlp = torch.nn.Sequential(
+            self._proj_mlp: torch.nn.modules.container.Sequential = torch.nn.Sequential(
                 torch.nn.Dropout(p=input_dropout_rate),
                 torch.nn.Linear(
                     in_features=input_dim,
                     out_features=(output_num_features - 1) * output_dim,
-                )
+                ),
             ).apply(init_mlp_xavier_weights_zero_bias)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        output_emb_0 = x[..., :self._output_dim]  # [.., D] -> [.., 1, D']
+        output_emb_0 = x[..., : self._output_dim]  # [.., D] -> [.., 1, D']
         if self._output_num_features > 1:
             return torch.cat([output_emb_0, self._proj_mlp(x)], dim=-1)
         return output_emb_0
@@ -108,7 +112,7 @@ class TauFn(torch.nn.Module):
     def __init__(
         self,
         alpha: float,
-        item_sideinfo_dim: float,
+        item_sideinfo_dim: int,
     ) -> None:
         super().__init__()
 
@@ -140,7 +144,12 @@ class GeGLU(torch.nn.Module):
             torch.empty((in_features, out_features * 2)).normal_(mean=0, std=0.02),
         )
         self._b = torch.nn.Parameter(
-            torch.zeros((1, out_features * 2,)),
+            torch.zeros(
+                (
+                    1,
+                    out_features * 2,
+                )
+            ),
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -171,7 +180,12 @@ class SwiGLU(torch.nn.Module):
             torch.empty((in_features, out_features * 2)).normal_(mean=0, std=0.02),
         )
         self._b = torch.nn.Parameter(
-            torch.zeros((1, out_features * 2,)),
+            torch.zeros(
+                (
+                    1,
+                    out_features * 2,
+                )
+            ),
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -205,20 +219,28 @@ class MoLGatingFn(torch.nn.Module):
 
         self._context_only_partial_module: Optional[torch.nn.Module] = (
             context_only_partial_fn(context_embedding_dim, num_logits)
-            if context_only_partial_fn else None
+            if context_only_partial_fn
+            else None
         )
         self._item_only_partial_module: Optional[torch.nn.Module] = (
             item_only_partial_fn(item_embedding_dim + item_sideinfo_dim, num_logits)
-            if item_only_partial_fn else None
+            if item_only_partial_fn
+            else None
         )
         self._ci_partial_module: Optional[torch.nn.Module] = (
             ci_partial_fn(
-                num_logits +
-                (item_sideinfo_dim if combine_item_sideinfo_into_ci else 0),
+                num_logits
+                + (item_sideinfo_dim if combine_item_sideinfo_into_ci else 0),
                 num_logits,
-            ) if ci_partial_fn is not None else None
+            )
+            if ci_partial_fn is not None
+            else None
         )
-        if self._context_only_partial_module is None and self._item_only_partial_module is None and self._ci_partial_module is None:
+        if (
+            self._context_only_partial_module is None
+            and self._item_only_partial_module is None
+            and self._ci_partial_module is None
+        ):
             raise ValueError(
                 "At least one of context_only_partial_fn, item_only_partial_fn, "
                 "and ci_partial_fn must not be None."
@@ -228,9 +250,11 @@ class MoLGatingFn(torch.nn.Module):
         self._combine_item_sideinfo_into_ci: bool = combine_item_sideinfo_into_ci
         self._normalization_fn: torch.nn.Module = normalization_fn(num_logits)
         if gating_use_custom_tau:
-            self._tau_fn = TauFn(item_sideinfo_dim=item_sideinfo_dim, alpha=gating_tau_alpha)
+            self._tau_fn: Optional[TauFn] = TauFn(
+                item_sideinfo_dim=item_sideinfo_dim, alpha=gating_tau_alpha
+            )
         else:
-            self._tau_fn = None
+            self._tau_fn: Optional[TauFn] = None
 
     def forward(
         self,
@@ -253,34 +277,42 @@ class MoLGatingFn(torch.nn.Module):
         """
         B, X, _ = logits.size()
         # [B, 1, F], [1/B, X, F], [B, X, F]
-        context_partial_inputs, item_partial_inputs, ci_partial_inputs = None, None, None
+        context_partial_inputs, item_partial_inputs, ci_partial_inputs = (
+            None,
+            None,
+            None,
+        )
         if self._context_only_partial_module is not None:
-            context_partial_inputs = (
-                self._context_only_partial_module(context_embeddings).unsqueeze(1)
-            )
+            context_partial_inputs = self._context_only_partial_module(
+                context_embeddings
+            ).unsqueeze(1)
         if self._item_only_partial_module is not None:
             if item_sideinfo is not None:
                 item_embeddings = torch.cat([item_embeddings, item_sideinfo], dim=-1)
-            item_partial_inputs = self._item_only_partial_module(item_embeddings)
+            item_partial_inputs = self._item_only_partial_module(item_embeddings)  # pyre-ignore [29]
         if self._ci_partial_module is not None:
             if self._combine_item_sideinfo_into_ci:
+                assert item_sideinfo is not None
                 B_prime = item_sideinfo.size(0)
                 if B_prime == 1:
                     item_sideinfo = item_sideinfo.expand(B, -1, -1)
-                ci_partial_inputs = self._ci_partial_module(
+                ci_partial_inputs = self._ci_partial_module(  # pyre-ignore [29]
                     torch.cat([logits, item_sideinfo], dim=2)
                 )
             else:
                 ci_partial_inputs = self._ci_partial_module(logits)
 
         if self._combination_type == "glu_silu":
-            gating_inputs = context_partial_inputs * item_partial_inputs + ci_partial_inputs
+            gating_inputs = (
+                context_partial_inputs * item_partial_inputs + ci_partial_inputs
+            )
             gating_weights = gating_inputs * F.sigmoid(gating_inputs)
         elif self._combination_type == "glu_silu_ln":
-            gating_inputs = context_partial_inputs * item_partial_inputs + ci_partial_inputs
-            gating_weights = (
-                gating_inputs
-                * F.sigmoid(F.layer_norm(gating_inputs, normalized_shapes=[self._num_logits]))
+            gating_inputs = (
+                context_partial_inputs * item_partial_inputs + ci_partial_inputs
+            )
+            gating_weights = gating_inputs * F.sigmoid(
+                F.layer_norm(gating_inputs, normalized_shape=[self._num_logits])
             )
         elif self._combination_type == "silu":
             if context_partial_inputs is not None:
@@ -316,14 +348,15 @@ class MoLGatingFn(torch.nn.Module):
         tau = None
         if self._tau_fn is not None:
             tau = self._tau_fn(item_sideinfo)
-        return self._normalization_fn(gating_weights, logits, tau)  #, {}
+        return self._normalization_fn(gating_weights, logits, tau)  # , {}
 
 
 class MoLSimilarity(torch.nn.Module):
     """
-    Implements MoL (Mixture-of-Logits) learned similarity in 
+    Implements MoL (Mixture-of-Logits) learned similarity in
     Revisiting Neural Retrieval on Accelerators (https://arxiv.org/abs/2306.04039, KDD'23).
     """
+
     def __init__(
         self,
         input_embedding_dim: int,
@@ -351,13 +384,14 @@ class MoLSimilarity(torch.nn.Module):
         super().__init__()
 
         self._gating_fn: MoLGatingFn = MoLGatingFn(
-            num_logits=input_dot_product_groups * item_dot_product_groups + num_precomputed_logits,
+            num_logits=input_dot_product_groups * item_dot_product_groups
+            + num_precomputed_logits,
             context_embedding_dim=input_embedding_dim,
             item_embedding_dim=item_embedding_dim,
             item_sideinfo_dim=item_sideinfo_dim,
             context_only_partial_fn=gating_context_only_partial_fn,
             item_only_partial_fn=gating_item_only_partial_fn,
-            ci_partial_fn=gating_ci_partial_fn,
+            ci_partial_fn=gating_ci_partial_fn,  # pyre-ignore [6]
             combine_item_sideinfo_into_ci=gating_combine_item_sideinfo_into_ci,
             combination_type=gating_combination_type,
             normalization_fn=gating_normalization_fn,
@@ -365,7 +399,8 @@ class MoLSimilarity(torch.nn.Module):
             gating_tau_alpha=gating_tau_alpha,
         )
         self._context_proj_module: torch.nn.Module = context_proj_fn(
-            input_embedding_dim, dot_product_dimension * input_dot_product_groups,
+            input_embedding_dim,
+            dot_product_dimension * input_dot_product_groups,
         )
         self._item_proj_module: torch.nn.Module = item_proj_fn(
             item_embedding_dim,  # + item_sideinfo_dim,
@@ -383,18 +418,15 @@ class MoLSimilarity(torch.nn.Module):
     def _frequency_estimator_old(self, ids: torch.Tensor) -> torch.Tensor:
         ids_shape = ids.size()
         ids = ids.reshape(-1)
-        temp = (
-            (1 - self._lnx_estimator_alpha) * self._B[ids] +
-            self._lnx_estimator_alpha * (
-                self._lnx_num_batches + 1 - self._A[ids]
-            )
-        )
-        temp = torch.clamp(temp, max=self._lnx_estimator_b_cap)
+        temp = (1 - self._lnx_estimator_alpha) * self._B[
+            ids
+        ] + self._lnx_estimator_alpha * (self._lnx_num_batches + 1 - self._A[ids])
+        temp = torch.clamp(temp, max=self._lnx_estimator_b_cap)  # pyre-ignore [6]
         if self.train:
             self._lnx_num_batches = self._lnx_num_batches + 1
             self._B[ids] = temp
             self._A[ids] = self._lnx_num_batches
-        return 1.0 / temp.reshape(ids_shape)
+        return torch.div(1.0, temp.reshape(ids_shape))
 
     def _frequency_estimator(self, ids: torch.Tensor, update: bool) -> torch.Tensor:
         ids_shape = ids.size()
@@ -420,14 +452,18 @@ class MoLSimilarity(torch.nn.Module):
             index=sorted_unique_inverses,
         )
 
-        temp = (1 - self._lnx_estimator_alpha) * self._B[ids] + self._lnx_estimator_alpha * delta_batches
-        temp = torch.clamp(temp, max=self._lnx_estimator_b_cap)
+        temp = (1 - self._lnx_estimator_alpha) * self._B[
+            ids
+        ] + self._lnx_estimator_alpha * delta_batches
+        temp = torch.clamp(temp, max=self._lnx_estimator_b_cap)  # pyre-ignore [6]
 
         if update:
             self._B[ids] = temp
             self._A[sorted_unique_ids] = most_recent_batches
-            self._lnx_estimator_num_elements = self._lnx_estimator_num_elements + ids.numel()
-        return 1.0 / temp.reshape(ids_shape)
+            self._lnx_estimator_num_elements = (
+                self._lnx_estimator_num_elements + ids.numel()
+            )
+        return torch.div(1.0, temp.reshape(ids_shape))
 
     def get_query_component_embeddings(
         self,
@@ -436,19 +472,29 @@ class MoLSimilarity(torch.nn.Module):
         """
         Args:
             input_embeddings: (B, self._input_embedding_dim,) x float.
-        
+
         Returns:
             (B, query_dot_product_groups, dot_product_embedding_dim) x float.
         """
-        with torch.autocast(enabled=self._bf16_training, dtype=torch.bfloat16, device_type='cuda'):
+        with torch.autocast(
+            enabled=self._bf16_training, dtype=torch.bfloat16, device_type="cuda"
+        ):
             split_user_embeddings = self._context_proj_module(input_embeddings).reshape(
-                (input_embeddings.size(0), self._input_dot_product_groups, self._dot_product_dimension)
+                (
+                    input_embeddings.size(0),
+                    self._input_dot_product_groups,
+                    self._dot_product_dimension,
+                )
             )
             if self._dot_product_l2_norm:
                 split_user_embeddings = split_user_embeddings / torch.clamp(
                     torch.linalg.norm(
-                        split_user_embeddings, ord=None, dim=-1, keepdim=True,
-                    ), min=self._eps,
+                        split_user_embeddings,
+                        ord=None,
+                        dim=-1,
+                        keepdim=True,
+                    ),
+                    min=self._eps,
                 )
             return split_user_embeddings
 
@@ -459,19 +505,29 @@ class MoLSimilarity(torch.nn.Module):
         """
         Args:
             input_embeddings: (B, self._input_embedding_dim,) x float.
-        
+
         Returns:
             (B, item_dot_product_groups, dot_product_embedding_dim) x float.
         """
-        with torch.autocast(enabled=self._bf16_training, dtype=torch.bfloat16, device_type='cuda'):
+        with torch.autocast(
+            enabled=self._bf16_training, dtype=torch.bfloat16, device_type="cuda"
+        ):
             split_item_embeddings = self._item_proj_module(input_embeddings).reshape(
-                input_embeddings.size()[:-1] + (self._item_dot_product_groups, self._dot_product_dimension,)
+                input_embeddings.size()[:-1]
+                + (
+                    self._item_dot_product_groups,
+                    self._dot_product_dimension,
+                )
             )
             if self._dot_product_l2_norm:
                 split_item_embeddings = split_item_embeddings / torch.clamp(
                     torch.linalg.norm(
-                        split_item_embeddings, ord=None, dim=-1, keepdim=True,
-                    ), min=self._eps,
+                        split_item_embeddings,
+                        ord=None,
+                        dim=-1,
+                        keepdim=True,
+                    ),
+                    min=self._eps,
                 )
             return split_item_embeddings
 
@@ -492,13 +548,15 @@ class MoLSimilarity(torch.nn.Module):
             item_ids: (1/B, X,)
             precomputed_logits: (B, X, self._num_precomputed_logits,)
         """
-        with torch.autocast(enabled=self._bf16_training, dtype=torch.bfloat16, device_type='cuda'):
+        with torch.autocast(
+            enabled=self._bf16_training, dtype=torch.bfloat16, device_type="cuda"
+        ):
             B = input_embeddings.size(0)
             B_prime, X, D = item_embeddings.shape
 
-            #if self._item_sideinfo_dim > 0:
+            # if self._item_sideinfo_dim > 0:
             #    item_proj_input = torch.cat([item_embeddings, item_sideinfo], dim=-1)
-            #else:
+            # else:
             item_proj_input = item_embeddings
 
             split_user_embeddings = self._context_proj_module(input_embeddings).reshape(
@@ -510,31 +568,45 @@ class MoLSimilarity(torch.nn.Module):
             if self._dot_product_l2_norm:
                 split_user_embeddings = split_user_embeddings / torch.clamp(
                     torch.linalg.norm(
-                        split_user_embeddings, ord=None, dim=-1, keepdim=True,
-                    ), min=self._eps,
+                        split_user_embeddings,
+                        ord=None,
+                        dim=-1,
+                        keepdim=True,
+                    ),
+                    min=self._eps,
                 )
                 split_item_embeddings = split_item_embeddings / torch.clamp(
                     torch.linalg.norm(
-                        split_item_embeddings, ord=None, dim=-1, keepdim=True,
-                    ), min=self._eps,
+                        split_item_embeddings,
+                        ord=None,
+                        dim=-1,
+                        keepdim=True,
+                    ),
+                    min=self._eps,
                 )
             if B_prime == 1:
-                #logits = torch.mm(split_user_embeddings, split_item_embeddings.t()).reshape(
+                # logits = torch.mm(split_user_embeddings, split_item_embeddings.t()).reshape(
                 #    B, self._input_dot_product_groups, X, self._item_dot_product_groups
-                #).permute(0, 2, 1, 3)  # (bn, xm) -> (b, n, x, m) -> (b, x, n, m)
+                # ).permute(0, 2, 1, 3)  # (bn, xm) -> (b, n, x, m) -> (b, x, n, m)
                 logits = torch.einsum(
-                    "bnd,xmd->bxnm", split_user_embeddings, split_item_embeddings.squeeze(0)
-                ).reshape(B, X, self._input_dot_product_groups * self._item_dot_product_groups)
+                    "bnd,xmd->bxnm",
+                    split_user_embeddings,
+                    split_item_embeddings.squeeze(0),
+                ).reshape(
+                    B, X, self._input_dot_product_groups * self._item_dot_product_groups
+                )
             else:
-                #logits = torch.bmm(
+                # logits = torch.bmm(
                 #    split_user_embeddings,
                 #    split_item_embeddings.permute(0, 2, 1)   # [b, n, d], [b, xm, d] -> [b, n, xm]
-                #).reshape(B, self._input_dot_product_groups, X, self._item_dot_product_groups).permute(0, 2, 1, 3)
+                # ).reshape(B, self._input_dot_product_groups, X, self._item_dot_product_groups).permute(0, 2, 1, 3)
                 logits = torch.einsum(
                     "bnd,bxmd->bxnm", split_user_embeddings, split_item_embeddings
-                ).reshape(B, X, self._input_dot_product_groups * self._item_dot_product_groups)
+                ).reshape(
+                    B, X, self._input_dot_product_groups * self._item_dot_product_groups
+                )
             # [b, x, n, m] -> [b, x, n * m]
-            #logits = logits.reshape(B, X, self._input_dot_product_groups * self._item_dot_product_groups)
+            # logits = logits.reshape(B, X, self._input_dot_product_groups * self._item_dot_product_groups)
 
             return self._gating_fn(
                 logits=logits / self._temperature,  # [B, X, L]

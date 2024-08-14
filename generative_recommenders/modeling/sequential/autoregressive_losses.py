@@ -18,6 +18,7 @@ from typing import List, Tuple
 
 import torch
 import torch.nn.functional as F
+from generative_recommenders.modeling.ndp_module import NDPModule
 from torch.utils.checkpoint import checkpoint
 
 
@@ -260,7 +261,7 @@ class BCELoss(AutoregressiveLoss):
     def __init__(
         self,
         temperature: float,
-        model,  #: NDPModule,
+        model: NDPModule,
     ) -> None:
         super().__init__()
         self._temperature: float = temperature
@@ -380,7 +381,7 @@ class BCELossWithRatings(AutoregressiveLoss):
     def __init__(
         self,
         temperature: float,
-        model,  #: NDPModule,
+        model: NDPModule,
     ) -> None:
         super().__init__()
         self._temperature: float = temperature
@@ -484,7 +485,7 @@ class SampledSoftmaxLoss(AutoregressiveLoss):
         self,
         num_to_sample: int,
         softmax_temperature: float,
-        model,
+        model: torch.nn.Module,
         activation_checkpoint: bool = False,
     ) -> None:
         super().__init__()

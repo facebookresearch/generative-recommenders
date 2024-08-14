@@ -27,14 +27,20 @@ from typing import Dict, Optional, Tuple
 import torch
 import torch.nn.functional as F
 
-from modeling.ndp_module import NDPModule
-from modeling.sequential.embedding_modules import EmbeddingModule
-from modeling.sequential.input_features_preprocessors import (
+from generative_recommenders.modeling.ndp_module import NDPModule
+from generative_recommenders.modeling.sequential.embedding_modules import (
+    EmbeddingModule,
+)
+from generative_recommenders.modeling.sequential.input_features_preprocessors import (
     InputFeaturesPreprocessorModule,
 )
-from modeling.sequential.output_postprocessors import OutputPostprocessorModule
-from modeling.sequential.utils import get_current_embeddings
-from modeling.similarity_module import GeneralizedInteractionModule
+from generative_recommenders.modeling.sequential.output_postprocessors import (
+    OutputPostprocessorModule,
+)
+from generative_recommenders.modeling.sequential.utils import get_current_embeddings
+from generative_recommenders.modeling.similarity_module import (
+    GeneralizedInteractionModule,
+)
 
 
 class StandardAttentionFF(torch.nn.Module):
@@ -67,7 +73,7 @@ class StandardAttentionFF(torch.nn.Module):
             torch.nn.Dropout(p=dropout_rate),
         )
 
-    def forward(self, inputs) -> torch.Tensor:
+    def forward(self, inputs: torch.Tensor) -> torch.Tensor:
         # Conv1D requires (B, D, N)
         return self._conv1d(inputs.transpose(-1, -2)).transpose(-1, -2) + inputs
 
@@ -254,7 +260,7 @@ class SASRec(GeneralizedInteractionModule):
         past_embeddings: torch.Tensor,
         past_payloads: Dict[str, torch.Tensor],
         batch_id: Optional[int] = None,
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    ) -> torch.Tensor:
         """
         Args:
             past_ids: [B, N] x int64 where the latest engaged ids come first. In
@@ -295,9 +301,8 @@ class SASRec(GeneralizedInteractionModule):
         next_timestamps: torch.Tensor,
         target_ids: torch.Tensor,
         batch_id: Optional[int] = None,
-    ) -> Tuple[torch.Tensor, Dict[str, torch.Tensor]]:
+    ) -> torch.Tensor:
         return self.interaction(
-            self.encode(past_ids, past_ratings, past_timestamps, next_timestamps),
+            self.encode(past_ids, past_ratings, past_timestamps, next_timestamps),  # pyre-ignore [6]
             target_ids,
-            batch_id=batch_id,
         )  # [B, X]

@@ -13,15 +13,22 @@
 # limitations under the License.
 
 import gin
-from modeling.sequential.embedding_modules import EmbeddingModule
-from modeling.sequential.hstu import HSTU
-from modeling.sequential.input_features_preprocessors import (
+from generative_recommenders.modeling.sequential.embedding_modules import (
+    EmbeddingModule,
+)
+from generative_recommenders.modeling.sequential.hstu import HSTU
+from generative_recommenders.modeling.sequential.input_features_preprocessors import (
     InputFeaturesPreprocessorModule,
 )
-from modeling.sequential.output_postprocessors import OutputPostprocessorModule
-from modeling.sequential.sasrec import SASRec
+from generative_recommenders.modeling.sequential.output_postprocessors import (
+    OutputPostprocessorModule,
+)
+from generative_recommenders.modeling.sequential.sasrec import SASRec
 
-from modeling.similarity_module import GeneralizedInteractionModule, InteractionModule
+from generative_recommenders.modeling.similarity_module import (
+    GeneralizedInteractionModule,
+    InteractionModule,
+)
 
 
 @gin.configurable
@@ -50,7 +57,7 @@ def sasrec_encoder(
         ffn_dropout_rate=ffn_dropout_rate,
         num_blocks=num_blocks,
         num_heads=num_heads,
-        similarity_module=interaction_module,
+        similarity_module=interaction_module,  # pyre-ignore [6]
         input_features_preproc_module=input_preproc_module,
         output_postproc_module=output_postproc_module,
         activation_checkpoint=activation_checkpoint,
@@ -82,7 +89,7 @@ def hstu_encoder(
 ) -> GeneralizedInteractionModule:
     return HSTU(
         embedding_module=embedding_module,
-        similarity_module=interaction_module,
+        similarity_module=interaction_module,  # pyre-ignore [6]
         input_features_preproc_module=input_preproc_module,
         output_postproc_module=output_postproc_module,
         max_sequence_len=max_sequence_length,

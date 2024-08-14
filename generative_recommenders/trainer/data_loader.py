@@ -12,12 +12,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import os
 from typing import Optional, Tuple
 
-import os
 import gin
-
 import torch
+
 
 @gin.configurable
 def create_data_loader(
@@ -27,9 +27,12 @@ def create_data_loader(
     rank: int,
     shuffle: bool,
     prefetch_factor: int = 128,
-    num_workers: int = os.cpu_count(),
+    num_workers: Optional[int] = os.cpu_count(),
     drop_last: bool = False,
-) -> Tuple[Optional[torch.utils.data.distributed.DistributedSampler], torch.utils.data.DataLoader]:
+) -> Tuple[
+    Optional[torch.utils.data.distributed.DistributedSampler[torch.utils.data.Dataset]],
+    torch.utils.data.DataLoader,
+]:
     # print(f"num_workers={num_workers}")
     if shuffle:
         sampler = torch.utils.data.distributed.DistributedSampler(
@@ -46,7 +49,7 @@ def create_data_loader(
         dataset,
         batch_size=batch_size,
         # shuffle=True, cannot use with sampler
-        num_workers=num_workers,
+        num_workers=num_workers or 0,
         sampler=sampler,
         prefetch_factor=prefetch_factor,
     )

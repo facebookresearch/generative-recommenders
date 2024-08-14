@@ -16,7 +16,7 @@ import abc
 
 import torch
 
-from modeling.initialization import truncated_normal
+from generative_recommenders.modeling.initialization import truncated_normal
 
 
 class EmbeddingModule(torch.nn.Module):
@@ -53,7 +53,7 @@ class LocalEmbeddingModule(EmbeddingModule):
     def debug_str(self) -> str:
         return f"local_emb_d{self._item_embedding_dim}"
 
-    def reset_params(self):
+    def reset_params(self) -> None:
         for name, params in self.named_parameters():
             if "_item_emb" in name:
                 print(
@@ -91,7 +91,7 @@ class CategoricalEmbeddingModule(EmbeddingModule):
     def debug_str(self) -> str:
         return f"cat_emb_d{self._item_embedding_dim}"
 
-    def reset_params(self):
+    def reset_params(self) -> None:
         for name, params in self.named_parameters():
             if "_item_emb" in name:
                 print(

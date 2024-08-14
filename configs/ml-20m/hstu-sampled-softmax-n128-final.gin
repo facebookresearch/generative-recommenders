@@ -6,7 +6,7 @@
 #
 # Run this as:
 # mkdir -p logs/ml-20m-l200/
-# CUDA_VISIBLE_DEVICES=0 python3 train.py --gin_config_file=configs/ml-20m/hstu-sampled-softmax-n128-final.gin --master_port=12345 2>&1 | tee logs/ml-20m-l200/hstu-sampled-softmax-n128-final.log
+# CUDA_VISIBLE_DEVICES=0 python3 main.py --gin_config_file=configs/ml-20m/hstu-sampled-softmax-n128-final.gin --master_port=12345 2>&1 | tee logs/ml-20m-l200/hstu-sampled-softmax-n128-final.log
 
 train_fn.dataset_name = "ml-20m"
 train_fn.max_sequence_length = 200

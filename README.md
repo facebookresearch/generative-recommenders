@@ -29,7 +29,7 @@ mkdir -p tmp/ && python3 preprocess_public_data.py
 A GPU with 24GB or more HBM should work for most datasets.
 
 ```
-CUDA_VISIBLE_DEVICES=0 python3 train.py --gin_config_file=configs/ml-1m/hstu-sampled-softmax-n128-large-final.gin --master_port=12345
+CUDA_VISIBLE_DEVICES=0 python3 main.py --gin_config_file=configs/ml-1m/hstu-sampled-softmax-n128-large-final.gin --master_port=12345
 ```
 
 Other configurations are included in configs/ml-1m, configs/ml-20m, and configs/amzn-books to make reproducing these experiments easier.

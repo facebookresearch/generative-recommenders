@@ -6,7 +6,7 @@
 #
 # Run this as:
 # mkdir -p logs/amzn-books-l50/
-# CUDA_VISIBLE_DEVICES=1 python3 train.py --gin_config_file=configs/amzn-books/hstu-sampled-softmax-n512-large-final.gin --master_port=12346 2>&1 | tee logs/amzn-books-l50/hstu-sampled-softmax-n512-large-final2.log
+# CUDA_VISIBLE_DEVICES=1 python3 main.py --gin_config_file=configs/amzn-books/hstu-sampled-softmax-n512-large-final.gin --master_port=12346 2>&1 | tee logs/amzn-books-l50/hstu-sampled-softmax-n512-large-final2.log
 
 train_fn.dataset_name = "amzn-books"
 train_fn.max_sequence_length = 50

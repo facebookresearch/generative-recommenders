@@ -36,14 +36,14 @@ class DatasetV2(torch.utils.data.Dataset):
         """
         super().__init__()
 
-        self.ratings_frame = pd.read_csv(
+        self.ratings_frame: pd.DataFrame = pd.read_csv(
             ratings_file,
             delimiter=",",
             # iterator=True,
         )
         self._padding_length: int = padding_length
         self._ignore_last_n: int = ignore_last_n
-        self._cache = dict()
+        self._cache: Dict[int, Dict[str, torch.Tensor]] = dict()
         self._shift_id_by: int = shift_id_by
         self._chronological: bool = chronological
         self._sample_ratio: float = sample_ratio
@@ -51,18 +51,18 @@ class DatasetV2(torch.utils.data.Dataset):
     def __len__(self) -> int:
         return len(self.ratings_frame)
 
-    def __getitem__(self, idx) -> Dict[str, torch.Tensor]:
+    def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]:
         if idx in self._cache.keys():
             return self._cache[idx]
         sample = self.load_item(idx)
         self._cache[idx] = sample
         return sample
 
-    def load_item(self, idx) -> Dict[str, torch.Tensor]:
+    def load_item(self, idx: int) -> Dict[str, torch.Tensor]:
         data = self.ratings_frame.iloc[idx]
         user_id = data.user_id
 
-        def eval_as_list(x, ignore_last_n) -> List[int]:
+        def eval_as_list(x: str, ignore_last_n: int) -> List[int]:
             y = eval(x)
             y_list = [y] if type(y) == int else list(y)
             if ignore_last_n > 0:
@@ -71,7 +71,7 @@ class DatasetV2(torch.utils.data.Dataset):
             return y_list
 
         def eval_int_list(
-            x,
+            x: str,
             target_len: int,
             ignore_last_n: int,
             shift_id_by: int,
