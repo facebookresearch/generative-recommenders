@@ -12,6 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# pyre-unsafe
+
 """
 Implements HSTU (Hierarchical Sequential Transduction Unit) in
 Actions Speak Louder than Words: Trillion-Parameter Sequential Transducers for Generative Recommendations

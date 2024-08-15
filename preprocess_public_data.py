@@ -12,6 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# pyre-unsafe
+
 """
 Usage: mkdir -p tmp/ && python3 preprocess_public_data.py
 """
