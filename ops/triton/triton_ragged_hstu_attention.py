@@ -407,7 +407,7 @@ def _ragged_hstu_attn_fwd(  # noqa C901
     BLOCK_D_V: tl.constexpr,
     BLOCK_M: tl.constexpr,
     BLOCK_N: tl.constexpr,
-    max_attn_len,
+    max_attn_len: tl.constexpr,
     HAS_MAX_ATTN_LEN: tl.constexpr,
 ):
     # M_CTX == N_CTX
