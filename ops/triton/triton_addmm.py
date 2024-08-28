@@ -182,6 +182,7 @@ def _addmm_fwd(
     stride_yn,
     stride_zm,
     stride_zn,
+    BROADCAST_Y: tl.constexpr,
     BLOCK_M: tl.constexpr,
     BLOCK_N: tl.constexpr,
     BLOCK_K: tl.constexpr,
@@ -213,16 +214,23 @@ def _addmm_fwd(
         x = tl.load(x_ptrs, mask=mask_k & mask_m, other=0.0)
         mask_k = offs_k[:, None] < K - k * BLOCK_K
         w = tl.load(w_ptrs, mask=mask_k & mask_n, other=0.0)
+        w = w.to(x_ptr.dtype.element_ty)
         accumulator += tl.dot(x, w, allow_tf32=ALLOW_TF32)
         x_ptrs += BLOCK_K * stride_xk
         w_ptrs += BLOCK_K * stride_wk
 
     z = accumulator.to(z_ptr.dtype.element_ty)
-    y_ptr += pid_m.to(tl.int64) * BLOCK_M * stride_ym
-    y_ptr += pid_n.to(tl.int64) * BLOCK_N * stride_yn
-    y_ptrs = y_ptr + stride_ym * offs_m[:, None] + stride_yn * offs_n[None, :]
     z_mask = mask_m & mask_n
-    y = tl.load(y_ptrs, mask=z_mask)
+    if BROADCAST_Y:
+        # y is a vector, broadcast to add to z
+        y_ptr += pid_n.to(tl.int64) * BLOCK_N * stride_yn
+        y_ptrs = y_ptr + stride_yn * offs_n[None, :]
+        y = tl.load(y_ptrs, mask=mask_n)
+    else:
+        y_ptr += pid_m.to(tl.int64) * BLOCK_M * stride_ym
+        y_ptr += pid_n.to(tl.int64) * BLOCK_N * stride_yn
+        y_ptrs = y_ptr + stride_ym * offs_m[:, None] + stride_yn * offs_n[None, :]
+        y = tl.load(y_ptrs, mask=z_mask)
     z = z + y
     z_ptr += pid_m.to(tl.int64) * BLOCK_M * stride_zm
     z_ptr += pid_n.to(tl.int64) * BLOCK_N * stride_zn
