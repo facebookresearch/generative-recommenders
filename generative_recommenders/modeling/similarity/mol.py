@@ -98,6 +98,8 @@ class IdentityMLPProjectionFn(torch.nn.Module):
                 torch.nn.Dropout(p=input_dropout_rate),
                 torch.nn.Linear(
                     in_features=input_dim,
+                    # pyre-fixme[58]: `*` is not supported for operand types
+                    #  `Add[int, typing.Any]` and `int`.
                     out_features=(output_num_features - 1) * output_dim,
                 ),
             ).apply(init_mlp_xavier_weights_zero_bias)
@@ -143,10 +145,14 @@ class GeGLU(torch.nn.Module):
         self._in_features = in_features
         self._out_features = out_features
         self._w = torch.nn.Parameter(
+            # pyre-fixme[6]: For 1st argument expected `Sequence[Union[int,
+            #  SymInt]]` but got `Tuple[int, Multiply[int, int]]`.
             torch.empty((in_features, out_features * 2)).normal_(mean=0, std=0.02),
         )
         self._b = torch.nn.Parameter(
             torch.zeros(
+                # pyre-fixme[6]: For 1st argument expected `Sequence[Union[int,
+                #  SymInt]]` but got `Tuple[int, Multiply[int, int]]`.
                 (
                     1,
                     out_features * 2,
@@ -179,10 +185,14 @@ class SwiGLU(torch.nn.Module):
         self._in_features = in_features
         self._out_features = out_features
         self._w = torch.nn.Parameter(
+            # pyre-fixme[6]: For 1st argument expected `Sequence[Union[int,
+            #  SymInt]]` but got `Tuple[int, Multiply[int, int]]`.
             torch.empty((in_features, out_features * 2)).normal_(mean=0, std=0.02),
         )
         self._b = torch.nn.Parameter(
             torch.zeros(
+                # pyre-fixme[6]: For 1st argument expected `Sequence[Union[int,
+                #  SymInt]]` but got `Tuple[int, Multiply[int, int]]`.
                 (
                     1,
                     out_features * 2,
@@ -225,12 +235,15 @@ class MoLGatingFn(torch.nn.Module):
             else None
         )
         self._item_only_partial_module: Optional[torch.nn.Module] = (
+            # pyre-fixme[6]: For 1st argument expected `int` but got `Add[int, int]`.
             item_only_partial_fn(item_embedding_dim + item_sideinfo_dim, num_logits)
             if item_only_partial_fn
             else None
         )
         self._ci_partial_module: Optional[torch.nn.Module] = (
             ci_partial_fn(
+                # pyre-fixme[6]: For 1st argument expected `int` but got `Add[int,
+                #  int]`.
                 num_logits
                 + (item_sideinfo_dim if combine_item_sideinfo_into_ci else 0),
                 num_logits,
@@ -386,6 +399,8 @@ class MoLSimilarity(torch.nn.Module):
         super().__init__()
 
         self._gating_fn: MoLGatingFn = MoLGatingFn(
+            # pyre-fixme[58]: `+` is not supported for operand types `Multiply[int,
+            #  int]` and `int`.
             num_logits=input_dot_product_groups * item_dot_product_groups
             + num_precomputed_logits,
             context_embedding_dim=input_embedding_dim,
@@ -402,10 +417,14 @@ class MoLSimilarity(torch.nn.Module):
         )
         self._context_proj_module: torch.nn.Module = context_proj_fn(
             input_embedding_dim,
+            # pyre-fixme[6]: For 2nd argument expected `int` but got `Multiply[int,
+            #  int]`.
             dot_product_dimension * input_dot_product_groups,
         )
         self._item_proj_module: torch.nn.Module = item_proj_fn(
             item_embedding_dim,  # + item_sideinfo_dim,
+            # pyre-fixme[6]: For 2nd argument expected `int` but got `Multiply[int,
+            #  int]`.
             dot_product_dimension * item_dot_product_groups,
         )
         self._item_sideinfo_dim: int = item_sideinfo_dim
@@ -420,6 +439,8 @@ class MoLSimilarity(torch.nn.Module):
     def _frequency_estimator_old(self, ids: torch.Tensor) -> torch.Tensor:
         ids_shape = ids.size()
         ids = ids.reshape(-1)
+        # pyre-fixme[58]: `*` is not supported for operand types `Add[int,
+        #  typing.Any]` and `Any`.
         temp = (1 - self._lnx_estimator_alpha) * self._B[
             ids
         ] + self._lnx_estimator_alpha * (self._lnx_num_batches + 1 - self._A[ids])
@@ -454,6 +475,8 @@ class MoLSimilarity(torch.nn.Module):
             index=sorted_unique_inverses,
         )
 
+        # pyre-fixme[58]: `*` is not supported for operand types `Add[int,
+        #  typing.Any]` and `Any`.
         temp = (1 - self._lnx_estimator_alpha) * self._B[
             ids
         ] + self._lnx_estimator_alpha * delta_batches
@@ -595,6 +618,8 @@ class MoLSimilarity(torch.nn.Module):
                     split_user_embeddings,
                     split_item_embeddings.squeeze(0),
                 ).reshape(
+                    # pyre-fixme[6]: For 3rd argument expected `Union[int, SymInt]`
+                    #  but got `Multiply[int, int]`.
                     B, X, self._input_dot_product_groups * self._item_dot_product_groups
                 )
             else:
@@ -605,6 +630,8 @@ class MoLSimilarity(torch.nn.Module):
                 logits = torch.einsum(
                     "bnd,bxmd->bxnm", split_user_embeddings, split_item_embeddings
                 ).reshape(
+                    # pyre-fixme[6]: For 3rd argument expected `Union[int, SymInt]`
+                    #  but got `Multiply[int, int]`.
                     B, X, self._input_dot_product_groups * self._item_dot_product_groups
                 )
             # [b, x, n, m] -> [b, x, n * m]

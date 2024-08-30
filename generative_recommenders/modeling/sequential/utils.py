@@ -63,11 +63,15 @@ def batch_scatter_embeddings(
     B, N, D = dst_embeddings.size()
     flattened_indices = rowwise_indices + torch.arange(
         start=0,
+        # pyre-fixme[6]: For 2nd argument expected `Union[bool, float, int]` but got
+        #  `Multiply[int, int]`.
         end=B * N,
         step=N,
         dtype=rowwise_indices.dtype,
         device=rowwise_indices.device,
     )
+    # pyre-fixme[6]: For 1st argument expected `Union[int, SymInt]` but got
+    #  `Multiply[int, int]`.
     dst_embeddings.view(B * N, D)[flattened_indices, :] = src_embeddings
 
 

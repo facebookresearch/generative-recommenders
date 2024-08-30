@@ -86,6 +86,8 @@ class DatasetV2(torch.utils.data.Dataset):
             y.reverse()
             if shift_id_by > 0:
                 y = [x + shift_id_by for x in y]
+            # pyre-fixme[7]: Expected `Tuple[List[int], int]` but got
+            #  `Tuple[Union[List[Add[int, int]], List[int]], int]`.
             return y, y_len
 
         if self._sample_ratio < 1.0:
@@ -129,6 +131,8 @@ class DatasetV2(torch.utils.data.Dataset):
         ) -> List[int]:
             y_len = len(y)
             if y_len < target_len:
+                # pyre-fixme[58]: `*` is not supported for operand types `List[int]`
+                #  and `Add[int, typing.Any]`.
                 y = y + [0] * (target_len - y_len)
             else:
                 if not chronological:
@@ -150,19 +154,27 @@ class DatasetV2(torch.utils.data.Dataset):
             historical_timestamps.reverse()
 
         max_seq_len = self._padding_length - 1
+        # pyre-fixme[6]: For 2nd argument expected `SupportsRichComparisonT` but got
+        #  `Add[int, typing.Any]`.
         history_length = min(len(historical_ids), max_seq_len)
         historical_ids = _truncate_or_pad_seq(
             historical_ids,
+            # pyre-fixme[6]: For 2nd argument expected `int` but got `Add[int,
+            #  typing.Any]`.
             max_seq_len,
             self._chronological,
         )
         historical_ratings = _truncate_or_pad_seq(
             historical_ratings,
+            # pyre-fixme[6]: For 2nd argument expected `int` but got `Add[int,
+            #  typing.Any]`.
             max_seq_len,
             self._chronological,
         )
         historical_timestamps = _truncate_or_pad_seq(
             historical_timestamps,
+            # pyre-fixme[6]: For 2nd argument expected `int` but got `Add[int,
+            #  typing.Any]`.
             max_seq_len,
             self._chronological,
         )

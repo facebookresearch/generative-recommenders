@@ -105,6 +105,7 @@ class LearnablePositionalEmbeddingRatedInputFeaturesPreprocessor(
     ) -> None:
         super().__init__()
 
+        # pyre-fixme[8]: Attribute has type `int`; used as `Add[int, int]`.
         self._embedding_dim: int = item_embedding_dim + rating_embedding_dim
         self._pos_emb: torch.nn.Embedding = torch.nn.Embedding(
             max_sequence_len,
@@ -171,6 +172,8 @@ class CombinedItemAndRatingInputFeaturesPreprocessor(InputFeaturesPreprocessorMo
         self._rating_embedding_dim: int = rating_embedding_dim
         # Due to [item_0, rating_0, item_1, rating_1, ...]
         self._pos_emb: torch.nn.Embedding = torch.nn.Embedding(
+            # pyre-fixme[6]: For 1st argument expected `int` but got `Multiply[int,
+            #  int]`.
             max_sequence_len * 2,
             self._embedding_dim,
         )
@@ -214,6 +217,8 @@ class CombinedItemAndRatingInputFeaturesPreprocessor(InputFeaturesPreprocessorMo
                 past_payloads["ratings"].to(past_ids.dtype).unsqueeze(2),
             ],
             dim=2,
+        # pyre-fixme[6]: For 2nd argument expected `Union[int, SymInt]` but got
+        #  `Multiply[int, int]`.
         ).reshape(B, N * 2)
 
     def get_preprocessed_masks(
@@ -227,6 +232,8 @@ class CombinedItemAndRatingInputFeaturesPreprocessor(InputFeaturesPreprocessorMo
         Returns (B, N * 2,) x bool.
         """
         B, N = past_ids.size()
+        # pyre-fixme[6]: For 2nd argument expected `Union[int, SymInt]` but got
+        #  `Multiply[int, int]`.
         return (past_ids != 0).unsqueeze(2).expand(-1, -1, 2).reshape(B, N * 2)
 
     def forward(
@@ -246,8 +253,12 @@ class CombinedItemAndRatingInputFeaturesPreprocessor(InputFeaturesPreprocessorMo
             ],
             dim=2,
         ) * (self._embedding_dim**0.5)
+        # pyre-fixme[6]: For 2nd argument expected `Union[int, SymInt]` but got
+        #  `Multiply[int, int]`.
         user_embeddings = user_embeddings.view(B, N * 2, D)
         user_embeddings = user_embeddings + self._pos_emb(
+            # pyre-fixme[6]: For 1st argument expected `Union[bool, float, int]` but
+            #  got `Multiply[int, int]`.
             torch.arange(N * 2, device=past_ids.device).unsqueeze(0).repeat(B, 1)
         )
         user_embeddings = self._emb_dropout(user_embeddings)

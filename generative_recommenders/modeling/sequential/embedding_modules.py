@@ -48,6 +48,7 @@ class LocalEmbeddingModule(EmbeddingModule):
 
         self._item_embedding_dim: int = item_embedding_dim
         self._item_emb = torch.nn.Embedding(
+            # pyre-fixme[6]: For 1st argument expected `int` but got `Add[int, int]`.
             num_items + 1, item_embedding_dim, padding_idx=0
         )
         self.reset_params()
@@ -85,6 +86,7 @@ class CategoricalEmbeddingModule(EmbeddingModule):
 
         self._item_embedding_dim: int = item_embedding_dim
         self._item_emb: torch.nn.Embedding = torch.nn.Embedding(
+            # pyre-fixme[6]: For 1st argument expected `int` but got `Add[int, int]`.
             num_items + 1, item_embedding_dim, padding_idx=0
         )
         self.register_buffer("_item_id_to_category_id", item_id_to_category_id)

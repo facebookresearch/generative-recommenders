@@ -180,6 +180,8 @@ def train_fn(
         )
     )
     input_preproc_module = LearnablePositionalEmbeddingInputFeaturesPreprocessor(
+        # pyre-fixme[58]: `+` is not supported for operand types `Add[int, int]` and
+        #  `int`.
         max_sequence_len=dataset.max_sequence_length + gr_output_length + 1,
         embedding_dim=item_embedding_dim,
         dropout_rate=dropout_rate,
@@ -295,6 +297,8 @@ def train_fn(
             seq_features, target_ids, target_ratings = movielens_seq_features_from_row(
                 row,
                 device=device,
+                # pyre-fixme[6]: For 3rd argument expected `int` but got `Add[int,
+                #  int]`.
                 max_output_length=gr_output_length + 1,
             )
 
@@ -305,6 +309,8 @@ def train_fn(
                     movielens_seq_features_from_row(
                         row,
                         device=device,
+                        # pyre-fixme[6]: For 3rd argument expected `int` but got
+                        #  `Add[int, int]`.
                         max_output_length=gr_output_length + 1,
                     )
                 )
@@ -433,6 +439,8 @@ def train_fn(
         )
         for eval_iter, row in enumerate(iter(eval_data_loader)):
             seq_features, target_ids, target_ratings = movielens_seq_features_from_row(
+                # pyre-fixme[6]: For 3rd argument expected `int` but got `Add[int,
+                #  int]`.
                 row, device=device, max_output_length=gr_output_length + 1
             )
             eval_dict = eval_metrics_v2_from_tensors(
@@ -454,6 +462,8 @@ def train_fn(
                 eval_dict_all[k] = eval_dict_all[k] + [v]
             del eval_dict
 
+            # pyre-fixme[58]: `>=` is not supported for operand types `Add[int,
+            #  int]` and `int`.
             if (eval_iter + 1 >= partial_eval_num_iters) and (not is_full_eval(epoch)):
                 logging.info(
                     f"Truncating epoch {epoch} eval to {eval_iter + 1} iters to save cost.."

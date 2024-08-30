@@ -69,6 +69,8 @@ class RelativePositionalBias(RelativeAttentionBiasModule):
 
         self._max_seq_len: int = max_seq_len
         self._w = torch.nn.Parameter(
+            # pyre-fixme[58]: `-` is not supported for operand types `Multiply[int,
+            #  int]` and `int`.
             torch.empty(2 * max_seq_len - 1).normal_(mean=0, std=0.02),
         )
 
@@ -78,9 +80,16 @@ class RelativePositionalBias(RelativeAttentionBiasModule):
     ) -> torch.Tensor:
         del all_timestamps
         n: int = self._max_seq_len
+        # pyre-fixme[58]: `-` is not supported for operand types `Multiply[int,
+        #  int]` and `int`.
         t = F.pad(self._w[: 2 * n - 1], [0, n]).repeat(n)
+        # pyre-fixme[58]: `-` is not supported for operand types `Multiply[int,
+        #  int]` and `int`.
         t = t[..., :-n].reshape(1, n, 3 * n - 2)
+        # pyre-fixme[58]: `-` is not supported for operand types `Multiply[int,
+        #  int]` and `int`.
         r = (2 * n - 1) // 2
+        # pyre-fixme[16]: `Divide` has no attribute `__neg__`.
         return t[..., r:-r]
 
 
@@ -99,9 +108,13 @@ class RelativeBucketedTimeAndPositionBasedBias(RelativeAttentionBiasModule):
 
         self._max_seq_len: int = max_seq_len
         self._ts_w = torch.nn.Parameter(
+            # pyre-fixme[6]: For 1st argument expected `Sequence[Union[int,
+            #  SymInt]]` but got `Add[int, int]`.
             torch.empty(num_buckets + 1).normal_(mean=0, std=0.02),
         )
         self._pos_w = torch.nn.Parameter(
+            # pyre-fixme[58]: `-` is not supported for operand types `Multiply[int,
+            #  int]` and `int`.
             torch.empty(2 * max_seq_len - 1).normal_(mean=0, std=0.02),
         )
         self._num_buckets: int = num_buckets
@@ -121,8 +134,14 @@ class RelativeBucketedTimeAndPositionBasedBias(RelativeAttentionBiasModule):
         """
         B = all_timestamps.size(0)
         N = self._max_seq_len
+        # pyre-fixme[58]: `-` is not supported for operand types `Multiply[int,
+        #  int]` and `int`.
         t = F.pad(self._pos_w[: 2 * N - 1], [0, N]).repeat(N)
+        # pyre-fixme[58]: `-` is not supported for operand types `Multiply[int,
+        #  int]` and `int`.
         t = t[..., :-N].reshape(1, N, 3 * N - 2)
+        # pyre-fixme[58]: `-` is not supported for operand types `Multiply[int,
+        #  int]` and `int`.
         r = (2 * N - 1) // 2
 
         # [B, N + 1] to simplify tensor manipulations.
@@ -137,6 +156,7 @@ class RelativeBucketedTimeAndPositionBasedBias(RelativeAttentionBiasModule):
             min=0,
             max=self._num_buckets,
         ).detach()
+        # pyre-fixme[16]: `Divide` has no attribute `__neg__`.
         rel_pos_bias = t[:, :, r:-r]
         rel_ts_bias = torch.index_select(
             self._ts_w, dim=0, index=bucketed_timestamps.view(-1)
@@ -162,12 +182,15 @@ def _hstu_attention_maybe_from_cache(
     invalid_attn_mask: torch.Tensor,
     rel_attn_bias: RelativeAttentionBiasModule,
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    # pyre-fixme[9]: B has type `int`; used as `Add[int, typing.Any]`.
     B: int = x_offsets.size(0) - 1
     n: int = invalid_attn_mask.size(-1)
     if delta_x_offsets is not None:
         padded_q, padded_k = cached_q, cached_k
         flattened_offsets = delta_x_offsets[1] + torch.arange(
             start=0,
+            # pyre-fixme[6]: For 2nd argument expected `Union[bool, float, int]` but
+            #  got `Multiply[int, int]`.
             end=B * n,
             step=n,
             device=delta_x_offsets[1].device,
@@ -176,6 +199,8 @@ def _hstu_attention_maybe_from_cache(
         assert isinstance(padded_q, torch.Tensor)
         assert isinstance(padded_k, torch.Tensor)
         padded_q = (
+            # pyre-fixme[6]: For 1st argument expected `Union[int, SymInt]` but got
+            #  `Multiply[int, int]`.
             padded_q.view(B * n, -1)
             .index_copy_(
                 dim=0,
@@ -185,6 +210,8 @@ def _hstu_attention_maybe_from_cache(
             .view(B, n, -1)
         )
         padded_k = (
+            # pyre-fixme[6]: For 1st argument expected `Union[int, SymInt]` but got
+            #  `Multiply[int, int]`.
             padded_k.view(B * n, -1)
             .index_copy_(
                 dim=0,
@@ -217,6 +244,8 @@ def _hstu_attention_maybe_from_cache(
             torch.ops.fbgemm.jagged_to_padded_dense(v, [x_offsets], [n]).reshape(
                 B, n, num_heads, linear_dim
             ),
+        # pyre-fixme[6]: For 3rd argument expected `Union[int, SymInt]` but got
+        #  `Multiply[int, int]`.
         ).reshape(B, n, num_heads * linear_dim),
         [x_offsets],
     )[0]
@@ -255,9 +284,15 @@ class SequentialTransductionUnitJagged(torch.nn.Module):
         if self._linear_config == "uvqk":
             self._uvqk: torch.nn.Parameter = torch.nn.Parameter(
                 torch.empty(
+                    # pyre-fixme[6]: For 1st argument expected `Sequence[Union[int,
+                    #  SymInt]]` but got `Tuple[int, Add[int, int]]`.
                     (
                         embedding_dim,
+                        # pyre-fixme[58]: `*` is not supported for operand types
+                        #  `Multiply[int, int]` and `int`.
                         linear_hidden_dim * 2 * num_heads
+                        # pyre-fixme[58]: `*` is not supported for operand types
+                        #  `Multiply[int, int]` and `int`.
                         + attention_dim * num_heads * 2,
                     )
                 ).normal_(mean=0, std=0.02),
@@ -267,6 +302,8 @@ class SequentialTransductionUnitJagged(torch.nn.Module):
         self._linear_activation: str = linear_activation
         self._concat_ua: bool = concat_ua
         self._o = torch.nn.Linear(
+            # pyre-fixme[58]: `*` is not supported for operand types `Multiply[int,
+            #  int]` and `Union[int, int]`.
             in_features=linear_hidden_dim * num_heads * (3 if concat_ua else 1),
             out_features=embedding_dim,
         )
@@ -278,6 +315,8 @@ class SequentialTransductionUnitJagged(torch.nn.Module):
 
     def _norm_attn_output(self, x: torch.Tensor) -> torch.Tensor:
         return F.layer_norm(
+            # pyre-fixme[6]: For 2nd argument expected `Sequence[int]` but got
+            #  `Sequence[Multiply[int, int]]`.
             x, normalized_shape=[self._linear_dim * self._num_heads], eps=self._eps
         )
 
@@ -325,6 +364,8 @@ class SequentialTransductionUnitJagged(torch.nn.Module):
                 batched_mm_output = batched_mm_output
             u, v, q, k = torch.split(
                 batched_mm_output,
+                # pyre-fixme[6]: For 2nd argument expected `Union[List[int], int]`
+                #  but got `List[Multiply[int, int]]`.
                 [
                     self._linear_dim * self._num_heads,
                     self._linear_dim * self._num_heads,
@@ -339,6 +380,7 @@ class SequentialTransductionUnitJagged(torch.nn.Module):
         if delta_x_offsets is not None:
             v = cached_v.index_copy_(dim=0, index=delta_x_offsets[0], source=v)
 
+        # pyre-fixme[9]: B has type `int`; used as `Add[int, typing.Any]`.
         B: int = x_offsets.size(0) - 1
         if self._normalization == "rel_bias" or self._normalization == "hstu_rel_bias":
             assert self._rel_attn_bias is not None
@@ -359,10 +401,13 @@ class SequentialTransductionUnitJagged(torch.nn.Module):
             )
         elif self._normalization == "softmax_rel_bias":
             if delta_x_offsets is not None:
+                # pyre-fixme[9]: B has type `int`; used as `Add[int, typing.Any]`.
                 B = x_offsets.size(0) - 1
                 padded_q, padded_k = cached_q, cached_k
                 flattened_offsets = delta_x_offsets[1] + torch.arange(
                     start=0,
+                    # pyre-fixme[6]: For 2nd argument expected `Union[bool, float,
+                    #  int]` but got `Multiply[int, int]`.
                     end=B * n,
                     step=n,
                     device=delta_x_offsets[1].device,
@@ -371,6 +416,8 @@ class SequentialTransductionUnitJagged(torch.nn.Module):
                 assert padded_q is not None
                 assert padded_k is not None
                 padded_q = (
+                    # pyre-fixme[6]: For 1st argument expected `Union[int, SymInt]`
+                    #  but got `Multiply[int, int]`.
                     padded_q.view(B * n, -1)
                     .index_copy_(
                         dim=0,
@@ -380,6 +427,8 @@ class SequentialTransductionUnitJagged(torch.nn.Module):
                     .view(B, n, -1)
                 )
                 padded_k = (
+                    # pyre-fixme[6]: For 1st argument expected `Union[int, SymInt]`
+                    #  but got `Multiply[int, int]`.
                     padded_k.view(B * n, -1)
                     .index_copy_(
                         dim=0,
@@ -605,6 +654,8 @@ class HSTU(GeneralizedInteractionModule):
                     # TODO: change to lambda x.
                     relative_attention_bias_module=(
                         RelativeBucketedTimeAndPositionBasedBias(
+                            # pyre-fixme[6]: For 1st argument expected `int` but got
+                            #  `Add[int, int]`.
                             max_seq_len=max_sequence_len
                             + max_output_len,  # accounts for next item.
                             num_buckets=128,
@@ -628,6 +679,8 @@ class HSTU(GeneralizedInteractionModule):
             "_attn_mask",
             torch.triu(
                 torch.ones(
+                    # pyre-fixme[6]: For 1st argument expected `Sequence[Union[int,
+                    #  SymInt]]` but got `Tuple[Add[int, int], Add[int, int]]`.
                     (
                         self._max_sequence_length + max_output_len,
                         self._max_sequence_length + max_output_len,

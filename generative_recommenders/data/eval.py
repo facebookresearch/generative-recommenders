@@ -118,12 +118,16 @@ def eval_metrics_v2_from_tensors(
         eval_top_k_ids, eval_top_k_prs, _ = (
             eval_state.candidate_index.get_top_k_outputs(
                 query_embeddings=shared_input_embeddings[
+                    # pyre-fixme[58]: `*` is not supported for operand types
+                    #  `Add[int, int]` and `Any`.
                     mb * user_max_batch_size : (mb + 1) * user_max_batch_size, ...
                 ],
                 top_k_module=eval_state.top_k_module,
                 k=k,
                 invalid_ids=(
                     seq_features.past_ids[
+                        # pyre-fixme[58]: `*` is not supported for operand types
+                        #  `Add[int, int]` and `Any`.
                         mb * user_max_batch_size : (mb + 1) * user_max_batch_size, :
                     ]
                     if filter_invalid_ids
@@ -151,6 +155,7 @@ def eval_metrics_v2_from_tensors(
         == target_ids,
         dim=1,
     )
+    # pyre-fixme[6]: For 2nd argument expected `Tensor` but got `Add[int, int]`.
     eval_ranks = torch.where(eval_rank_indices == k, MAX_K + 1, eval_rank_indices + 1)
 
     output = {

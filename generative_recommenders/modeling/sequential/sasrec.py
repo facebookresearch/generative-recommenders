@@ -113,6 +113,7 @@ class SASRec(GeneralizedInteractionModule):
         self._embedding_module: EmbeddingModule = embedding_module
         self._embedding_dim: int = embedding_dim
         self._item_embedding_dim: int = embedding_module.item_embedding_dim
+        # pyre-fixme[8]: Attribute has type `int`; used as `Add[int, int]`.
         self._max_sequence_length: int = max_sequence_len + max_output_len
         self._input_features_preproc: InputFeaturesPreprocessorModule = (
             input_features_preproc_module

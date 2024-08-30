@@ -312,8 +312,12 @@ def _ragged_hstu_attn_fwd_one_block(  # noqa: C901
                 offs_pos_w = offs_n_minus_m + max_pos_ind - 1
                 offs_pos_w = tl.where(offs_pos_w > 0, offs_pos_w, 0)
                 offs_pos_w = tl.where(
+                    # pyre-fixme[58]: `-` is not supported for operand types
+                    #  `Multiply[int, typing.Any]` and `int`.
                     offs_pos_w < 2 * max_pos_ind - 2,
                     offs_pos_w,
+                    # pyre-fixme[58]: `-` is not supported for operand types
+                    #  `Multiply[int, typing.Any]` and `int`.
                     2 * max_pos_ind - 2,
                 )
             else:
@@ -693,6 +697,8 @@ def triton_ragged_attention(
 
     grid = lambda meta: (  # noqa E731
         triton.cdiv(N, meta["BLOCK_M"]),
+        # pyre-fixme[58]: `*` is not supported for operand types `Add[int,
+        #  typing.Any]` and `int`.
         Z * H,
     )
 
@@ -793,6 +799,7 @@ def triton_ragged_attention_relative_bias(
     _, _, DimV = v.shape
     out = torch.empty_like(v)
     grid = lambda meta: (  # noqa E731
+        # pyre-fixme[6]: For 1st argument expected `int` but got `Add[int, typing.Any]`.
         triton.cdiv(N, meta["BLOCK_M"]),
         Z * H,
     )

@@ -46,6 +46,7 @@ def get_reco_dataset(
         dp = get_common_preprocessors()[dataset_name]
         train_dataset = DatasetV2(
             ratings_file=dp.output_format_csv(),
+            # pyre-fixme[6]: For 2nd argument expected `int` but got `Add[int, int]`.
             padding_length=max_sequence_length + 1,  # target
             ignore_last_n=1,
             chronological=chronological,
@@ -53,6 +54,7 @@ def get_reco_dataset(
         )
         eval_dataset = DatasetV2(
             ratings_file=dp.output_format_csv(),
+            # pyre-fixme[6]: For 2nd argument expected `int` but got `Add[int, int]`.
             padding_length=max_sequence_length + 1,  # target
             ignore_last_n=0,
             chronological=chronological,
@@ -62,12 +64,14 @@ def get_reco_dataset(
         dp = get_common_preprocessors()[dataset_name]
         train_dataset = DatasetV2(
             ratings_file=dp.output_format_csv(),
+            # pyre-fixme[6]: For 2nd argument expected `int` but got `Add[int, int]`.
             padding_length=max_sequence_length + 1,  # target
             ignore_last_n=1,
             chronological=chronological,
         )
         eval_dataset = DatasetV2(
             ratings_file=dp.output_format_csv(),
+            # pyre-fixme[6]: For 2nd argument expected `int` but got `Add[int, int]`.
             padding_length=max_sequence_length + 1,  # target
             ignore_last_n=0,
             chronological=chronological,
@@ -76,6 +80,7 @@ def get_reco_dataset(
         dp = get_common_preprocessors()[dataset_name]
         train_dataset = DatasetV2(
             ratings_file=dp.output_format_csv(),
+            # pyre-fixme[6]: For 2nd argument expected `int` but got `Add[int, int]`.
             padding_length=max_sequence_length + 1,  # target
             ignore_last_n=1,
             shift_id_by=1,  # [0..n-1] -> [1..n]
@@ -83,6 +88,7 @@ def get_reco_dataset(
         )
         eval_dataset = DatasetV2(
             ratings_file=dp.output_format_csv(),
+            # pyre-fixme[6]: For 2nd argument expected `int` but got `Add[int, int]`.
             padding_length=max_sequence_length + 1,  # target
             ignore_last_n=0,
             shift_id_by=1,  # [0..n-1] -> [1..n]
@@ -98,23 +104,36 @@ def get_reco_dataset(
         assert expected_max_item_id is not None
         item_features: ItemFeatures = ItemFeatures(
             max_ind_range=[63, 16383, 511],
+            # pyre-fixme[6]: For 2nd argument expected `int` but got `Add[int, int]`.
             num_items=expected_max_item_id + 1,
             max_jagged_dimension=max_jagged_dimension,
             lengths=[
+                # pyre-fixme[6]: For 1st argument expected `Sequence[Union[int,
+                #  SymInt]]` but got `Tuple[Add[int, int]]`.
                 torch.zeros((expected_max_item_id + 1,), dtype=torch.int64),
+                # pyre-fixme[6]: For 1st argument expected `Sequence[Union[int,
+                #  SymInt]]` but got `Tuple[Add[int, int]]`.
                 torch.zeros((expected_max_item_id + 1,), dtype=torch.int64),
+                # pyre-fixme[6]: For 1st argument expected `Sequence[Union[int,
+                #  SymInt]]` but got `Tuple[Add[int, int]]`.
                 torch.zeros((expected_max_item_id + 1,), dtype=torch.int64),
             ],
             values=[
                 torch.zeros(
+                    # pyre-fixme[6]: For 1st argument expected `Sequence[Union[int,
+                    #  SymInt]]` but got `Tuple[Add[int, int], int]`.
                     (expected_max_item_id + 1, max_jagged_dimension),
                     dtype=torch.int64,
                 ),
                 torch.zeros(
+                    # pyre-fixme[6]: For 1st argument expected `Sequence[Union[int,
+                    #  SymInt]]` but got `Tuple[Add[int, int], int]`.
                     (expected_max_item_id + 1, max_jagged_dimension),
                     dtype=torch.int64,
                 ),
                 torch.zeros(
+                    # pyre-fixme[6]: For 1st argument expected `Sequence[Union[int,
+                    #  SymInt]]` but got `Tuple[Add[int, int], int]`.
                     (expected_max_item_id + 1, max_jagged_dimension),
                     dtype=torch.int64,
                 ),

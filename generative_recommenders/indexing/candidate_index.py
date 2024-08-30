@@ -164,6 +164,8 @@ class CandidateIndex(object):
         if invalid_ids is not None:
             max_num_invalid_ids = invalid_ids.size(1)
 
+        # pyre-fixme[6]: For 1st argument expected `SupportsRichComparisonT` but got
+        #  `Add[int, int]`.
         k_prime = min(k + max_num_invalid_ids, self.num_objects)
         top_k_prime_scores, top_k_prime_ids = top_k_module(
             query_embeddings=query_embeddings, k=k_prime
