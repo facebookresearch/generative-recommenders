@@ -97,6 +97,19 @@ class DataProcessor:
         return os.path.isfile("%s/%s" % (os.getcwd(), name))
 
 
+class MovielensSyntheticDataProcessor(DataProcessor):
+    def __init__(
+        self,
+        prefix: str,
+        expected_num_unique_items: Optional[int] = None,
+        expected_max_item_id: Optional[int] = None,
+    ) -> None:
+        super().__init__(prefix, expected_num_unique_items, expected_max_item_id)
+
+    def preprocess_rating(self) -> None:
+        return
+
+
 class MovielensDataProcessor(DataProcessor):
     def __init__(
         self,
@@ -417,9 +430,10 @@ class AmazonDataProcessor(DataProcessor):
         return num_unique_items
 
 
-def get_common_preprocessors() -> (
-    Dict[str, Union[AmazonDataProcessor, MovielensDataProcessor]]
-):
+def get_common_preprocessors() -> Dict[
+    str,
+    Union[AmazonDataProcessor, MovielensDataProcessor, MovielensSyntheticDataProcessor],
+]:
     ml_1m_dp = MovielensDataProcessor(  # pyre-ignore [45]
         "http://files.grouplens.org/datasets/movielens/ml-1m.zip",
         "tmp/movielens1m.zip",
@@ -442,6 +456,11 @@ def get_common_preprocessors() -> (
         prefix="ml-20mx16x32",
         convert_timestamp=False,
     )
+    ml_3b_dp = MovielensSyntheticDataProcessor(  # pyre-ignore [45]
+        prefix="ml-3b",
+        expected_num_unique_items=26743 * 32,
+        expected_max_item_id=26743 * 32,
+    )
     amzn_books_dp = AmazonDataProcessor(  # pyre-ignore [45]
         "http://snap.stanford.edu/data/amazon/productGraph/categoryFiles/ratings_Books.csv",
         "tmp/ratings_Books.csv",
@@ -452,5 +471,6 @@ def get_common_preprocessors() -> (
         "ml-1m": ml_1m_dp,
         "ml-20m": ml_20m_dp,
         "ml-1b": ml_1b_dp,
+        "ml-3b": ml_3b_dp,
         "amzn-books": amzn_books_dp,
     }

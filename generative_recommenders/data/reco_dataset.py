@@ -21,7 +21,7 @@ import pandas as pd
 
 import torch
 
-from generative_recommenders.data.dataset import DatasetV2
+from generative_recommenders.data.dataset import DatasetV2, MultiFileDatasetV2
 from generative_recommenders.data.item_features import ItemFeatures
 from generative_recommenders.data.preprocessor import get_common_preprocessors
 
@@ -68,6 +68,22 @@ def get_reco_dataset(
         )
         eval_dataset = DatasetV2(
             ratings_file=dp.output_format_csv(),
+            padding_length=max_sequence_length + 1,  # target
+            ignore_last_n=0,
+            chronological=chronological,
+        )
+    elif dataset_name == "ml-3b":
+        dp = get_common_preprocessors()[dataset_name]
+        train_dataset = MultiFileDatasetV2(
+            file_prefix="tmp/ml-3b/16x32",
+            num_files=16,
+            padding_length=max_sequence_length + 1,  # target
+            ignore_last_n=1,
+            chronological=chronological,
+        )
+        eval_dataset = MultiFileDatasetV2(
+            file_prefix="tmp/ml-3b/16x32",
+            num_files=16,
             padding_length=max_sequence_length + 1,  # target
             ignore_last_n=0,
             chronological=chronological,
