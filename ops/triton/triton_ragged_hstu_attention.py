@@ -331,6 +331,7 @@ def _ragged_hstu_attn_fwd_one_block(  # noqa: C901
             other=0.0,
         )
         qk = qk + attn_bias
+    # pyre-fixme[16]: Module `math` has no attribute `fast_dividef`.
     silu = fast_dividef(qk, 1.0 + tl.exp(-qk)) * (1.0 / MAX_SEQ_LEN)
     silu = tl.where(invalid_mask, silu, 0)
     if HAS_ATTN_SCALE:
