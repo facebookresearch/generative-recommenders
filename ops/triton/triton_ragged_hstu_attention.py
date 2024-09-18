@@ -653,7 +653,7 @@ def _ragged_hstu_attn_fwd_compute(  # noqa C901
     key=[
         "Z",
         "H",
-        "MAX_SEQ_LEN",
+        "AUTOTUNE_MAX_SEQ_LEN",
         "DimQ",
         "DimV",
         "BUCKET_FN",
@@ -692,6 +692,7 @@ def _ragged_hstu_attn_fwd(  # noqa C901
     Z,
     H,
     MAX_SEQ_LEN,
+    AUTOTUNE_MAX_SEQ_LEN,  # Quantized MAX_SEQ_LEN used as an autotuning key
     DimQ,
     DimV,
     DeltaSize,
@@ -784,7 +785,7 @@ def _ragged_hstu_attn_fwd(  # noqa C901
     key=[
         "Z",
         "H",
-        "MAX_SEQ_LEN",
+        "AUTOTUNE_MAX_SEQ_LEN",
         "DimQ",
         "DimV",
         "BUCKET_FN",
@@ -823,6 +824,7 @@ def _ragged_hstu_attn_fwd_persistent(  # noqa C901
     Z,
     H,
     MAX_SEQ_LEN,
+    AUTOTUNE_MAX_SEQ_LEN,  # Quantized MAX_SEQ_LEN used as an autotuning key
     DimQ,
     DimV,
     DeltaSize,
@@ -959,6 +961,9 @@ def triton_ragged_attention(
         else:
             stride_sz = attn_scale.stride(0)
             stride_sm = attn_scale.stride(1)
+    autotune_max_seq_len = triton.next_power_of_2(N)
+    if autotune_max_seq_len > N:
+        autotune_max_seq_len = autotune_max_seq_len // 2
 
     kwargs = {
     "Q": q,
@@ -989,6 +994,7 @@ def triton_ragged_attention(
     "Z": Z,
     "H": H,
     "MAX_SEQ_LEN": N,
+    "AUTOTUNE_MAX_SEQ_LEN": autotune_max_seq_len,
     "DimQ": DimQ,
     "DimV": DimV,
     "DeltaSize": 0,
@@ -1066,6 +1072,9 @@ def triton_ragged_attention_relative_bias(
             stride_sm = attn_scale.stride(1)
     use_time_bias = relative_bias_type == "TIME" or relative_bias_type == "ALL"
     use_pos_bias = relative_bias_type == "POSITION" or relative_bias_type == "ALL"
+    autotune_max_seq_len = triton.next_power_of_2(N)
+    if autotune_max_seq_len > N:
+        autotune_max_seq_len = autotune_max_seq_len // 2
 
     kwargs = {
     "Q": q,
@@ -1096,6 +1105,7 @@ def triton_ragged_attention_relative_bias(
     "Z": Z,
     "H": H,
     "MAX_SEQ_LEN": N,
+    "AUTOTUNE_MAX_SEQ_LEN": autotune_max_seq_len,
     "DimQ": DimQ,
     "DimV": DimV,
     "DeltaSize": 0,
