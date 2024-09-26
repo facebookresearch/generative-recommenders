@@ -218,7 +218,6 @@ def _addmm_fwd(
         x_ptrs += BLOCK_K * stride_xk
         w_ptrs += BLOCK_K * stride_wk
 
-    z = accumulator.to(z_ptr.dtype.element_ty)
     z_mask = mask_m & mask_n
     if BROADCAST_Y:
         # y is a vector, broadcast to add to z
@@ -230,7 +229,7 @@ def _addmm_fwd(
         y_ptr += pid_n.to(tl.int64) * BLOCK_N * stride_yn
         y_ptrs = y_ptr + stride_ym * offs_m[:, None] + stride_yn * offs_n[None, :]
         y = tl.load(y_ptrs, mask=z_mask)
-    z = z + y
+    z = (accumulator + y.to(tl.float32)).to(z_ptr.dtype.element_ty)
     z_ptr += pid_m.to(tl.int64) * BLOCK_M * stride_zm
     z_ptr += pid_n.to(tl.int64) * BLOCK_N * stride_zn
     z_ptrs = z_ptr + stride_zm * offs_m[:, None] + stride_zn * offs_n[None, :]
