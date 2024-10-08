@@ -189,7 +189,8 @@ def _addmm_fwd(
     ALLOW_TF32: tl.constexpr,
     BROADCAST_Y: tl.constexpr,
 ):
-    pid = tl.program_id(axis=0)
+    pid_0, pid_1 = tl.program_id(axis=0), tl.program_id(axis=1)
+    pid = pid_0 * tl.num_programs(axis=1) + pid_1
     num_pid_m = tl.cdiv(M, BLOCK_M)
     num_pid_n = tl.cdiv(N, BLOCK_N)
     num_pid_in_group = GROUP_M * num_pid_n
@@ -253,8 +254,10 @@ class _AddMmFunction(torch.autograd.Function):
         if M == 0 or N == 0:
             return z
 
-        def grid(META):
-            return (triton.cdiv(M, META["BLOCK_M"]) * triton.cdiv(N, META["BLOCK_N"]),)
+        grid = lambda meta: (  # noqa E731
+            triton.cdiv(M, meta["BLOCK_M"]),
+            triton.cdiv(N, meta["BLOCK_N"]),
+        )
 
         _addmm_fwd[grid](
             x,
