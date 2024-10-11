@@ -12,6 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# pyre-unsafe
+
 """
 Run fractal expansion introduced in https://arxiv.org/abs/1901.08910.
 Implementation adapted from the scripts used to generate MovieLens-1B
