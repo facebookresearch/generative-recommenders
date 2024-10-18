@@ -20,11 +20,19 @@ from typing import List, Optional
 
 import torch
 
+import os
+
 # @manual=//triton:triton
 import triton
 
 # @manual=//triton:triton
 import triton.language as tl
+
+has_fb_tl_smem_ops = hasattr(tl, 'local_copy') and hasattr(tl, 'gather')
+# pyre-ignore[16]:
+fb_tl_local_copy = tl.local_copy if has_fb_tl_smem_ops else None
+# pyre-ignore[16]:
+fb_tl_gather = tl.gather if has_fb_tl_smem_ops else None
 
 try:
     # @manual=//triton:triton
@@ -55,6 +63,8 @@ def _get_fw_configs() -> List[triton.Config]:  # noqa: C901
                                             "BLOCK_N": BLOCK_N,
                                             "matrix_instr_nonkdim": matrix_instr_nonkdim,
                                             "waves_per_eu": waves_per_eu,
+                                            "enable_tw_preload": False,
+                                            "enable_pw_preload": False,
                                         },
                                         num_stages=num_stages,
                                         num_warps=num_warps,
@@ -208,6 +218,50 @@ def _get_fw_configs() -> List[triton.Config]:  # noqa: C901
                 num_warps=8,
             ),
         ]
+
+        for config in configs:
+            config.kwargs["enable_tw_preload"] = False
+            config.kwargs["enable_pw_preload"] = False
+
+        if os.getenv("HSTU_AUTOTUNE_OPS_AND_MAXNREGS", None) == "1":
+            # autotune for maxnregs, optimial values for A100 and H100 (with SMEM) for seq_lens 256-2048
+            maxnregs_autotune = [128, 155, 256, 166, 207]
+            BLOCK_M_to_smem_autotune = [64, 64]
+            BLOCK_N_to_smem_autotune = [32, 64]
+            enable_preload = has_fb_tl_smem_ops
+
+            def do_smem_autotune(BlockM, BlockN):
+                for BLOCK_M_N in zip(BLOCK_M_to_smem_autotune,
+                                     BLOCK_N_to_smem_autotune):
+                    if BlockM == BLOCK_M_N[0] and BlockN == BLOCK_M_N[1]:
+                        return True
+                return False
+
+            # This is only for testing and collecting the best maxnregs, never enable this
+            # if os.getenv("HSTU_AUTOTUNE_OPS_MAXNREGS_BRUTE", None) == "1":
+            #     maxnregs_autotune = range(96, 256)
+
+            base_configs = configs
+            configs = []
+            for config in base_configs:
+                configs.append(config)
+
+                # skip adding extra smem configs for BLOCK_M/Ns that we know aren't going to come out on top
+                if not do_smem_autotune(config.kwargs["BLOCK_M"], config.kwargs["BLOCK_N"]):
+                    continue
+
+                for max_regs in maxnregs_autotune:
+                    configs.append(
+                        triton.Config(
+                            {
+                                "BLOCK_M": config.kwargs["BLOCK_M"], "BLOCK_N": config.kwargs["BLOCK_N"],
+                                "enable_tw_preload": enable_preload, "enable_pw_preload": enable_preload,
+                                "maxnreg": max_regs
+                            },
+                            num_stages=config.num_stages,
+                            num_warps=config.num_warps,
+                        )
+                    )
     return configs
 
 
@@ -227,6 +281,8 @@ def _ragged_hstu_attn_fwd_one_block(  # noqa: C901
     ts_0,
     TW,
     PW,
+    TW_PRELOAD,
+    PW_PRELOAD,
     alpha,
     MAX_SEQ_LEN,
     num_buckets,
@@ -251,6 +307,8 @@ def _ragged_hstu_attn_fwd_one_block(  # noqa: C901
     ALLOW_TF32: tl.constexpr,
     BLOCK_M: tl.constexpr,
     BLOCK_N: tl.constexpr,
+    enable_tw_preload: tl.constexpr,
+    enable_pw_preload: tl.constexpr,
 ):
     start_n = tl.multiple_of(start_n, BLOCK_N)
     # -- compute qk ----
@@ -306,10 +364,18 @@ def _ragged_hstu_attn_fwd_one_block(  # noqa: C901
             ts = ts.to(tl.int32)
             ts = tl.where(ts > 0, ts, 0)
             ts = tl.where(ts < num_buckets, ts, num_buckets)
-            ts_w = tl.load(
-                TW + ts,
-                mask=mask_m[:, None] and mask_n[None, :],
-            )
+            if enable_tw_preload:
+                ts_w = fb_tl_gather(
+                    TW_PRELOAD, ts,
+                    # Masking here SMEM hurts perf, and un-does 8% perf win
+                    # TODO: Find a way to peal this out of the loop or hoist it to prologue
+                    # mask=mask_m[:, None] and mask_n[None, :],
+                )
+            else:
+                ts_w = tl.load(
+                    TW + ts,
+                    mask=mask_m[:, None] and mask_n[None, :],
+                )
             attn_bias = attn_bias + ts_w
         if USE_POS_BIAS:
             if HAS_MAX_POS_IND:
@@ -322,10 +388,18 @@ def _ragged_hstu_attn_fwd_one_block(  # noqa: C901
                 )
             else:
                 offs_pos_w = offs_n_minus_m + MAX_SEQ_LEN - 1
-            pos_w = tl.load(
-                PW + offs_pos_w,
-                mask=mask_m[:, None] and mask_n[None, :],
-            )
+            if enable_pw_preload:
+                pos_w = fb_tl_gather(
+                    PW_PRELOAD, offs_pos_w,
+                    # Masking here SMEM hurts perf, and un-does 8% perf win
+                    # TODO: Find a way to peal this out of the loop or hoist it to prologue
+                    # mask=mask_m[:, None] and mask_n[None, :],
+                )
+            else:
+                pos_w = tl.load(
+                    PW + offs_pos_w,
+                    mask=mask_m[:, None] and mask_n[None, :],
+                )
             attn_bias = attn_bias + pos_w
         qk = qk + attn_bias
     elif ATTN_BIAS_TYPE == "separate":
@@ -402,6 +476,8 @@ def _ragged_hstu_attn_fwd_compute(  # noqa C901
     BLOCK_N: tl.constexpr,
     max_attn_len: tl.constexpr,
     HAS_MAX_ATTN_LEN: tl.constexpr,
+    enable_tw_preload: tl.constexpr,
+    enable_pw_preload: tl.constexpr,
 ):
     off_z = off_hz // H
     off_h = off_hz % H
@@ -507,6 +583,19 @@ def _ragged_hstu_attn_fwd_compute(  # noqa C901
             K_block_ptr = tl.advance(K_block_ptr, (0, low))
             # pyre-ignore[61]
             V_block_ptr = tl.advance(V_block_ptr, (low, 0))
+
+        TW_PRELOAD = None
+        if USE_TIME_BIAS and enable_tw_preload:
+            tw_bucket_range = tl.arange(0, 2048)
+            TW_PRELOAD = tl.load(TW + tw_bucket_range)
+            TW_PRELOAD = fb_tl_local_copy(TW_PRELOAD)
+
+        PW_PRELOAD = None
+        if USE_POS_BIAS and enable_pw_preload:
+            pw_bucket_range = tl.arange(0, 4096)
+            PW_PRELOAD = tl.load(PW + pw_bucket_range)
+            PW_PRELOAD = fb_tl_local_copy(PW_PRELOAD)
+
         # pyre-ignore[61]
         for start_n in range(low, high, BLOCK_N):
             cur_offs_n = offs_n + start_n
@@ -532,6 +621,8 @@ def _ragged_hstu_attn_fwd_compute(  # noqa C901
                 ts_0=ts_0 if ATTN_BIAS_TYPE == "fused" and USE_TIME_BIAS else None,
                 TW=TW,
                 PW=PW,
+                TW_PRELOAD=TW_PRELOAD,
+                PW_PRELOAD=PW_PRELOAD,
                 alpha=alpha,
                 MAX_SEQ_LEN=MAX_SEQ_LEN,
                 num_buckets=num_buckets,
@@ -558,6 +649,8 @@ def _ragged_hstu_attn_fwd_compute(  # noqa C901
                 ALLOW_TF32=ALLOW_TF32,
                 BLOCK_M=BLOCK_M,
                 BLOCK_N=BLOCK_N,
+                enable_tw_preload=enable_tw_preload,
+                enable_pw_preload=enable_pw_preload,
             )
             K_block_ptr = tl.advance(K_block_ptr, (0, BLOCK_N))
             V_block_ptr = tl.advance(V_block_ptr, (BLOCK_N, 0))
@@ -598,6 +691,8 @@ def _ragged_hstu_attn_fwd_compute(  # noqa C901
                         ),
                         TW=TW,
                         PW=PW,
+                        TW_PRELOAD=TW_PRELOAD,
+                        PW_PRELOAD=PW_PRELOAD,
                         alpha=alpha,
                         MAX_SEQ_LEN=MAX_SEQ_LEN,
                         num_buckets=num_buckets,
@@ -624,6 +719,8 @@ def _ragged_hstu_attn_fwd_compute(  # noqa C901
                         ALLOW_TF32=ALLOW_TF32,
                         BLOCK_M=BLOCK_M,
                         BLOCK_N=BLOCK_N,
+                        enable_tw_preload=enable_tw_preload,
+                        enable_pw_preload=enable_pw_preload,
                     )
                     K_block_ptr = tl.advance(K_block_ptr, (0, BLOCK_N))
                     V_block_ptr = tl.advance(V_block_ptr, (BLOCK_N, 0))
@@ -722,6 +819,8 @@ def _ragged_hstu_attn_fwd(  # noqa C901
     BLOCK_N: tl.constexpr,
     max_attn_len: tl.constexpr,
     HAS_MAX_ATTN_LEN: tl.constexpr,
+    enable_tw_preload: tl.constexpr,
+    enable_pw_preload: tl.constexpr,
 ):
     off_hz = tl.program_id(1)
     pid = tl.program_id(0)
@@ -781,6 +880,8 @@ def _ragged_hstu_attn_fwd(  # noqa C901
         HAS_MAX_ATTN_LEN=HAS_MAX_ATTN_LEN,
         BLOCK_M=BLOCK_M,
         BLOCK_N=BLOCK_N,
+        enable_tw_preload=enable_tw_preload,
+        enable_pw_preload=enable_pw_preload,
     )
 
 
@@ -854,6 +955,8 @@ def _ragged_hstu_attn_fwd_persistent(  # noqa C901
     BLOCK_N: tl.constexpr,
     max_attn_len: tl.constexpr,
     HAS_MAX_ATTN_LEN: tl.constexpr,
+    enable_tw_preload: tl.constexpr,
+    enable_pw_preload: tl.constexpr,
 ):
     n_tile_num = tl.cdiv(MAX_SEQ_LEN, BLOCK_M)
     prog_id = tl.program_id(0)
@@ -926,6 +1029,8 @@ def _ragged_hstu_attn_fwd_persistent(  # noqa C901
             HAS_MAX_ATTN_LEN=HAS_MAX_ATTN_LEN,
             BLOCK_M=BLOCK_M,
             BLOCK_N=BLOCK_N,
+            enable_tw_preload=enable_tw_preload,
+            enable_pw_preload=enable_pw_preload,
         )
         tile_idx += num_progs
 
