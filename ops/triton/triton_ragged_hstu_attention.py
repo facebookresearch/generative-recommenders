@@ -396,7 +396,8 @@ def _ragged_hstu_attn_fwd_compute(  # noqa C901
     time_bucket_div,
     time_delta,
     contextual_seq_len,
-    off_hz,
+    off_z,
+    off_h,
     pid,
     INVALID_MASK_TYPE: tl.constexpr,
     CAUSAL: tl.constexpr,
@@ -417,8 +418,6 @@ def _ragged_hstu_attn_fwd_compute(  # noqa C901
     HAS_MAX_ATTN_LEN: tl.constexpr,
     HAS_CONTEXTUAL_SEQ_LEN: tl.constexpr,
 ):
-    off_z = off_hz // H
-    off_h = off_hz % H
     seq_start = tl.load(seq_offsets + off_z)
     seq_end = tl.load(seq_offsets + off_z + 1)
     seq_len = (seq_end - seq_start).to(tl.int32)
@@ -495,7 +494,11 @@ def _ragged_hstu_attn_fwd_compute(  # noqa C901
         if INVALID_MASK_TYPE == "lower_triangular":
             if HAS_MULTIPLE_TARGETS:
                 if HAS_MAX_ATTN_LEN:
-                    start_m_index = seq_len - n_targets if start_m > seq_len - n_targets else start_m
+                    start_m_index = (
+                        seq_len - n_targets
+                        if start_m > seq_len - n_targets
+                        else start_m
+                    )
                     low = start_m_index - max_attn_len
                     low = low if low > 0 else 0
                 else:
@@ -676,6 +679,7 @@ def _ragged_hstu_attn_fwd_compute(  # noqa C901
             out_ptrs = Out + off_o
             tl.store(out_ptrs, acc, mask=(offs_m < seq_len)[:, None])
 
+
 @triton.autotune(
     configs=_get_fw_configs(),
     key=[
@@ -695,6 +699,7 @@ def _ragged_hstu_attn_fwd(  # noqa C901
     Q,
     K,
     V,
+    sort_by_length_indices,
     seq_offsets,
     TS,
     TW,
@@ -748,8 +753,13 @@ def _ragged_hstu_attn_fwd(  # noqa C901
     max_attn_len: tl.constexpr,
     HAS_MAX_ATTN_LEN: tl.constexpr,
     HAS_CONTEXTUAL_SEQ_LEN: tl.constexpr,
+    HAS_SORT_BY_LENGTH_INDICES: tl.constexpr,
 ):
     off_hz = tl.program_id(1)
+    off_z = off_hz // H
+    if HAS_SORT_BY_LENGTH_INDICES:
+        off_z = tl.load(sort_by_length_indices + off_z)
+    off_h = off_hz % H
     pid = tl.program_id(0)
     _ragged_hstu_attn_fwd_compute(
         Q=Q,
@@ -789,7 +799,8 @@ def _ragged_hstu_attn_fwd(  # noqa C901
         time_bucket_div=time_bucket_div,
         time_delta=time_delta,
         contextual_seq_len=contextual_seq_len,
-        off_hz=off_hz,
+        off_z=off_z,
+        off_h=off_h,
         pid=pid,
         INVALID_MASK_TYPE=INVALID_MASK_TYPE,
         CAUSAL=CAUSAL,
@@ -831,6 +842,7 @@ def _ragged_hstu_attn_fwd_persistent(  # noqa C901
     Q,
     K,
     V,
+    sort_by_length_indices,
     seq_offsets,
     TS,
     TW,
@@ -884,6 +896,7 @@ def _ragged_hstu_attn_fwd_persistent(  # noqa C901
     max_attn_len: tl.constexpr,
     HAS_MAX_ATTN_LEN: tl.constexpr,
     HAS_CONTEXTUAL_SEQ_LEN: tl.constexpr,
+    HAS_SORT_BY_LENGTH_INDICES: tl.constexpr,
 ):
     n_tile_num = tl.cdiv(MAX_SEQ_LEN, BLOCK_M)
     prog_id = tl.program_id(0)
@@ -899,7 +912,8 @@ def _ragged_hstu_attn_fwd_persistent(  # noqa C901
     for _ in range(0, tiles_per_sm):
         pid = (total_tiles - tile_idx - 1) // (Z * H)
         off_hz = (total_tiles - tile_idx - 1) % (Z * H)
-        ## 
+        off_z = off_hz // H
+        off_h = off_hz % H
         _ragged_hstu_attn_fwd_compute(
             Q=Q,
             K=K,
@@ -938,7 +952,8 @@ def _ragged_hstu_attn_fwd_persistent(  # noqa C901
             time_bucket_div=time_bucket_div,
             time_delta=time_delta,
             contextual_seq_len=contextual_seq_len,
-            off_hz=off_hz,
+            off_z=off_z,
+            off_h=off_h,
             pid=pid,
             INVALID_MASK_TYPE=INVALID_MASK_TYPE,
             CAUSAL=CAUSAL,
@@ -961,6 +976,7 @@ def _ragged_hstu_attn_fwd_persistent(  # noqa C901
         )
         tile_idx += num_progs
 
+
 def triton_ragged_attention(
     N: int,
     alpha: float,
@@ -975,6 +991,7 @@ def triton_ragged_attention(
     attn_scale: Optional[torch.Tensor],
     max_attn_len: Optional[int],
     contextual_seq_len: Optional[int],
+    sort_by_length_indices: Optional[torch.Tensor] = None,
 ) -> torch.Tensor:
     assert invalid_attn_mask_type in [
         "lower_triangular",
@@ -991,6 +1008,7 @@ def triton_ragged_attention(
     has_attn_scale = attn_scale is not None
     has_max_attn_len = max_attn_len is not None
     has_contextual_seq_len = contextual_seq_len is not None and contextual_seq_len > 0
+    has_sort_by_length_indices = sort_by_length_indices is not None
 
     stride_sz = 0
     stride_sm = 0
@@ -1005,69 +1023,71 @@ def triton_ragged_attention(
         autotune_max_seq_len = autotune_max_seq_len // 2
 
     kwargs = {
-    "Q": q,
-    "K": k,
-    "V": v,
-    "seq_offsets": seq_offsets,
-    "TS": None,
-    "TW": None,
-    "PW": None,
-    "Bias": attn_bias,
-    "seq2_offsets": seq2_offsets,
-    "delta_x_offsets": None,
-    "num_targets": num_targets,
-    "Scale": attn_scale,
-    "Out": out,
-    "stride_qm": q.stride(0),
-    "stride_qh": q.stride(1),
-    "stride_kn": k.stride(0),
-    "stride_kh": k.stride(1),
-    "stride_vn": v.stride(0),
-    "stride_vh": v.stride(1),
-    "stride_sz": stride_sz,
-    "stride_sm": stride_sm,
-    "stride_ts": None,
-    "stride_om": out.stride(0),
-    "stride_oh": out.stride(1),
-    "alpha": alpha,
-    "Z": Z,
-    "H": H,
-    "MAX_SEQ_LEN": N,
-    "AUTOTUNE_MAX_SEQ_LEN": autotune_max_seq_len,
-    "DimQ": DimQ,
-    "DimV": DimV,
-    "DeltaSize": 0,
-    "num_buckets": None,
-    "max_pos_ind": None,
-    "time_bucket_incr": None,
-    "time_bucket_div": None,
-    "time_delta": None,
-    "contextual_seq_len": contextual_seq_len,
-    "INVALID_MASK_TYPE": invalid_attn_mask_type,
-    "CAUSAL": None,
-    "BUCKET_FN": "none",
-    "ATTN_BIAS_TYPE": "separate" if has_attn_bias else "none",
-    "USE_TIME_BIAS": False,
-    "USE_POS_BIAS": False,
-    "HAS_MAX_POS_IND": False,
-    "HAS_MULTIPLE_TARGETS": has_multiple_targets,
-    "HAS_ATTN_SCALE": has_attn_scale,
-    "IS_DELTA_Q": False,
-    "ALLOW_TF32": torch.backends.cuda.matmul.allow_tf32,
-    "BLOCK_D_Q": DimQ,
-    "BLOCK_D_V": DimV,
-    "max_attn_len": max_attn_len,
-    "HAS_MAX_ATTN_LEN": has_max_attn_len,
-    "HAS_CONTEXTUAL_SEQ_LEN": has_contextual_seq_len,
+        "Q": q,
+        "K": k,
+        "V": v,
+        "sort_by_length_indices": sort_by_length_indices,
+        "seq_offsets": seq_offsets,
+        "TS": None,
+        "TW": None,
+        "PW": None,
+        "Bias": attn_bias,
+        "seq2_offsets": seq2_offsets,
+        "delta_x_offsets": None,
+        "num_targets": num_targets,
+        "Scale": attn_scale,
+        "Out": out,
+        "stride_qm": q.stride(0),
+        "stride_qh": q.stride(1),
+        "stride_kn": k.stride(0),
+        "stride_kh": k.stride(1),
+        "stride_vn": v.stride(0),
+        "stride_vh": v.stride(1),
+        "stride_sz": stride_sz,
+        "stride_sm": stride_sm,
+        "stride_ts": None,
+        "stride_om": out.stride(0),
+        "stride_oh": out.stride(1),
+        "alpha": alpha,
+        "Z": Z,
+        "H": H,
+        "MAX_SEQ_LEN": N,
+        "AUTOTUNE_MAX_SEQ_LEN": autotune_max_seq_len,
+        "DimQ": DimQ,
+        "DimV": DimV,
+        "DeltaSize": 0,
+        "num_buckets": None,
+        "max_pos_ind": None,
+        "time_bucket_incr": None,
+        "time_bucket_div": None,
+        "time_delta": None,
+        "contextual_seq_len": contextual_seq_len,
+        "INVALID_MASK_TYPE": invalid_attn_mask_type,
+        "CAUSAL": None,
+        "BUCKET_FN": "none",
+        "ATTN_BIAS_TYPE": "separate" if has_attn_bias else "none",
+        "USE_TIME_BIAS": False,
+        "USE_POS_BIAS": False,
+        "HAS_MAX_POS_IND": False,
+        "HAS_MULTIPLE_TARGETS": has_multiple_targets,
+        "HAS_ATTN_SCALE": has_attn_scale,
+        "IS_DELTA_Q": False,
+        "ALLOW_TF32": torch.backends.cuda.matmul.allow_tf32,
+        "BLOCK_D_Q": DimQ,
+        "BLOCK_D_V": DimV,
+        "max_attn_len": max_attn_len,
+        "HAS_MAX_ATTN_LEN": has_max_attn_len,
+        "HAS_CONTEXTUAL_SEQ_LEN": has_contextual_seq_len,
+        "HAS_SORT_BY_LENGTH_INDICES": has_sort_by_length_indices,
     }
     if torch.version.hip:
         grid = (1216,)
         _ragged_hstu_attn_fwd_persistent[grid](**kwargs)
     else:
         grid = lambda meta: (  # noqa E731
-                triton.cdiv(N, meta["BLOCK_M"]),
-                Z * H,
-            )
+            triton.cdiv(N, meta["BLOCK_M"]),
+            Z * H,
+        )
         _ragged_hstu_attn_fwd[grid](**kwargs)
     return out
 
@@ -1094,6 +1114,7 @@ def triton_ragged_attention_relative_bias(
     relative_bias_type: str,
     max_attn_len: Optional[int],
     contextual_seq_len: Optional[int],
+    sort_by_length_indices: Optional[torch.Tensor] = None,
 ) -> torch.Tensor:
     Z = timestamps.size(0)
     N = timestamps.size(1) - 1
@@ -1102,6 +1123,7 @@ def triton_ragged_attention_relative_bias(
     has_max_pos_id = max_pos_ind is not None
     has_max_attn_len = max_attn_len is not None
     has_contextual_seq_len = contextual_seq_len is not None and contextual_seq_len > 0
+    has_sort_by_length_indices = sort_by_length_indices is not None
     _, H, DimQ = q.shape
     _, _, DimV = v.shape
     out = torch.empty_like(v)
@@ -1120,69 +1142,71 @@ def triton_ragged_attention_relative_bias(
         autotune_max_seq_len = autotune_max_seq_len // 2
 
     kwargs = {
-    "Q": q,
-    "K": k,
-    "V": v,
-    "seq_offsets": seq_offsets,
-    "TS": timestamps,
-    "TW": ts_weights,
-    "PW": pos_weights,
-    "Bias": None,
-    "seq2_offsets": None,
-    "delta_x_offsets": None,
-    "num_targets": num_targets,
-    "Scale": attn_scale,
-    "Out": out,
-    "stride_qm": q.stride(0),
-    "stride_qh": q.stride(1),
-    "stride_kn": k.stride(0),
-    "stride_kh": k.stride(1),
-    "stride_vn": v.stride(0),
-    "stride_vh": v.stride(1),
-    "stride_sz": stride_sz,
-    "stride_sm": stride_sm,
-    "stride_ts": timestamps.stride(0),
-    "stride_om": out.stride(0),
-    "stride_oh": out.stride(1),
-    "alpha": alpha,
-    "Z": Z,
-    "H": H,
-    "MAX_SEQ_LEN": N,
-    "AUTOTUNE_MAX_SEQ_LEN": autotune_max_seq_len,
-    "DimQ": DimQ,
-    "DimV": DimV,
-    "DeltaSize": 0,
-    "num_buckets": num_buckets,
-    "max_pos_ind": max_pos_ind,
-    "time_bucket_incr": time_bucket_incr,
-    "time_bucket_div": time_bucket_div,
-    "time_delta": time_delta,
-    "contextual_seq_len": contextual_seq_len,
-    "INVALID_MASK_TYPE": invalid_attn_mask_type,
-    "CAUSAL": causal,
-    "BUCKET_FN": time_bucket_fn,
-    "ATTN_BIAS_TYPE": "fused",
-    "USE_TIME_BIAS": use_time_bias,
-    "USE_POS_BIAS": use_pos_bias,
-    "HAS_MAX_POS_IND": has_max_pos_id,
-    "HAS_MULTIPLE_TARGETS": has_multiple_targets,
-    "HAS_ATTN_SCALE": has_attn_scale,
-    "IS_DELTA_Q": False,
-    "ALLOW_TF32": torch.backends.cuda.matmul.allow_tf32,
-    "BLOCK_D_Q": DimQ,
-    "BLOCK_D_V": DimV,
-    "max_attn_len": max_attn_len,
-    "HAS_MAX_ATTN_LEN": has_max_attn_len,
-    "HAS_CONTEXTUAL_SEQ_LEN": has_contextual_seq_len,
+        "Q": q,
+        "K": k,
+        "V": v,
+        "sort_by_length_indices": sort_by_length_indices,
+        "seq_offsets": seq_offsets,
+        "TS": timestamps,
+        "TW": ts_weights,
+        "PW": pos_weights,
+        "Bias": None,
+        "seq2_offsets": None,
+        "delta_x_offsets": None,
+        "num_targets": num_targets,
+        "Scale": attn_scale,
+        "Out": out,
+        "stride_qm": q.stride(0),
+        "stride_qh": q.stride(1),
+        "stride_kn": k.stride(0),
+        "stride_kh": k.stride(1),
+        "stride_vn": v.stride(0),
+        "stride_vh": v.stride(1),
+        "stride_sz": stride_sz,
+        "stride_sm": stride_sm,
+        "stride_ts": timestamps.stride(0),
+        "stride_om": out.stride(0),
+        "stride_oh": out.stride(1),
+        "alpha": alpha,
+        "Z": Z,
+        "H": H,
+        "MAX_SEQ_LEN": N,
+        "AUTOTUNE_MAX_SEQ_LEN": autotune_max_seq_len,
+        "DimQ": DimQ,
+        "DimV": DimV,
+        "DeltaSize": 0,
+        "num_buckets": num_buckets,
+        "max_pos_ind": max_pos_ind,
+        "time_bucket_incr": time_bucket_incr,
+        "time_bucket_div": time_bucket_div,
+        "time_delta": time_delta,
+        "contextual_seq_len": contextual_seq_len,
+        "INVALID_MASK_TYPE": invalid_attn_mask_type,
+        "CAUSAL": causal,
+        "BUCKET_FN": time_bucket_fn,
+        "ATTN_BIAS_TYPE": "fused",
+        "USE_TIME_BIAS": use_time_bias,
+        "USE_POS_BIAS": use_pos_bias,
+        "HAS_MAX_POS_IND": has_max_pos_id,
+        "HAS_MULTIPLE_TARGETS": has_multiple_targets,
+        "HAS_ATTN_SCALE": has_attn_scale,
+        "IS_DELTA_Q": False,
+        "ALLOW_TF32": torch.backends.cuda.matmul.allow_tf32,
+        "BLOCK_D_Q": DimQ,
+        "BLOCK_D_V": DimV,
+        "max_attn_len": max_attn_len,
+        "HAS_MAX_ATTN_LEN": has_max_attn_len,
+        "HAS_CONTEXTUAL_SEQ_LEN": has_contextual_seq_len,
+        "HAS_SORT_BY_LENGTH_INDICES": has_sort_by_length_indices,
     }
     if torch.version.hip:
         grid = (1216,)
         _ragged_hstu_attn_fwd_persistent[grid](**kwargs)
     else:
         grid = lambda meta: (  # noqa E731
-                triton.cdiv(N, meta["BLOCK_M"]),
-                Z * H,
-            )
+            triton.cdiv(N, meta["BLOCK_M"]),
+            Z * H,
+        )
         _ragged_hstu_attn_fwd[grid](**kwargs)
 
     return out
