@@ -301,13 +301,6 @@ def train_fn(
             if (batch_id % eval_interval) == 0:
                 model.eval()
 
-                seq_features, target_ids, target_ratings = (
-                    movielens_seq_features_from_row(
-                        row,
-                        device=device,
-                        max_output_length=gr_output_length + 1,
-                    )
-                )
                 eval_state = get_eval_state(
                     model=model.module,
                     all_item_ids=dataset.all_item_ids,
