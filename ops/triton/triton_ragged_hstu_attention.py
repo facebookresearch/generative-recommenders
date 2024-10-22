@@ -595,7 +595,7 @@ def _ragged_hstu_attn_fwd_compute(  # noqa C901
                 offset = (low_delta - uih_end).to(tl.int32)  # pyre-ignore [61]
                 K_block_ptr = tl.advance(K_block_ptr, (0, offset))
                 V_block_ptr = tl.advance(V_block_ptr, (offset, 0))
-                for start_delta in range(low_delta, high_delta, BLOCK_N):
+                for start_delta in tl.range(low_delta, high_delta, BLOCK_N, num_stages=0):
                     cur_offs_n = offs_n + start_delta
                     mask_n = cur_offs_n < seq_len
                     acc += _ragged_hstu_attn_fwd_one_block(
