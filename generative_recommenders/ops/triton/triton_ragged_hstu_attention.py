@@ -3233,7 +3233,7 @@ def triton_ragged_attention_relative_bias_bwd(
 
     contextual_seq_len = 0 if contextual_seq_len is None else contextual_seq_len
 
-    if N < 1024:
+    if autotune_max_seq_len(N) < 1024:
         fused_bias_bwd = True
         # have to explicitly use fp32 since 'atomic_add does not support bf16'
         d_ts_weights = torch.empty(
