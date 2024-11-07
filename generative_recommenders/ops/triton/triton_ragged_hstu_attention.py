@@ -250,13 +250,13 @@ def _ragged_hstu_attn_fwd_one_block(  # noqa: C901
     MAX_SEQ_LEN,
     num_buckets,
     max_pos_ind,
-    max_attn_len,
     time_bucket_incr,
     time_bucket_div,
     time_delta,
     bias_ptrs,
     attn_scale,
     contextual_seq_len,
+    MAX_ATTN_LEN: tl.constexpr,
     INVALID_MASK_TYPE: tl.constexpr,
     CAUSAL: tl.constexpr,
     BUCKET_FN: tl.constexpr,
@@ -266,7 +266,6 @@ def _ragged_hstu_attn_fwd_one_block(  # noqa: C901
     HAS_MAX_POS_IND: tl.constexpr,
     HAS_MULTIPLE_TARGETS: tl.constexpr,
     HAS_ATTN_SCALE: tl.constexpr,
-    HAS_MAX_ATTN_LEN: tl.constexpr,
     HAS_CONTEXTUAL_SEQ_LEN: tl.constexpr,
     IS_DELTA_Q: tl.constexpr,
     ALLOW_TF32: tl.constexpr,
@@ -294,14 +293,14 @@ def _ragged_hstu_attn_fwd_one_block(  # noqa: C901
             offs_m = tl.where(offs_m > n_targets - 1, offs_m, n_targets - 1)
             offs_n = tl.where(offs_n > n_targets - 1, offs_n, n_targets - 1)
     offs_n_minus_m = offs_n[None, :] - offs_m[:, None]
-    if HAS_MAX_ATTN_LEN:
+    if MAX_ATTN_LEN > 0:
         if INVALID_MASK_TYPE == "lower_triangular":
             invalid_mask = invalid_mask or (
-                offs_n_minus_m < 0 and offs_n_minus_m >= -max_attn_len
+                offs_n_minus_m < 0 and offs_n_minus_m >= -MAX_ATTN_LEN
             )
         elif INVALID_MASK_TYPE == "upper_triangular":
             invalid_mask = invalid_mask or (
-                offs_n_minus_m > 0 and offs_n_minus_m <= max_attn_len
+                offs_n_minus_m > 0 and offs_n_minus_m <= MAX_ATTN_LEN
             )
     else:
         if INVALID_MASK_TYPE == "lower_triangular":
@@ -433,8 +432,7 @@ def _ragged_hstu_attn_fwd_compute(  # noqa C901
     BLOCK_D_V: tl.constexpr,
     BLOCK_M: tl.constexpr,
     BLOCK_N: tl.constexpr,
-    max_attn_len: tl.constexpr,
-    HAS_MAX_ATTN_LEN: tl.constexpr,
+    MAX_ATTN_LEN: tl.constexpr,
     HAS_CONTEXTUAL_SEQ_LEN: tl.constexpr,
 ):
     seq_start = tl.load(seq_offsets + off_z)
@@ -512,13 +510,13 @@ def _ragged_hstu_attn_fwd_compute(  # noqa C901
         acc = tl.zeros([BLOCK_M, BLOCK_D_V], dtype=tl.float32)
         if INVALID_MASK_TYPE == "lower_triangular":
             if HAS_MULTIPLE_TARGETS:
-                if HAS_MAX_ATTN_LEN:
+                if MAX_ATTN_LEN > 0:
                     start_m_index = (
                         seq_len - n_targets
                         if start_m > seq_len - n_targets
                         else start_m
                     )
-                    low = start_m_index - max_attn_len
+                    low = start_m_index - MAX_ATTN_LEN
                     low = low if low > 0 else 0
                 else:
                     low = 0
@@ -531,8 +529,8 @@ def _ragged_hstu_attn_fwd_compute(  # noqa C901
                     if start_m < contextual_seq_len:
                         high = seq_len - n_targets
             else:
-                if HAS_MAX_ATTN_LEN:
-                    low = start_m - max_attn_len
+                if MAX_ATTN_LEN > 0:
+                    low = start_m - MAX_ATTN_LEN
                     low = low if low > 0 else 0
                 else:
                     low = 0
@@ -578,7 +576,7 @@ def _ragged_hstu_attn_fwd_compute(  # noqa C901
                 MAX_SEQ_LEN=MAX_SEQ_LEN,
                 num_buckets=num_buckets,
                 max_pos_ind=max_pos_ind,
-                max_attn_len=max_attn_len,
+                MAX_ATTN_LEN=MAX_ATTN_LEN,
                 time_bucket_incr=time_bucket_incr,
                 time_bucket_div=time_bucket_div,
                 time_delta=time_delta,
@@ -596,7 +594,6 @@ def _ragged_hstu_attn_fwd_compute(  # noqa C901
                 HAS_MAX_POS_IND=HAS_MAX_POS_IND,
                 HAS_MULTIPLE_TARGETS=HAS_MULTIPLE_TARGETS,
                 HAS_ATTN_SCALE=HAS_ATTN_SCALE,
-                HAS_MAX_ATTN_LEN=HAS_MAX_ATTN_LEN,
                 HAS_CONTEXTUAL_SEQ_LEN=HAS_CONTEXTUAL_SEQ_LEN,
                 IS_DELTA_Q=IS_DELTA_Q,
                 ALLOW_TF32=ALLOW_TF32,
@@ -646,7 +643,7 @@ def _ragged_hstu_attn_fwd_compute(  # noqa C901
                         MAX_SEQ_LEN=MAX_SEQ_LEN,
                         num_buckets=num_buckets,
                         max_pos_ind=max_pos_ind,
-                        max_attn_len=max_attn_len,
+                        MAX_ATTN_LEN=MAX_ATTN_LEN,
                         time_bucket_incr=time_bucket_incr,
                         time_bucket_div=time_bucket_div,
                         time_delta=time_delta,
@@ -664,7 +661,6 @@ def _ragged_hstu_attn_fwd_compute(  # noqa C901
                         HAS_MAX_POS_IND=HAS_MAX_POS_IND,
                         HAS_MULTIPLE_TARGETS=HAS_MULTIPLE_TARGETS,
                         HAS_ATTN_SCALE=HAS_ATTN_SCALE,
-                        HAS_MAX_ATTN_LEN=HAS_MAX_ATTN_LEN,
                         HAS_CONTEXTUAL_SEQ_LEN=HAS_CONTEXTUAL_SEQ_LEN,
                         IS_DELTA_Q=IS_DELTA_Q,
                         ALLOW_TF32=ALLOW_TF32,
@@ -769,8 +765,7 @@ def _ragged_hstu_attn_fwd(  # noqa C901
     BLOCK_D_V: tl.constexpr,
     BLOCK_M: tl.constexpr,
     BLOCK_N: tl.constexpr,
-    max_attn_len: tl.constexpr,
-    HAS_MAX_ATTN_LEN: tl.constexpr,
+    MAX_ATTN_LEN: tl.constexpr,
     HAS_CONTEXTUAL_SEQ_LEN: tl.constexpr,
     HAS_SORT_BY_LENGTH_INDICES: tl.constexpr,
 ):
@@ -834,8 +829,7 @@ def _ragged_hstu_attn_fwd(  # noqa C901
         ALLOW_TF32=ALLOW_TF32,
         BLOCK_D_Q=BLOCK_D_Q,
         BLOCK_D_V=BLOCK_D_V,
-        max_attn_len=max_attn_len,
-        HAS_MAX_ATTN_LEN=HAS_MAX_ATTN_LEN,
+        MAX_ATTN_LEN=MAX_ATTN_LEN,
         HAS_CONTEXTUAL_SEQ_LEN=HAS_CONTEXTUAL_SEQ_LEN,
         BLOCK_M=BLOCK_M,
         BLOCK_N=BLOCK_N,
@@ -912,8 +906,7 @@ def _ragged_hstu_attn_fwd_persistent(  # noqa C901
     BLOCK_D_V: tl.constexpr,
     BLOCK_M: tl.constexpr,
     BLOCK_N: tl.constexpr,
-    max_attn_len: tl.constexpr,
-    HAS_MAX_ATTN_LEN: tl.constexpr,
+    MAX_ATTN_LEN: tl.constexpr,
     HAS_CONTEXTUAL_SEQ_LEN: tl.constexpr,
     HAS_SORT_BY_LENGTH_INDICES: tl.constexpr,
 ):
@@ -987,8 +980,7 @@ def _ragged_hstu_attn_fwd_persistent(  # noqa C901
             ALLOW_TF32=ALLOW_TF32,
             BLOCK_D_Q=BLOCK_D_Q,
             BLOCK_D_V=BLOCK_D_V,
-            max_attn_len=max_attn_len,
-            HAS_MAX_ATTN_LEN=HAS_MAX_ATTN_LEN,
+            MAX_ATTN_LEN=MAX_ATTN_LEN,
             HAS_CONTEXTUAL_SEQ_LEN=HAS_CONTEXTUAL_SEQ_LEN,
             BLOCK_M=BLOCK_M,
             BLOCK_N=BLOCK_N,
@@ -1048,15 +1040,13 @@ def _get_named_specs() -> List[VersionedSpec]:
             "HAS_ATTN_SCALE": HAS_ATTN_SCALE,
             "BLOCK_M": -1,  # autotuned
             "BLOCK_N": -1,  # autotuned
-            "max_attn_len": 0,
-            "HAS_MAX_ATTN_LEN": False,
+            "MAX_ATTN_LEN": 0,
             "HAS_CONTEXTUAL_SEQ_LEN": False,
             "HAS_SORT_BY_LENGTH_INDICES": False,
         }
 
     default_values = {
-        "max_attn_len": 0,
-        "HAS_MAX_ATTN_LEN": 0,
+        "MAX_ATTN_LEN": 0,
         "HAS_CONTEXTUAL_SEQ_LEN": 0,
         "HAS_SORT_BY_LENGTH_INDICES": 0,
     }
@@ -1378,10 +1368,10 @@ def _ragged_hstu_attn_bwd_one_block(  # noqa C901
     MAX_SEQ_LEN,
     num_buckets,
     max_pos_ind,
-    max_attn_len,
     time_bucket_incr,
     time_bucket_div,
     time_delta,
+    MAX_ATTN_LEN: tl.constexpr,
     INVALID_MASK_TYPE: tl.constexpr,
     CAUSAL: tl.constexpr,
     BUCKET_FN: tl.constexpr,
@@ -1392,7 +1382,6 @@ def _ragged_hstu_attn_bwd_one_block(  # noqa C901
     HAS_MAX_POS_IND: tl.constexpr,
     HAS_MULTIPLE_TARGETS: tl.constexpr,
     HAS_ATTN_SCALE: tl.constexpr,
-    HAS_MAX_ATTN_LEN: tl.constexpr,
     HAS_CONTEXTUAL_SEQ_LEN: tl.constexpr,
     ALLOW_TF32: tl.constexpr,
     BLOCK_M: tl.constexpr,
@@ -1474,16 +1463,16 @@ def _ragged_hstu_attn_bwd_one_block(  # noqa C901
     # pyre-fixme[16]: Module `math` has no attribute `fast_dividef`.
     sig_trans = fast_dividef(1.0, 1.0 + tl.exp(-qk_trans))
     silu_trans = qk_trans * sig_trans * (1.0 / MAX_SEQ_LEN)
-    if HAS_MAX_ATTN_LEN:
+    if MAX_ATTN_LEN > 0:
         if INVALID_MASK_TYPE == "lower_triangular":
             invalid_mask_trans = invalid_mask_trans or (
                 pos_offs_m[None, :] > pos_offs_n[:, None]
-                and pos_offs_n[:, None] - pos_offs_m[None, :] >= -max_attn_len
+                and pos_offs_n[:, None] - pos_offs_m[None, :] >= -MAX_ATTN_LEN
             )
         elif INVALID_MASK_TYPE == "upper_triangular":
             invalid_mask_trans = invalid_mask_trans or (
                 pos_offs_m[None, :] < pos_offs_n[:, None]
-                and pos_offs_n[:, None] - pos_offs_m[None, :] <= max_attn_len
+                and pos_offs_n[:, None] - pos_offs_m[None, :] <= MAX_ATTN_LEN
             )
     else:
         if INVALID_MASK_TYPE == "lower_triangular":
@@ -1613,10 +1602,10 @@ def _ragged_hstu_attn_bwd_one_col_block(  # noqa C901
     MAX_SEQ_LEN,
     num_buckets,
     max_pos_ind,
-    max_attn_len,
     time_bucket_incr,
     time_bucket_div,
     time_delta,
+    MAX_ATTN_LEN: tl.constexpr,
     INVALID_MASK_TYPE: tl.constexpr,
     CAUSAL: tl.constexpr,
     BUCKET_FN: tl.constexpr,
@@ -1627,7 +1616,6 @@ def _ragged_hstu_attn_bwd_one_col_block(  # noqa C901
     HAS_MAX_POS_IND: tl.constexpr,
     HAS_MULTIPLE_TARGETS: tl.constexpr,
     HAS_ATTN_SCALE: tl.constexpr,
-    HAS_MAX_ATTN_LEN: tl.constexpr,
     HAS_CONTEXTUAL_SEQ_LEN: tl.constexpr,
     ALLOW_TF32: tl.constexpr,
     BLOCK_D_Q: tl.constexpr,
@@ -1640,15 +1628,15 @@ def _ragged_hstu_attn_bwd_one_col_block(  # noqa C901
     if INVALID_MASK_TYPE == "lower_triangular":
         if HAS_MULTIPLE_TARGETS:
             low = start_n
-            if HAS_MAX_ATTN_LEN:
-                high = start_n + max_attn_len + BLOCK_N
+            if MAX_ATTN_LEN > 0:
+                high = start_n + MAX_ATTN_LEN + BLOCK_N
                 high = high if high + n_targets < seq_len else seq_len
             else:
                 high = seq_len
         else:
             low = start_n
-            if HAS_MAX_ATTN_LEN:
-                high = start_n + max_attn_len + BLOCK_N
+            if MAX_ATTN_LEN > 0:
+                high = start_n + MAX_ATTN_LEN + BLOCK_N
                 high = high if high < seq_len else seq_len
             else:
                 high = seq_len
@@ -1750,7 +1738,7 @@ def _ragged_hstu_attn_bwd_one_col_block(  # noqa C901
                 MAX_SEQ_LEN=MAX_SEQ_LEN,
                 num_buckets=num_buckets,
                 max_pos_ind=max_pos_ind,
-                max_attn_len=max_attn_len,
+                MAX_ATTN_LEN=MAX_ATTN_LEN,
                 time_bucket_incr=time_bucket_incr,
                 time_bucket_div=time_bucket_div,
                 time_delta=time_delta,
@@ -1764,7 +1752,6 @@ def _ragged_hstu_attn_bwd_one_col_block(  # noqa C901
                 HAS_MAX_POS_IND=HAS_MAX_POS_IND,
                 HAS_MULTIPLE_TARGETS=HAS_MULTIPLE_TARGETS,
                 HAS_ATTN_SCALE=HAS_ATTN_SCALE,
-                HAS_MAX_ATTN_LEN=HAS_MAX_ATTN_LEN,
                 HAS_CONTEXTUAL_SEQ_LEN=HAS_CONTEXTUAL_SEQ_LEN,
                 ALLOW_TF32=ALLOW_TF32,
                 BLOCK_M=BLOCK_M,
@@ -1809,7 +1796,7 @@ def _ragged_hstu_attn_bwd_one_col_block(  # noqa C901
             MAX_SEQ_LEN=MAX_SEQ_LEN,
             num_buckets=num_buckets,
             max_pos_ind=max_pos_ind,
-            max_attn_len=max_attn_len,
+            MAX_ATTN_LEN=MAX_ATTN_LEN,
             time_bucket_incr=time_bucket_incr,
             time_bucket_div=time_bucket_div,
             time_delta=time_delta,
@@ -1823,7 +1810,6 @@ def _ragged_hstu_attn_bwd_one_col_block(  # noqa C901
             HAS_MAX_POS_IND=HAS_MAX_POS_IND,
             HAS_MULTIPLE_TARGETS=HAS_MULTIPLE_TARGETS,
             HAS_ATTN_SCALE=HAS_ATTN_SCALE,
-            HAS_MAX_ATTN_LEN=HAS_MAX_ATTN_LEN,
             HAS_CONTEXTUAL_SEQ_LEN=HAS_CONTEXTUAL_SEQ_LEN,
             ALLOW_TF32=ALLOW_TF32,
             BLOCK_M=BLOCK_M,
@@ -2096,10 +2082,10 @@ def _ragged_hstu_attn_bwd(  # noqa C901
     DimV,
     num_buckets,
     max_pos_ind,
-    max_attn_len,
     time_bucket_incr,
     time_bucket_div,
     time_delta,
+    MAX_ATTN_LEN: tl.constexpr,
     INVALID_MASK_TYPE: tl.constexpr,
     CAUSAL: tl.constexpr,
     BUCKET_FN: tl.constexpr,
@@ -2110,7 +2096,6 @@ def _ragged_hstu_attn_bwd(  # noqa C901
     HAS_MAX_POS_IND: tl.constexpr,
     HAS_MULTIPLE_TARGETS: tl.constexpr,
     HAS_ATTN_SCALE: tl.constexpr,
-    HAS_MAX_ATTN_LEN: tl.constexpr,
     HAS_CONTEXTUAL_SEQ_LEN: tl.constexpr,
     ALLOW_TF32: tl.constexpr,
     BLOCK_D_Q: tl.constexpr,
@@ -2197,7 +2182,7 @@ def _ragged_hstu_attn_bwd(  # noqa C901
             MAX_SEQ_LEN=MAX_SEQ_LEN,
             num_buckets=num_buckets,
             max_pos_ind=max_pos_ind,
-            max_attn_len=max_attn_len,
+            MAX_ATTN_LEN=MAX_ATTN_LEN,
             time_bucket_incr=time_bucket_incr,
             time_bucket_div=time_bucket_div,
             time_delta=time_delta,
@@ -2211,7 +2196,6 @@ def _ragged_hstu_attn_bwd(  # noqa C901
             HAS_MAX_POS_IND=HAS_MAX_POS_IND,
             HAS_MULTIPLE_TARGETS=HAS_MULTIPLE_TARGETS,
             HAS_ATTN_SCALE=HAS_ATTN_SCALE,
-            HAS_MAX_ATTN_LEN=HAS_MAX_ATTN_LEN,
             HAS_CONTEXTUAL_SEQ_LEN=HAS_CONTEXTUAL_SEQ_LEN,
             ALLOW_TF32=ALLOW_TF32,
             BLOCK_D_Q=BLOCK_D_Q,
@@ -2256,7 +2240,7 @@ def _ragged_hstu_attn_bwd(  # noqa C901
                 MAX_SEQ_LEN=MAX_SEQ_LEN,
                 num_buckets=num_buckets,
                 max_pos_ind=max_pos_ind,
-                max_attn_len=max_attn_len,
+                MAX_ATTN_LEN=MAX_ATTN_LEN,
                 time_bucket_incr=time_bucket_incr,
                 time_bucket_div=time_bucket_div,
                 time_delta=time_delta,
@@ -2270,7 +2254,6 @@ def _ragged_hstu_attn_bwd(  # noqa C901
                 HAS_MAX_POS_IND=HAS_MAX_POS_IND,
                 HAS_MULTIPLE_TARGETS=HAS_MULTIPLE_TARGETS,
                 HAS_ATTN_SCALE=HAS_ATTN_SCALE,
-                HAS_MAX_ATTN_LEN=HAS_MAX_ATTN_LEN,
                 HAS_CONTEXTUAL_SEQ_LEN=HAS_CONTEXTUAL_SEQ_LEN,
                 ALLOW_TF32=ALLOW_TF32,
                 BLOCK_D_Q=BLOCK_D_Q,
@@ -2308,10 +2291,10 @@ def triton_ragged_attention_fwd(
     _, _, DimV = v.shape
 
     out = torch.empty_like(v)
+    max_attn_len = max_attn_len or 0
     has_multiple_targets = num_targets is not None
     has_attn_bias = attn_bias is not None
     has_attn_scale = attn_scale is not None
-    has_max_attn_len = max_attn_len is not None
     has_contextual_seq_len = contextual_seq_len is not None and contextual_seq_len > 0
     has_sort_by_length_indices = sort_by_length_indices is not None
     if L == 0:
@@ -2384,8 +2367,7 @@ def triton_ragged_attention_fwd(
         ALLOW_TF32=torch.backends.cuda.matmul.allow_tf32,
         BLOCK_D_Q=DimQ,
         BLOCK_D_V=DimV,
-        max_attn_len=max_attn_len,
-        HAS_MAX_ATTN_LEN=has_max_attn_len,
+        MAX_ATTN_LEN=max_attn_len,
         HAS_CONTEXTUAL_SEQ_LEN=has_contextual_seq_len,
         HAS_SORT_BY_LENGTH_INDICES=has_sort_by_length_indices,
     )
@@ -2501,7 +2483,7 @@ def triton_ragged_attention_bwd(
         DimV=DimV,
         num_buckets=None,
         max_pos_ind=None,
-        max_attn_len=max_attn_len,
+        MAX_ATTN_LEN=max_attn_len,
         time_bucket_incr=None,
         time_bucket_div=None,
         time_delta=None,
@@ -2515,7 +2497,6 @@ def triton_ragged_attention_bwd(
         HAS_MAX_POS_IND=False,
         HAS_MULTIPLE_TARGETS=num_targets is not None,
         HAS_ATTN_SCALE=attn_scale is not None,
-        HAS_MAX_ATTN_LEN=max_attn_len is not None,
         HAS_CONTEXTUAL_SEQ_LEN=contextual_seq_len is not None
         and contextual_seq_len > 0,
         ALLOW_TF32=torch.backends.cuda.matmul.allow_tf32,
@@ -2562,6 +2543,7 @@ class _RaggedAttentionFunction(torch.autograd.Function):
         if attn_scale is not None:
             saved_tensors.append(attn_scale)
         contextual_seq_len = 0 if contextual_seq_len else contextual_seq_len
+        max_attn_len = max_attn_len or 0
         if sort_by_length_indices is not None:
             saved_tensors.append(sort_by_length_indices)
         ctx.save_for_backward(*saved_tensors)
@@ -2708,10 +2690,10 @@ def _attn_bias_bwd(  # noqa C901
     DimV,
     num_buckets,
     max_pos_ind,
-    max_attn_len,
     time_bucket_incr,
     time_bucket_div,
     time_delta,
+    MAX_ATTN_LEN: tl.constexpr,
     INVALID_MASK_TYPE: tl.constexpr,
     CAUSAL: tl.constexpr,
     BUCKET_FN: tl.constexpr,
@@ -2720,7 +2702,6 @@ def _attn_bias_bwd(  # noqa C901
     HAS_MAX_POS_IND: tl.constexpr,
     HAS_MULTIPLE_TARGETS: tl.constexpr,
     HAS_ATTN_SCALE: tl.constexpr,
-    HAS_MAX_ATTN_LEN: tl.constexpr,
     HAS_CONTEXTUAL_SEQ_LEN: tl.constexpr,
     ALLOW_TF32: tl.constexpr,
     BLOCK_D_Q: tl.constexpr,
@@ -2757,14 +2738,14 @@ def _attn_bias_bwd(  # noqa C901
         invalid_mask = offs_m[:, None] == offs_n[None, :]
     else:
         # mt_invalid_mask will be equal to invalid_mask
-        if HAS_MAX_ATTN_LEN:
+        if MAX_ATTN_LEN > 0:
             if INVALID_MASK_TYPE == "lower_triangular":
                 invalid_mask = (offs_m[:, None] >= offs_n[None, :]) and (
-                    offs_m[:, None] - offs_n[None, :] <= max_attn_len
+                    offs_m[:, None] - offs_n[None, :] <= MAX_ATTN_LEN
                 )
             elif INVALID_MASK_TYPE == "upper_triangular":
                 invalid_mask = (offs_m[:, None] <= offs_n[None, :]) and (
-                    offs_n[None, :] - offs_m[:, None] <= max_attn_len
+                    offs_n[None, :] - offs_m[:, None] <= MAX_ATTN_LEN
                 )
         else:
             if INVALID_MASK_TYPE == "lower_triangular":
@@ -2778,16 +2759,16 @@ def _attn_bias_bwd(  # noqa C901
         if INVALID_MASK_TYPE == "lower_triangular":
             if HAS_MULTIPLE_TARGETS:
                 low = start_n
-                if HAS_MAX_ATTN_LEN:
+                if MAX_ATTN_LEN > 0:
                     n_targets = tl.load(num_targets + off_z).to(tl.int32)
-                    high = start_n + max_attn_len + BLOCK_N
+                    high = start_n + MAX_ATTN_LEN + BLOCK_N
                     high = high if high + n_targets < seq_len else seq_len
                 else:
                     high = seq_len
             else:
                 low = start_n
-                if HAS_MAX_ATTN_LEN:
-                    high = start_n + max_attn_len + BLOCK_N
+                if MAX_ATTN_LEN > 0:
+                    high = start_n + MAX_ATTN_LEN + BLOCK_N
                     high = high if high < seq_len else seq_len
                 else:
                     high = seq_len
@@ -2825,9 +2806,11 @@ def _attn_bias_bwd(  # noqa C901
                 attn_scale = tl.load(scale_ptrs, mask=offs_m < seq_len)
             mask_m = offs_m < seq_len
             mask_n = offs_n < seq_len
+
             if HAS_MULTIPLE_TARGETS:
-                if INVALID_MASK_TYPE != "lower_triangular" or not HAS_MAX_ATTN_LEN:
+                if (INVALID_MASK_TYPE != "lower_triangular") or MAX_ATTN_LEN == 0:
                     n_targets = tl.load(num_targets + off_z).to(tl.int32)
+
                 if INVALID_MASK_TYPE == "lower_triangular":
                     pos_offs_m = tl.where(
                         # pyre-ignore[61]
@@ -2889,7 +2872,7 @@ def _attn_bias_bwd(  # noqa C901
                 else:
                     mt_offs_pos_w = offs_pos_w
             if HAS_MULTIPLE_TARGETS:
-                if HAS_MAX_ATTN_LEN:
+                if MAX_ATTN_LEN > 0:
                     if INVALID_MASK_TYPE == "lower_triangular":
                         # pyre-ignore[61]
                         mt_invalid_mask = invalid_mask or (
@@ -2903,7 +2886,7 @@ def _attn_bias_bwd(  # noqa C901
                             # pyre-fixme[61]: `pos_offs_m` is undefined, or not
                             #  always defined.
                             and pos_offs_n[None, :] - pos_offs_m[:, None]
-                            >= -max_attn_len
+                            >= -MAX_ATTN_LEN
                         )
                     elif INVALID_MASK_TYPE == "upper_triangular":
                         # pyre-ignore[61]
@@ -2918,7 +2901,7 @@ def _attn_bias_bwd(  # noqa C901
                             # pyre-fixme[61]: `pos_offs_m` is undefined, or not
                             #  always defined.
                             and pos_offs_n[None, :] - pos_offs_m[:, None]
-                            <= max_attn_len
+                            <= MAX_ATTN_LEN
                         )
                 else:
                     if INVALID_MASK_TYPE == "lower_triangular":
@@ -3083,7 +3066,6 @@ def triton_ragged_attention_relative_bias_fwd(
     has_attn_scale = attn_scale is not None
     has_multiple_targets = num_targets is not None
     has_max_pos_id = max_pos_ind is not None
-    has_max_attn_len = max_attn_len is not None
     has_contextual_seq_len = contextual_seq_len is not None and contextual_seq_len > 0
     has_sort_by_length_indices = sort_by_length_indices is not None
     L, H, DimQ = q.shape
@@ -3159,8 +3141,7 @@ def triton_ragged_attention_relative_bias_fwd(
         ALLOW_TF32=torch.backends.cuda.matmul.allow_tf32,
         BLOCK_D_Q=DimQ,
         BLOCK_D_V=DimV,
-        max_attn_len=max_attn_len,
-        HAS_MAX_ATTN_LEN=has_max_attn_len,
+        MAX_ATTN_LEN=max_attn_len or 0,
         HAS_CONTEXTUAL_SEQ_LEN=has_contextual_seq_len,
         HAS_SORT_BY_LENGTH_INDICES=has_sort_by_length_indices,
     )
@@ -3300,7 +3281,7 @@ def triton_ragged_attention_relative_bias_bwd(
             DimV=DimV,
             num_buckets=num_buckets,
             max_pos_ind=max_pos_ind,
-            max_attn_len=max_attn_len,
+            MAX_ATTN_LEN=max_attn_len,
             time_bucket_incr=time_bucket_incr,
             time_bucket_div=time_bucket_div,
             time_delta=time_delta,
@@ -3312,7 +3293,6 @@ def triton_ragged_attention_relative_bias_bwd(
             HAS_MAX_POS_IND=max_pos_ind is not None,
             HAS_MULTIPLE_TARGETS=has_multiple_targets,
             HAS_ATTN_SCALE=has_attn_scale,
-            HAS_MAX_ATTN_LEN=max_attn_len is not None,
             HAS_CONTEXTUAL_SEQ_LEN=contextual_seq_len is not None
             and contextual_seq_len > 0,
             ALLOW_TF32=torch.backends.cuda.matmul.allow_tf32,
@@ -3384,7 +3364,7 @@ def triton_ragged_attention_relative_bias_bwd(
         DimV=DimV,
         num_buckets=num_buckets,
         max_pos_ind=max_pos_ind,
-        max_attn_len=max_attn_len,
+        MAX_ATTN_LEN=max_attn_len,
         time_bucket_incr=time_bucket_incr,
         time_bucket_div=time_bucket_div,
         time_delta=time_delta,
@@ -3398,7 +3378,6 @@ def triton_ragged_attention_relative_bias_bwd(
         HAS_MAX_POS_IND=max_pos_ind is not None,
         HAS_MULTIPLE_TARGETS=has_multiple_targets,
         HAS_ATTN_SCALE=has_attn_scale,
-        HAS_MAX_ATTN_LEN=max_attn_len is not None,
         HAS_CONTEXTUAL_SEQ_LEN=contextual_seq_len is not None
         and contextual_seq_len > 0,
         ALLOW_TF32=torch.backends.cuda.matmul.allow_tf32,
@@ -3462,6 +3441,7 @@ class _RaggedAttentionRelativeBiasFunction(torch.autograd.Function):
             seq_offsets,
         ]
         contextual_seq_len = 0 if contextual_seq_len is None else contextual_seq_len
+        max_attn_len = max_attn_len or 0
         if num_targets is not None:
             saved_tensors.append(num_targets)
         if attn_scale is not None:
