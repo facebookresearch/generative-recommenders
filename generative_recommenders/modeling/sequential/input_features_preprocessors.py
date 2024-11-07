@@ -162,13 +162,11 @@ class CombinedItemAndRatingInputFeaturesPreprocessor(InputFeaturesPreprocessorMo
         max_sequence_len: int,
         item_embedding_dim: int,
         dropout_rate: float,
-        rating_embedding_dim: int,
         num_ratings: int,
     ) -> None:
         super().__init__()
 
         self._embedding_dim: int = item_embedding_dim
-        self._rating_embedding_dim: int = rating_embedding_dim
         # Due to [item_0, rating_0, item_1, rating_1, ...]
         self._pos_emb: torch.nn.Embedding = torch.nn.Embedding(
             max_sequence_len * 2,
@@ -178,7 +176,7 @@ class CombinedItemAndRatingInputFeaturesPreprocessor(InputFeaturesPreprocessorMo
         self._emb_dropout = torch.nn.Dropout(p=dropout_rate)
         self._rating_emb: torch.nn.Embedding = torch.nn.Embedding(
             num_ratings,
-            rating_embedding_dim,
+            item_embedding_dim,
         )
         self.reset_state()
 
