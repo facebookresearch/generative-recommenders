@@ -80,6 +80,21 @@ The ``BERT4Rec`` and ``GRU4Rec`` rows are based on results reported by [Turning 
 note that the comparison slightly favors these two, due to them using full negatives whereas the other rows used 128/512 sampled negatives. The ``HSTU`` and ``HSTU-large`` rows are based on [Actions Speak Louder than Words: Trillion-Parameter Sequential Transducers for Generative Recommendations](https://arxiv.org/abs/2402.17152); in particular, HSTU rows utilize identical configurations as SASRec. ``HSTU`` and ``HSTU-large`` results can be reproduced with ``configs/*/hstu-*-final.gin``.
 
 
+#### Use synthetic dataset MovieLens-3B
+We support generating synthetic dataset with fractal expansion introduced in https://arxiv.org/abs/1901.08910. This allows us to expand the current 20 million real-world ratings from ML-20M to 3 billion.
+
+To download the pre-generated synthetic dataset:
+```
+pip3 install gdown
+mkdir -p tmp/ && cd tmp/
+gdown https://drive.google.com/uc?id=1-jZ6k0el7e7PyFnwqMLfqUTRh_Qdumt-
+unzip ml-3b.zip && rm ml-3b.zip
+```
+To generate the synthetic dataset on your own:
+```
+python run_fractal_expansion.py --input-csv-file tmp/ml-20m/ratings.csv --write-dataset True --output-prefix tmp/ml-3b/
+```
+
 ### Efficiency experiments
 
 ``ops/triton`` currently contains triton kernels needed for efficiency experiments (forward pass). More code (incl integration glue code) to be added at a later point in time. If it's urgent, please feel free to open PRs.
