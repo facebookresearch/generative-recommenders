@@ -30,17 +30,17 @@ try:
     from hammer.ops.triton.utils import (
         _switch_to_contiguous_if_needed,
         autotune_max_seq_len,
+        register_tritoncc_specs,
         triton_autotune,
         VersionedSpec,
-        register_tritoncc_specs,
     )
 except ImportError:
     from hammer.oss.generative_recommenders.ops.triton.utils import (
         _switch_to_contiguous_if_needed,
         autotune_max_seq_len,
+        register_tritoncc_specs,
         triton_autotune,
         VersionedSpec,
-        register_tritoncc_specs,
     )
 
 
@@ -373,6 +373,38 @@ def _get_bmm_tritoncc_named_specs() -> List[VersionedSpec]:
                     "Dense": (dtype, s),
                     "Bias": (dtype, s),
                     "Out": (dtype, s),
+                    "AUTOTUNE_MAX_SEQ_LEN": "i32",
+                    "N": i,
+                    "K": ik,
+                    "stride_jm": ik,
+                    "stride_db": i,
+                    "stride_dk": i,
+                    "stride_dn": stride_dn,
+                    "stride_bias_b": i,
+                    "stride_om": i,
+                    "ALLOW_TF32": ALLOW_TF32,
+                    "HAS_BIAS": has_bias,
+                    "BLOCK_M": -1,  # autotuned
+                    "BLOCK_N": -1,  # autotuned
+                    "BLOCK_K": -1,  # autotuned
+                },
+                version="amd_standalone_cint_v2",
+            )
+            for stride_dn in [("i32", 1), ("i32", s)]
+            for ik in [("i32", s), "i32"]
+            for i in [("i32", s), "i32"]
+            for has_bias in [True, False]
+            # The spec `("i32", s)` improve vectorization and makes the kernel faster.
+            # The second spec does not have such constraints but works on general sizes.
+        ]
+        + [
+            VersionedSpec(
+                spec={
+                    "seq_offsets": ("*i64", s),
+                    "Jagged": (dtype, s),
+                    "Dense": (dtype, s),
+                    "Bias": (dtype, s),
+                    "Out": (dtype, s),
                     "AUTOTUNE_MAX_SEQ_LEN": i,
                     "N": i,
                     "K": i,
@@ -426,6 +458,7 @@ def _get_bmm_tritoncc_named_specs() -> List[VersionedSpec]:
             for has_bias in [True, False]
         ]
     )
+
 
 @triton_autotune(
     configs=_get_bmm_configs(),
@@ -510,8 +543,10 @@ def jagged_dense_bmm_broadcast_add_kernel(
     out_ptrs = Out + offs_m[:, None] * stride_om + offs_n[None, :]
     tl.store(out_ptrs, out, mask=(offs_m[:, None] < seq_len) & (offs_n[None, :] < N))
 
+
 jagged_dense_bmm_broadcast_add_kernel = register_tritoncc_specs(
-    func=jagged_dense_bmm_broadcast_add_kernel, versioned_specs=_get_bmm_tritoncc_named_specs()
+    func=jagged_dense_bmm_broadcast_add_kernel,
+    versioned_specs=_get_bmm_tritoncc_named_specs(),
 )
 jagged_dense_bmm_broadcast_add_kernel = triton_autotune(
     configs=_get_bmm_configs(),
@@ -786,6 +821,7 @@ def _get_broadcast_add_tritoncc_named_specs() -> List[VersionedSpec]:
         for BLOCK_D in [32, 64]
     ]
 
+
 @triton_autotune(
     configs=_get_jagged_dense_broadcast_add_configs(),
     key=["AUTOTUNE_MAX_SEQ_LEN"],
@@ -842,13 +878,16 @@ def jagged_dense_broadcast_add_kernel(
         jagged_ptrs += BLOCK_D
         out_ptrs += BLOCK_D
 
+
 jagged_dense_broadcast_add_kernel = register_tritoncc_specs(
-    func=jagged_dense_broadcast_add_kernel, versioned_specs=_get_broadcast_add_tritoncc_named_specs()
+    func=jagged_dense_broadcast_add_kernel,
+    versioned_specs=_get_broadcast_add_tritoncc_named_specs(),
 )
 jagged_dense_broadcast_add_kernel = triton_autotune(
     configs=_get_jagged_dense_broadcast_add_configs(),
     key=["AUTOTUNE_MAX_SEQ_LEN"],
 )(jagged_dense_broadcast_add_kernel.fn)
+
 
 @triton.jit
 def jagged_reduce_sum(
@@ -1321,9 +1360,11 @@ def concat_2D_jagged(
         IS_REPLACE,
     )
 
+
 concat_2D_jagged = register_tritoncc_specs(
     func=concat_2D_jagged, versioned_specs=_get_concat_2D_jagged_tritoncc_named_specs()
 )
+
 
 @triton.jit
 def concat_2D_jagged_jagged_w_prefix(
@@ -1520,9 +1561,11 @@ def split_2D_jagged(
         IS_REPLACE,
     )
 
+
 split_2D_jagged = register_tritoncc_specs(
     func=split_2D_jagged, versioned_specs=_get_split_2D_jagged_tritoncc_named_specs()
 )
+
 
 @triton.jit
 def split_2D_jagged_jagged_w_prefix(
@@ -1763,10 +1806,10 @@ class _Split2DJaggedFunction(torch.autograd.Function):
                 stride_id=values.stride(0),
                 stride_ad=values_a.stride(0),
                 stride_bd=values_b.stride(0),
-                IS_DENSE_A=is_dense_a, # pyre-ignore[6]
-                IS_DENSE_B=is_dense_b, # pyre-ignore[6]
+                IS_DENSE_A=is_dense_a,  # pyre-ignore[6]
+                IS_DENSE_B=is_dense_b,  # pyre-ignore[6]
                 BLOCK_D=BLOCK_D,
-                IS_REPLACE=False, # pyre-ignore[6]
+                IS_REPLACE=False,  # pyre-ignore[6]
             )
         else:
             split_2D_jagged_jagged_w_prefix[(B, max_seq_len)](
@@ -1832,7 +1875,7 @@ class _Split2DJaggedFunction(torch.autograd.Function):
                 IS_DENSE_A=is_dense_a,
                 IS_DENSE_B=is_dense_b,
                 BLOCK_D=BLOCK_D,
-                IS_REPLACE=False, # pyre-ignore[6]
+                IS_REPLACE=False,  # pyre-ignore[6]
             )
         else:
             concat_2D_jagged_jagged_w_prefix[(ctx.B, ctx.max_seq_len)](
@@ -1922,9 +1965,11 @@ def copy_2D_jagged(
         boundary_check=(1, 0),
     )
 
+
 copy_2D_jagged = register_tritoncc_specs(
     func=copy_2D_jagged, versioned_specs=_get_copy_2D_jagged_tritoncc_named_specs()
 )
+
 
 @triton.jit
 def shrink_2D_jagged_from_tail(
@@ -1977,9 +2022,12 @@ def shrink_2D_jagged_from_tail(
         boundary_check=(1, 0),
     )
 
+
 shrink_2D_jagged_from_tail = register_tritoncc_specs(
-    func=shrink_2D_jagged_from_tail, versioned_specs=_get_copy_2D_jagged_tritoncc_named_specs()
+    func=shrink_2D_jagged_from_tail,
+    versioned_specs=_get_copy_2D_jagged_tritoncc_named_specs(),
 )
+
 
 @triton.jit
 def unshrink_2D_jagged_from_tail(
@@ -2032,9 +2080,12 @@ def unshrink_2D_jagged_from_tail(
         boundary_check=(1, 0),
     )
 
+
 unshrink_2D_jagged_from_tail = register_tritoncc_specs(
-    func=unshrink_2D_jagged_from_tail, versioned_specs=_get_copy_2D_jagged_tritoncc_named_specs()
+    func=unshrink_2D_jagged_from_tail,
+    versioned_specs=_get_copy_2D_jagged_tritoncc_named_specs(),
 )
+
 
 class _Shrink2DJaggedFromHeadFunction(torch.autograd.Function):
     @staticmethod
@@ -2213,9 +2264,12 @@ def jagged_remove_first_or_last_1D_kernel(
         mask=off_n < in_seq_len - 1,
     )
 
+
 jagged_remove_first_or_last_1D_kernel = register_tritoncc_specs(
-    func=jagged_remove_first_or_last_1D_kernel, versioned_specs=_get_remove_first_or_last_1D_named_specs()
+    func=jagged_remove_first_or_last_1D_kernel,
+    versioned_specs=_get_remove_first_or_last_1D_named_specs(),
 )
+
 
 @triton.jit
 def jagged_recover_first_or_last_1D_kernel(

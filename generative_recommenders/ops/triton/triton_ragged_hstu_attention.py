@@ -29,8 +29,8 @@ import triton.language as tl
 try:
     from hammer.ops.triton.utils import (
         _switch_to_contiguous_if_needed,
-        NamedSpecType,
         autotune_max_seq_len,
+        NamedSpecType,
         register_tritoncc_specs,
         triton_autotune,
         VersionedSpec,
@@ -38,8 +38,8 @@ try:
 except ImportError:
     from hammer.oss.generative_recommenders.ops.triton.utils import (
         _switch_to_contiguous_if_needed,
-        NamedSpecType,
         autotune_max_seq_len,
+        NamedSpecType,
         register_tritoncc_specs,
         triton_autotune,
         VersionedSpec,
@@ -611,7 +611,9 @@ def _ragged_hstu_attn_fwd_compute(  # noqa C901
                 offset = (low_delta - uih_end).to(tl.int32)  # pyre-ignore [61]
                 K_block_ptr = tl.advance(K_block_ptr, (0, offset))
                 V_block_ptr = tl.advance(V_block_ptr, (offset, 0))
-                for start_delta in tl.range(low_delta, high_delta, BLOCK_N, num_stages=0):
+                for start_delta in tl.range(
+                    low_delta, high_delta, BLOCK_N, num_stages=0
+                ):
                     cur_offs_n = offs_n + start_delta
                     mask_n = cur_offs_n < seq_len
                     acc += _ragged_hstu_attn_fwd_one_block(
@@ -1053,7 +1055,6 @@ def _get_named_specs() -> List[VersionedSpec]:
 
     return (
         [
-            # standalone magic model
             VersionedSpec(
                 spec={
                     "TW": ("*bf16", s),
@@ -1078,7 +1079,6 @@ def _get_named_specs() -> List[VersionedSpec]:
             for has_max_pos_ind in [False, True]
         ]
         + [
-            # standalone magic model
             VersionedSpec(
                 spec={
                     "TW": ("*bf16", s),
@@ -1101,7 +1101,6 @@ def _get_named_specs() -> List[VersionedSpec]:
             for has_max_pos_ind in [False, True]
         ]
         + [
-            # standalone cint model spec with RAB
             VersionedSpec(
                 spec={
                     "TW": "*bf16",
@@ -1125,7 +1124,6 @@ def _get_named_specs() -> List[VersionedSpec]:
             for is_delta_q in [True, False]
         ]
         + [
-            # standalone cint model spec without RAB
             VersionedSpec(
                 spec={
                     "TW": "*bf16",
@@ -1148,7 +1146,6 @@ def _get_named_specs() -> List[VersionedSpec]:
             for is_delta_q in [True, False]
         ]
         + [
-            # standalone cint model spec with RAB
             VersionedSpec(
                 spec={
                     "TW": "*bf16",
@@ -1173,7 +1170,6 @@ def _get_named_specs() -> List[VersionedSpec]:
             for is_delta_q in [False]
         ]
         + [
-            # standalone cint model spec without RAB
             VersionedSpec(
                 spec={
                     "TW": "*bf16",
@@ -1197,7 +1193,6 @@ def _get_named_specs() -> List[VersionedSpec]:
             for is_delta_q in [False]
         ]
         + [
-            # standalone cint model spec with RAB
             VersionedSpec(
                 spec={
                     "TW": "*bf16",
@@ -1222,7 +1217,6 @@ def _get_named_specs() -> List[VersionedSpec]:
             for is_delta_q in [True, False]
         ]
         + [
-            # standalone cint model spec without RAB
             VersionedSpec(
                 spec={
                     "TW": "*bf16",
@@ -1292,6 +1286,76 @@ def _get_named_specs() -> List[VersionedSpec]:
             )
             for block_dq, block_dv in [(32, 64)]
             for has_max_pos_ind in [False, True]
+        ]
+        + [
+            VersionedSpec(
+                spec={
+                    "TW": ("*bf16", s),
+                    "PW": ("*bf16", s),
+                    "delta_x_offsets": ("*i64", s, False),
+                    "num_targets": ("*i32", s, False),
+                    "HAS_MAX_POS_IND": has_max_pos_ind,
+                    "HAS_MULTIPLE_TARGETS": False,
+                    "ATTN_BIAS_TYPE": "fused",
+                    "BUCKET_FN": "sqrt",
+                    "IS_DELTA_Q": False,
+                    "BLOCK_D_Q": block_dq,
+                    "BLOCK_D_V": block_dv,
+                    "ALLOW_TF32": True,
+                    **_common_specs(dtype="*bf16"),
+                },
+                default_values=default_values,
+                version="amd_standalone_cint_v2",
+            )
+            for block_dq, block_dv in [(128, 128), (32, 64)]
+            for has_max_pos_ind in [False, True]
+        ]
+        + [
+            VersionedSpec(
+                spec={
+                    "TW": "*bf16",
+                    "PW": "*bf16",
+                    "delta_x_offsets": ("*i64", s, is_delta_q),
+                    "num_targets": ("*i32", s, True),
+                    "HAS_MAX_POS_IND": has_max_pos_ind,
+                    "HAS_MULTIPLE_TARGETS": True,
+                    "ATTN_BIAS_TYPE": "fused",
+                    "BUCKET_FN": "sqrt",
+                    "IS_DELTA_Q": is_delta_q,
+                    "BLOCK_D_Q": block,
+                    "BLOCK_D_V": block,
+                    "ALLOW_TF32": True,
+                    **_common_specs(dtype="*bf16"),
+                },
+                default_values=default_values,
+                version="amd_standalone_cint_v2",
+            )
+            for has_max_pos_ind in [True, False]
+            for block in [64, 128]
+            for is_delta_q in [True, False]
+        ]
+        + [
+            VersionedSpec(
+                spec={
+                    "TW": "*bf16",
+                    "PW": "*bf16",
+                    "delta_x_offsets": ("*i64", s, is_delta_q),
+                    "num_targets": ("*i32", s, True),
+                    "HAS_MAX_POS_IND": False,
+                    "HAS_MULTIPLE_TARGETS": True,
+                    "ATTN_BIAS_TYPE": "none",
+                    "BUCKET_FN": "none",
+                    "IS_DELTA_Q": is_delta_q,
+                    "BLOCK_D_Q": block,
+                    "BLOCK_D_V": block,
+                    "ALLOW_TF32": True,
+                    **_common_specs(dtype="*bf16"),
+                },
+                default_values=default_values,
+                version="amd_standalone_cint_v2",
+            )
+            for block in [64, 128]
+            for is_delta_q in [True, False]
         ]
     )
 
