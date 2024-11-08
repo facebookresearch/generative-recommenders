@@ -29,15 +29,15 @@ import triton.language as tl
 try:
     from hammer.ops.triton.utils import (
         _switch_to_contiguous_if_needed,
-        triton_autotune,
         register_tritoncc_specs,
+        triton_autotune,
         VersionedSpec,
     )
 except ImportError:
     from hammer.oss.generative_recommenders.ops.triton.utils import (
-         _switch_to_contiguous_if_needed,
-        triton_autotune,
+        _switch_to_contiguous_if_needed,
         register_tritoncc_specs,
+        triton_autotune,
         VersionedSpec,
     )
 
@@ -67,6 +67,31 @@ def _get_weighted_layer_norm_fwd_named_specs() -> List[VersionedSpec]:
                     "COMPUTE_MEAN_AND_RSTD": True,
                 },
                 default_values=default_values,
+            )
+            for BLOCK_D in [16, 128, 256, 512, 1024]
+            for dtype in ["*fp32", "*bf16"]
+            for is_swish in [True, False]
+        ]
+        + [
+            VersionedSpec(
+                spec={
+                    "X": (dtype, s),
+                    "Y": (dtype, s),
+                    "W": (dtype, s),
+                    "B": (dtype, s),
+                    "Mean": "*fp32",
+                    "Rstd": "*fp32",
+                    "D": ("i32", s),
+                    "eps": "fp32",
+                    "stride_x": ("i32", s),
+                    "stride_y": ("i32", s),
+                    "IS_SWISH": is_swish,
+                    "TRAINING": False,
+                    "BLOCK_D": BLOCK_D,
+                    "COMPUTE_MEAN_AND_RSTD": True,
+                },
+                default_values=default_values,
+                version="amd_standalone_cint_v2",
             )
             for BLOCK_D in [16, 128, 256, 512, 1024]
             for dtype in ["*fp32", "*bf16"]
@@ -221,8 +246,10 @@ def _weighted_layer_norm_fwd(
 
 
 _weighted_layer_norm_fwd = register_tritoncc_specs(
-    func=_weighted_layer_norm_fwd, versioned_specs=_get_weighted_layer_norm_fwd_named_specs()
+    func=_weighted_layer_norm_fwd,
+    versioned_specs=_get_weighted_layer_norm_fwd_named_specs(),
 )
+
 
 @triton.jit
 def _layer_norm_bwd_dx(
