@@ -97,9 +97,11 @@ def triton_autotune(
             key,
             reset_to_zero,
             restore_value,
-            prune_configs_by,
-            warmup,
-            rep,
+            pre_hook=None,
+            post_hook=None,
+            prune_configs_by=prune_configs_by,
+            warmup=warmup,
+            rep=rep,
         )
 
     return decorator
