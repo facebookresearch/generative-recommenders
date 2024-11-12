@@ -1606,7 +1606,7 @@ def _ragged_hstu_attn_bwd_one_block(  # noqa C901
     # Note: the factor `alpha` is delayed until the end of the function to reduce the cost
     dk += tl.dot(dqk_trans, tl.trans(q_trans), allow_tf32=ALLOW_TF32)
     if ATOMIC_ADD:
-        lock_id = tl.cdiv(start_m, BLOCK_M)
+        lock_id = start_m // BLOCK_M
         stride_lock = tl.cdiv(MAX_SEQ_LEN, BLOCK_M)
         lock = LOCK + tl.program_id(0) * stride_lock + lock_id
         tl.debug_barrier()  # add a barrier to force sync
