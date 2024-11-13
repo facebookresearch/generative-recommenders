@@ -44,7 +44,8 @@ void _concat_1d_jagged_jagged_cpu_kernel(
       combined_values[combined_start + i] = values_left[left_start + i];
     }
     for (auto i = 0; i < right_len; ++i) {
-      combined_values[left_len + combined_start + i] = values_right[right_start + i];
+      combined_values[left_len + combined_start + i] =
+          values_right[right_start + i];
     }
   }
 }

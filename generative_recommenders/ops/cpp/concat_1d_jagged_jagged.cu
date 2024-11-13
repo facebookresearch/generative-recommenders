@@ -43,7 +43,8 @@ __launch_bounds__(kMaxThreads) void _concat_1d_jagged_jagged_cuda_kernel(
         values_right,
     at::PackedTensorAccessor32<val_t, 1, at::RestrictPtrTraits>
         combined_values) {
-  for (int32_t b = blockIdx.x * blockDim.y + threadIdx.y; b < B; b += gridDim.x * blockDim.y) {
+  for (int32_t b = blockIdx.x * blockDim.y + threadIdx.y; b < B;
+       b += gridDim.x * blockDim.y) {
     auto left_start = offsets_left[b];
     auto left_len = offsets_left[b + 1] - left_start;
     auto right_start = offsets_right[b];
@@ -51,9 +52,10 @@ __launch_bounds__(kMaxThreads) void _concat_1d_jagged_jagged_cuda_kernel(
     auto combined_start = left_start + right_start;
     for (int32_t i = threadIdx.x; i < left_len + right_len; i += blockDim.x) {
       if (i < left_len) {
-          combined_values[combined_start + i] = values_left[left_start + i];
+        combined_values[combined_start + i] = values_left[left_start + i];
       } else {
-          combined_values[combined_start + i] = values_right[right_start + i - left_len];
+        combined_values[combined_start + i] =
+            values_right[right_start + i - left_len];
       }
     }
   }
