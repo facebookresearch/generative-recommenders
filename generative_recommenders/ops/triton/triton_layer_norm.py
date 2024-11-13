@@ -165,8 +165,8 @@ def _layer_norm_fwd(
     COMPUTE_MEAN_AND_RSTD: tl.constexpr,
 ):
     row = tl.program_id(0)
-    X += row * stride_x
-    Y += row * stride_y
+    X += row.to(tl.int64) * stride_x
+    Y += row.to(tl.int64) * stride_y
     cols = tl.arange(0, BLOCK_D)
     x = tl.load(X + cols, mask=cols < D, other=0.0).to(tl.float32)
 
@@ -211,8 +211,8 @@ def _weighted_layer_norm_fwd(
     COMPUTE_MEAN_AND_RSTD: tl.constexpr,
 ):
     row = tl.program_id(0)
-    X += row * stride_x
-    Y += row * stride_y
+    X += row.to(tl.int64) * stride_x
+    Y += row.to(tl.int64) * stride_y
     cols = tl.arange(0, BLOCK_D)
     x = tl.load(X + cols, mask=cols < D, other=0.0).to(tl.float32)
 
@@ -268,9 +268,9 @@ def _layer_norm_bwd_dx(
     row = tl.program_id(0)
     cols = tl.arange(0, BLOCK_D)
     mask = cols < D
-    X += row * stride_x
-    DY += row * stride_dy
-    DX += row * stride_dx
+    X += row.to(tl.int64) * stride_x
+    DY += row.to(tl.int64) * stride_dy
+    DX += row.to(tl.int64) * stride_dx
 
     # Load data to SRAM
     x = tl.load(X + cols, mask=mask, other=0).to(tl.float32)
@@ -321,11 +321,13 @@ def _weighted_layer_norm_bwd_dx(
     row = pid
 
     for idx in range(rows_per_tile):
-        x_ptrs = X + row * stride_x
-        dy_ptrs = DY + row * stride_dy
-        dx_ptrs = DX + row * stride_dx
-        dw_ptrs = DW + pid * D + cols
-        db_ptrs = DB + pid * D + cols
+        x_ptrs = X + row.to(tl.int64) * stride_x
+        dy_ptrs = DY + row.to(tl.int64) * stride_dy
+        dx_ptrs = DX + row.to(tl.int64) * stride_dx
+        dw_ptrs = DW + pid.to(tl.int64) * D
+        dw_ptrs += cols
+        db_ptrs = DB + pid.to(tl.int64) * D
+        db_ptrs += cols
 
         # Load data to SRAM
         x = tl.load(x_ptrs + cols, mask=mask, other=0).to(tl.float32)
@@ -641,8 +643,8 @@ def _weighted_rms_norm_fwd(
     BLOCK_D: tl.constexpr,
 ):
     row = tl.program_id(0)
-    X += row * stride_x
-    Y += row * stride_y
+    X += row.to(tl.int64) * stride_x
+    Y += row.to(tl.int64) * stride_y
     cols = tl.arange(0, BLOCK_D)
     x = tl.load(X + cols, mask=cols < D, other=0.0).to(tl.float32)
 
@@ -683,9 +685,9 @@ def _weighted_rms_norm_bwd_dx(
     row = tl.program_id(0)
     cols = tl.arange(0, BLOCK_D)
     mask = cols < D
-    X += row * stride_x
-    DY += row * stride_dy
-    DX += row * stride_dx
+    X += row.to(tl.int64) * stride_x
+    DY += row.to(tl.int64) * stride_dy
+    DX += row.to(tl.int64) * stride_dx
 
     # Load data to SRAM
     x = tl.load(X + cols, mask=mask, other=0).to(tl.float32)

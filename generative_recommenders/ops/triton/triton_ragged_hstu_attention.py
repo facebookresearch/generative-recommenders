@@ -435,7 +435,9 @@ def _ragged_hstu_attn_fwd_compute(  # noqa C901
     MAX_ATTN_LEN: tl.constexpr,
     HAS_CONTEXTUAL_SEQ_LEN: tl.constexpr,
 ):
-    seq_start = tl.load(seq_offsets + off_z)
+    seq_start = tl.load(seq_offsets + off_z).to(tl.int64)
+    off_h = off_h.to(tl.int64)
+    off_z = off_z.to(tl.int64)
     seq_end = tl.load(seq_offsets + off_z + 1)
     seq_len = (seq_end - seq_start).to(tl.int32)
     if IS_DELTA_Q:
@@ -676,24 +678,16 @@ def _ragged_hstu_attn_fwd_compute(  # noqa C901
             start_m_delta = pid * BLOCK_M
             offs_m_delta = start_m_delta + tl.arange(0, BLOCK_M)
             offs_v_d = tl.arange(0, BLOCK_D_V)
-            off_o = (
-                (off_z * DeltaSize + offs_m_delta[:, None]) * stride_om
-                + off_h * stride_oh
-                + offs_v_d[None, :]
-            )
-            out_ptrs = Out + off_o
+            off_o = Out + off_z * DeltaSize * stride_om + off_h * stride_oh
+            out_ptrs = off_o + offs_m_delta[:, None] * stride_om + offs_v_d[None, :]
             tl.store(out_ptrs, acc, mask=(offs_m_delta < DeltaSize)[:, None])
         else:
             # rematerialize offsets to save registers
             start_m = pid * BLOCK_M
             offs_m = start_m + tl.arange(0, BLOCK_M)
             offs_v_d = tl.arange(0, BLOCK_D_V)
-            off_o = (
-                (seq_start + offs_m[:, None]) * stride_om
-                + off_h * stride_oh
-                + offs_v_d[None, :]
-            )
-            out_ptrs = Out + off_o
+            off_o = Out + seq_start * stride_om + off_h * stride_oh
+            out_ptrs = off_o + offs_m[:, None] * stride_om + offs_v_d[None, :]
             tl.store(out_ptrs, acc, mask=(offs_m < seq_len)[:, None])
 
 
@@ -2174,7 +2168,8 @@ def _ragged_hstu_attn_bwd(  # noqa C901
     if HAS_SORT_BY_LENGTH_INDICES:
         off_z = tl.load(sort_by_length_indices + off_z)
     off_h = off_hz % H
-    seq_start = tl.load(seq_offsets + off_z)
+    off_h = off_h.to(tl.int64)
+    seq_start = tl.load(seq_offsets + off_z).to(tl.int64)
     seq_end = tl.load(seq_offsets + off_z + 1)
     seq_len = (seq_end - seq_start).to(tl.int32)
     if HAS_MULTIPLE_TARGETS:
