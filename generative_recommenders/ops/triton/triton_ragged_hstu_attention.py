@@ -513,12 +513,10 @@ def _ragged_hstu_attn_fwd_compute(  # noqa C901
         if INVALID_MASK_TYPE == "lower_triangular":
             if HAS_MULTIPLE_TARGETS:
                 if MAX_ATTN_LEN > 0:
-                    start_m_index = (
-                        seq_len - n_targets
-                        if start_m > seq_len - n_targets
-                        else start_m
-                    )
-                    low = start_m_index - MAX_ATTN_LEN
+                    if start_m > seq_len - n_targets:
+                        low = 0
+                    else:
+                        low = start_m - MAX_ATTN_LEN
                     low = low if low > 0 else 0
                 else:
                     low = 0
