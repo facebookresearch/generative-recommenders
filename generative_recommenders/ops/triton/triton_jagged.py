@@ -496,7 +496,7 @@ def jagged_dense_bmm_broadcast_add_kernel(
     off_m = tl.program_id(1)
     off_b = tl.program_id(2)
 
-    seq_start = tl.load(seq_offsets + off_b)
+    seq_start = tl.load(seq_offsets + off_b).to(tl.int64)
     seq_end = tl.load(seq_offsets + off_b + 1)
     seq_len = seq_end - seq_start
     start_m = off_m * BLOCK_M
@@ -505,7 +505,7 @@ def jagged_dense_bmm_broadcast_add_kernel(
         return
 
     Jagged += seq_start * stride_jm
-    Dense += off_b * stride_db
+    Dense += off_b.to(tl.int64) * stride_db
     Out += seq_start * stride_om
 
     offs_m = start_m + tl.arange(0, BLOCK_M)
@@ -591,7 +591,7 @@ def _jagged_jagged_bmm_reduce_sum(
     off_m = tl.program_id(1)
     off_n = tl.program_id(2)
 
-    seq_start = tl.load(seq_offsets + off_b)
+    seq_start = tl.load(seq_offsets + off_b).to(tl.int64)
     seq_end = tl.load(seq_offsets + off_b + 1)
     seq_len = seq_end - seq_start
 
@@ -599,7 +599,7 @@ def _jagged_jagged_bmm_reduce_sum(
     start_n = off_n * BLOCK_N
 
     accumulator = tl.zeros((BLOCK_M, BLOCK_N), dtype=tl.float32)
-    Out += off_b * stride_ob
+    Out += off_b.to(tl.int64) * stride_ob
     offs_m = start_m + tl.arange(0, BLOCK_M)
     offs_n = start_n + tl.arange(0, BLOCK_N)
     out_ptrs = Out + offs_m[:, None] * stride_om + offs_n[None, :] * stride_on
@@ -1267,8 +1267,8 @@ def concat_2D_jagged_w_prefix(
     BLOCK_D: tl.constexpr,
     IS_REPLACE: tl.constexpr,
 ):
-    off_z = tl.program_id(0)
-    off_n = tl.program_id(1)
+    off_z = tl.program_id(1)
+    off_n = tl.program_id(0)
     if IS_DENSE_A:
         seq_start_a = off_z * DenseSize
         seq_len_a = DenseSize
@@ -1304,21 +1304,31 @@ def concat_2D_jagged_w_prefix(
         out_seq_start = seq_start_a + seq_start_b + off_n
         out_seq_b_start = seq_len_a + n_prefix_from_B
 
-    out_ptrs = Out + out_seq_start * stride_od + offs_d
+    out_ptrs = Out + out_seq_start.to(tl.int64) * stride_od + offs_d
     if off_n < out_seq_b_start and off_n >= n_prefix_from_B:
         off_a = off_n - n_prefix_from_B
         if IS_DENSE_A:
-            in_ptrs = ValuesA + off_a * stride_ad + off_z * stride_dense_batch + offs_d
+            in_ptrs = (
+                ValuesA
+                + off_a.to(tl.int64) * stride_ad
+                + off_z.to(tl.int64) * stride_dense_batch
+                + offs_d
+            )
         else:
-            in_ptrs = ValuesA + (off_a + seq_start_a) * stride_ad + offs_d
+            in_ptrs = ValuesA + (off_a + seq_start_a).to(tl.int64) * stride_ad + offs_d
     else:
         off_b = off_n - out_seq_b_start + n_prefix_from_B
         if off_n < n_prefix_from_B:
             off_b += out_seq_b_start - n_prefix_from_B
         if IS_DENSE_B:
-            in_ptrs = ValuesB + off_b * stride_bd + off_z * stride_dense_batch + offs_d
+            in_ptrs = (
+                ValuesB
+                + off_b.to(tl.int64) * stride_bd
+                + off_z.to(tl.int64) * stride_dense_batch
+                + offs_d
+            )
         else:
-            in_ptrs = ValuesB + (off_b + seq_start_b) * stride_bd + offs_d
+            in_ptrs = ValuesB + (off_b + seq_start_b).to(tl.int64) * stride_bd + offs_d
     v = tl.load(in_ptrs, mask=offs_d < D)
     tl.store(out_ptrs, v, mask=offs_d < D)
 
@@ -1477,8 +1487,8 @@ def split_2D_jagged_w_prefix(
     BLOCK_D: tl.constexpr,
     IS_REPLACE: tl.constexpr,
 ):
-    off_z = tl.program_id(0)
-    off_n = tl.program_id(1)
+    off_z = tl.program_id(1)
+    off_n = tl.program_id(0)
     if IS_DENSE_A:
         seq_start_b = tl.load(OffsetsB + off_z)
         seq_end_b = tl.load(OffsetsB + off_z + 1)
@@ -1513,15 +1523,15 @@ def split_2D_jagged_w_prefix(
         out_seq_b_start = seq_len_a + n_prefix_to_B
 
     offs_d = tl.arange(0, BLOCK_D)
-    in_ptrs = JaggedIn + (seq_start + off_n) * stride_id + offs_d
+    in_ptrs = JaggedIn + (seq_start + off_n).to(tl.int64) * stride_id + offs_d
     if off_n < out_seq_b_start and off_n >= n_prefix_to_B:
         off_a = off_n - n_prefix_to_B
-        out_ptrs = OutA + (off_a + seq_start_a) * stride_ad + offs_d
+        out_ptrs = OutA + (off_a + seq_start_a).to(tl.int64) * stride_ad + offs_d
     else:
         off_b = off_n - out_seq_b_start + n_prefix_to_B
         if off_n < n_prefix_to_B:
             off_b += out_seq_b_start - n_prefix_to_B
-        out_ptrs = OutB + (off_b + seq_start_b) * stride_bd + offs_d
+        out_ptrs = OutB + (off_b + seq_start_b).to(tl.int64) * stride_bd + offs_d
     v = tl.load(in_ptrs, mask=offs_d < D)
     tl.store(out_ptrs, v, mask=offs_d < D)
 
@@ -1651,7 +1661,7 @@ class _Concat2DJaggedFunction(torch.autograd.Function):
                 (seq_len_a + seq_len_b, D), device=device, dtype=dtype
             )
         if n_prefix_from_right == 0:
-            concat_2D_jagged[(B, max_seq_len)](
+            concat_2D_jagged[(max_seq_len, B)](
                 OffsetsA=offsets_a,
                 ValuesA=values_a,
                 OffsetsB=offsets_b,
@@ -1669,7 +1679,7 @@ class _Concat2DJaggedFunction(torch.autograd.Function):
                 IS_REPLACE=is_replace,  # pyre-ignore[6]
             )
         else:
-            concat_2D_jagged_jagged_w_prefix[(B, max_seq_len)](
+            concat_2D_jagged_jagged_w_prefix[(max_seq_len, B)](
                 OffsetsA=offsets_a,
                 ValuesA=values_a,
                 OffsetsB=offsets_b,
@@ -1718,7 +1728,7 @@ class _Concat2DJaggedFunction(torch.autograd.Function):
             (ctx.seq_len_b, D), device=d_out.device, dtype=d_out.dtype
         )
         if ctx.n_prefix_from_right == 0:
-            split_2D_jagged[(B, ctx.max_seq_len)](
+            split_2D_jagged[(ctx.max_seq_len, B)](
                 JaggedIn=d_out,
                 DenseSize=dense_size,
                 OffsetsA=offsets_a,
@@ -1735,7 +1745,7 @@ class _Concat2DJaggedFunction(torch.autograd.Function):
                 IS_REPLACE=is_replace,
             )
         else:
-            split_2D_jagged_jagged_w_prefix[(B, ctx.max_seq_len)](
+            split_2D_jagged_jagged_w_prefix[(ctx.max_seq_len, B)](
                 JaggedIn=d_out,
                 OffsetsA=offsets_a,
                 OffsetsB=offsets_b,
@@ -1795,7 +1805,7 @@ class _Split2DJaggedFunction(torch.autograd.Function):
         values_a = torch.empty((seq_len_a, D), device=values.device, dtype=values.dtype)
         values_b = torch.empty((seq_len_b, D), device=values.device, dtype=values.dtype)
         if n_prefix_to_right == 0:
-            split_2D_jagged[(B, max_seq_len)](
+            split_2D_jagged[(max_seq_len, B)](
                 JaggedIn=values,
                 DenseSize=dense_size,
                 OffsetsA=offsets_a,
@@ -1812,7 +1822,7 @@ class _Split2DJaggedFunction(torch.autograd.Function):
                 IS_REPLACE=False,  # pyre-ignore[6]
             )
         else:
-            split_2D_jagged_jagged_w_prefix[(B, max_seq_len)](
+            split_2D_jagged_jagged_w_prefix[(max_seq_len, B)](
                 JaggedIn=values,
                 OffsetsA=offsets_a,
                 OffsetsB=offsets_b,
@@ -1860,7 +1870,7 @@ class _Split2DJaggedFunction(torch.autograd.Function):
             dtype=values_b.dtype,
         )
         if ctx.n_prefix_to_right == 0:
-            concat_2D_jagged[(ctx.B, ctx.max_seq_len)](
+            concat_2D_jagged[(ctx.max_seq_len, ctx.B)](
                 OffsetsA=offsets_a,
                 ValuesA=values_a,
                 OffsetsB=offsets_b,
@@ -1878,7 +1888,7 @@ class _Split2DJaggedFunction(torch.autograd.Function):
                 IS_REPLACE=False,  # pyre-ignore[6]
             )
         else:
-            concat_2D_jagged_jagged_w_prefix[(ctx.B, ctx.max_seq_len)](
+            concat_2D_jagged_jagged_w_prefix[(ctx.max_seq_len, ctx.B)](
                 OffsetsA=offsets_a,
                 ValuesA=values_a,
                 OffsetsB=offsets_b,

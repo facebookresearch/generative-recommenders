@@ -126,12 +126,10 @@ def _add_position_embeddings_kernel(
     offs_n = start_n + tl.arange(0, BLOCK_N)
     clamped_offs_n = tl.where(offs_n >= max_ind, max_ind, offs_n)
     offs_d = tl.arange(0, BLOCK_D)
-    jagged_ptr_offsets = (
-        seq_start * stride_jn + offs_n[:, None] * stride_jn + offs_d[None, :]
-    )
-    out_ptrs = (
-        Out + seq_start * stride_on + offs_n[:, None] * stride_on + offs_d[None, :]
-    )
+    Jagged += seq_start.to(tl.int64) * stride_jn
+    jagged_ptr_offsets = offs_n[:, None] * stride_jn + offs_d[None, :]
+    Out += seq_start.to(tl.int64) * stride_on
+    out_ptrs = Out + offs_n[:, None] * stride_on + offs_d[None, :]
     dense_ptrs = Dense + clamped_offs_n[:, None] * stride_dk + offs_d[None, :]
     for _d in range(0, D, BLOCK_D):
         mask = (offs_n[:, None] < seq_len) and offs_d[None, :] < D
@@ -180,31 +178,43 @@ def _add_position_embeddings_bwd_kernel(
         max_ind = tl.load(high_inds + off_b)
         if off_k < max_ind:
             seq_start = tl.load(seq_offsets + off_b)
-            jagged_ptrs = Jagged + (seq_start + off_k) * stride_jn + offs_d
+            jagged_ptr = (
+                Jagged
+                + seq_start.to(tl.int64) * stride_jn
+                + off_k.to(tl.int64) * stride_jn
+            )
+            jagged_ptrs = jagged_ptr + offs_d
             jg = tl.load(
                 jagged_ptrs,
                 mask=offs_d < D,
             )
             accumulator += jg
             if SCALE_JAGGED:
-                out_jagged_ptrs = JaggedOut + (seq_start + off_k) * stride_jon + offs_d
+                out_jagged_ptr = (
+                    JaggedOut
+                    + seq_start.to(tl.int64) * stride_jon
+                    + off_k.to(tl.int64) * stride_jon
+                )
+                out_jagged_ptrs = out_jagged_ptr + offs_d
                 tl.store(
                     out_jagged_ptrs,
                     jg * scale,
                     mask=offs_d < D,
                 )
         elif off_k == max_ind:
-            seq_start = tl.load(seq_offsets + off_b)
+            seq_start = tl.load(seq_offsets + off_b).to(tl.int64)
             seq_end = tl.load(seq_offsets + off_b + 1)
             for k in range(seq_start + max_ind, seq_end):
-                jagged_ptrs = Jagged + k * stride_jn + offs_d
+                jagged_ptr = Jagged + k * stride_jn
+                jagged_ptrs = jagged_ptr + offs_d
                 jg = tl.load(
                     jagged_ptrs,
                     mask=offs_d < D,
                 )
                 accumulator += jg
                 if SCALE_JAGGED:
-                    out_jagged_ptrs = JaggedOut + k * stride_jon + offs_d
+                    out_jagged_ptr = JaggedOut + k * stride_jon
+                    out_jagged_ptrs = out_jagged_ptr + offs_d
                     tl.store(
                         out_jagged_ptrs,
                         jg * scale,
@@ -476,9 +486,8 @@ def _add_timestamp_position_embeddings_kernel(
         return
     offs_n = start_n + tl.arange(0, BLOCK_N)
     offs_d = tl.arange(0, BLOCK_D)
-    seq_emb_offsets = (
-        seq_start * stride_sn + offs_n[:, None] * stride_sn + offs_d[None, :]
-    )
+    seq_emb_offsets = offs_n[:, None] * stride_sn + offs_d[None, :]
+    SeqEmb += seq_start.to(tl.int64) * stride_sn
     mask_n = offs_n < seq_len
     # position encoding
     seq_len = tl.load(Lengths + off_b)
@@ -513,9 +522,8 @@ def _add_timestamp_position_embeddings_kernel(
     if TRAINING:
         tl.store(TsInds + seq_start + offs_n, ts, mask=mask_n)
     ts_emb_offsets = ts[:, None] * stride_tn + offs_d[None, :]
-    out_offsets = (
-        Out + seq_start * stride_on + offs_n[:, None] * stride_on + offs_d[None, :]
-    )
+    Out += seq_start.to(tl.int64) * stride_on
+    out_offsets = Out + offs_n[:, None] * stride_on + offs_d[None, :]
     for _d in range(0, D, BLOCK_D):
         mask = (offs_n[:, None] < seq_len) and offs_d[None, :] < D
         seq_emb = tl.load(SeqEmb + seq_emb_offsets, mask=mask)
@@ -590,14 +598,16 @@ def _add_embeddings_bwd_kernel(
         off = off_block * BLOCK + off_i
         if off < jagged_size:
             value_ind = tl.load(ValueInds + off)
-            jagged_in = tl.load(In + value_ind * stride_in + offs_d, mask=mask_d)
+            in_offset = In + value_ind.to(tl.int64) * stride_in
+            jagged_in = tl.load(in_offset + offs_d, mask=mask_d)
             key_ind_new = tl.load(KeyInds + off)
             if key_ind == key_ind_new:
                 accumulator += jagged_in
             else:
                 if key_ind >= 0:
+                    out_offset = Out + key_ind.to(tl.int64) * stride_on
                     tl.atomic_add(
-                        Out + key_ind * stride_on + offs_d,
+                        out_offset + offs_d,
                         accumulator.to(Out.dtype.element_ty),
                         mask=mask_d,
                         sem="relaxed",
@@ -605,8 +615,9 @@ def _add_embeddings_bwd_kernel(
                 key_ind = key_ind_new
                 accumulator = jagged_in
     if key_ind >= 0:
+        out_offset = Out + key_ind.to(tl.int64) * stride_on
         tl.atomic_add(
-            Out + key_ind * stride_on + offs_d,
+            out_offset + offs_d,
             accumulator.to(Out.dtype.element_ty),
             mask=mask_d,
             sem="relaxed",
