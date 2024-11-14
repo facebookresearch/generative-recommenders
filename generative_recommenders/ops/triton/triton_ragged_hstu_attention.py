@@ -254,7 +254,6 @@ def _ragged_hstu_attn_fwd_one_block(  # noqa: C901
     time_bucket_div,
     time_delta,
     bias_ptrs,
-    attn_scale,
     contextual_seq_len,
     MAX_ATTN_LEN: tl.constexpr,
     INVALID_MASK_TYPE: tl.constexpr,
@@ -265,7 +264,6 @@ def _ragged_hstu_attn_fwd_one_block(  # noqa: C901
     USE_POS_BIAS: tl.constexpr,
     HAS_MAX_POS_IND: tl.constexpr,
     HAS_MULTIPLE_TARGETS: tl.constexpr,
-    HAS_ATTN_SCALE: tl.constexpr,
     HAS_CONTEXTUAL_SEQ_LEN: tl.constexpr,
     IS_DELTA_Q: tl.constexpr,
     ALLOW_TF32: tl.constexpr,
@@ -368,8 +366,6 @@ def _ragged_hstu_attn_fwd_one_block(  # noqa: C901
     # pyre-fixme[16]: Module `math` has no attribute `fast_dividef`.
     silu = fast_dividef(qk, 1.0 + tl.exp(-qk)) * (1.0 / MAX_SEQ_LEN)
     silu = tl.where(invalid_mask, silu, 0)
-    if HAS_ATTN_SCALE:
-        silu = silu * attn_scale[:, None]
     v = tl.load(V_block_ptr, boundary_check=(0,), padding_option="zero")
     silu = silu.to(v.dtype)
     return tl.dot(silu, v, allow_tf32=ALLOW_TF32)
@@ -388,7 +384,6 @@ def _ragged_hstu_attn_fwd_compute(  # noqa C901
     seq2_offsets,
     delta_x_offsets,
     num_targets,
-    Scale,
     Out,
     stride_qm,
     stride_qh,
@@ -396,8 +391,6 @@ def _ragged_hstu_attn_fwd_compute(  # noqa C901
     stride_kh,
     stride_vn,
     stride_vh,
-    stride_sz,
-    stride_sm,
     stride_ts,
     stride_om,
     stride_oh,
@@ -425,7 +418,6 @@ def _ragged_hstu_attn_fwd_compute(  # noqa C901
     USE_POS_BIAS: tl.constexpr,
     HAS_MAX_POS_IND: tl.constexpr,
     HAS_MULTIPLE_TARGETS: tl.constexpr,
-    HAS_ATTN_SCALE: tl.constexpr,
     IS_DELTA_Q: tl.constexpr,
     ALLOW_TF32: tl.constexpr,
     BLOCK_D_Q: tl.constexpr,
@@ -504,10 +496,6 @@ def _ragged_hstu_attn_fwd_compute(  # noqa C901
             off_bias = offs_m[:, None] * seq_len + offs_n[None, :]
             bias_ptrs = Bias + bias_start + off_bias
 
-        if HAS_ATTN_SCALE:
-            scale_ptrs = Scale + off_z * stride_sz
-            attn_scale = tl.load(scale_ptrs + offs_m * stride_sm, mask=offs_m < seq_len)
-
         q = tl.load(Q_block_ptr, boundary_check=(0,), padding_option="zero")
         acc = tl.zeros([BLOCK_M, BLOCK_D_V], dtype=tl.float32)
         if INVALID_MASK_TYPE == "lower_triangular":
@@ -584,8 +572,6 @@ def _ragged_hstu_attn_fwd_compute(  # noqa C901
                 time_delta=time_delta,
                 # pyre-ignore[61]
                 bias_ptrs=bias_ptrs if ATTN_BIAS_TYPE == "separate" else None,
-                # pyre-ignore[61]
-                attn_scale=attn_scale if HAS_ATTN_SCALE else None,
                 contextual_seq_len=contextual_seq_len,
                 INVALID_MASK_TYPE=INVALID_MASK_TYPE,
                 CAUSAL=CAUSAL,
@@ -595,7 +581,6 @@ def _ragged_hstu_attn_fwd_compute(  # noqa C901
                 USE_POS_BIAS=USE_POS_BIAS,
                 HAS_MAX_POS_IND=HAS_MAX_POS_IND,
                 HAS_MULTIPLE_TARGETS=HAS_MULTIPLE_TARGETS,
-                HAS_ATTN_SCALE=HAS_ATTN_SCALE,
                 HAS_CONTEXTUAL_SEQ_LEN=HAS_CONTEXTUAL_SEQ_LEN,
                 IS_DELTA_Q=IS_DELTA_Q,
                 ALLOW_TF32=ALLOW_TF32,
@@ -653,8 +638,6 @@ def _ragged_hstu_attn_fwd_compute(  # noqa C901
                         time_delta=time_delta,
                         # pyre-ignore[61]
                         bias_ptrs=bias_ptrs if ATTN_BIAS_TYPE == "separate" else None,
-                        # pyre-ignore[61]
-                        attn_scale=attn_scale if HAS_ATTN_SCALE else None,
                         contextual_seq_len=contextual_seq_len,
                         INVALID_MASK_TYPE=INVALID_MASK_TYPE,
                         CAUSAL=CAUSAL,
@@ -664,7 +647,6 @@ def _ragged_hstu_attn_fwd_compute(  # noqa C901
                         USE_POS_BIAS=USE_POS_BIAS,
                         HAS_MAX_POS_IND=HAS_MAX_POS_IND,
                         HAS_MULTIPLE_TARGETS=HAS_MULTIPLE_TARGETS,
-                        HAS_ATTN_SCALE=HAS_ATTN_SCALE,
                         HAS_CONTEXTUAL_SEQ_LEN=HAS_CONTEXTUAL_SEQ_LEN,
                         IS_DELTA_Q=IS_DELTA_Q,
                         ALLOW_TF32=ALLOW_TF32,
@@ -719,7 +701,6 @@ def _ragged_hstu_attn_fwd(  # noqa C901
     seq2_offsets,
     delta_x_offsets,
     num_targets,
-    Scale,
     Out,
     stride_qm,
     stride_qh,
@@ -727,8 +708,6 @@ def _ragged_hstu_attn_fwd(  # noqa C901
     stride_kh,
     stride_vn,
     stride_vh,
-    stride_sz,
-    stride_sm,
     stride_ts,
     stride_om,
     stride_oh,
@@ -754,7 +733,6 @@ def _ragged_hstu_attn_fwd(  # noqa C901
     USE_POS_BIAS: tl.constexpr,
     HAS_MAX_POS_IND: tl.constexpr,
     HAS_MULTIPLE_TARGETS: tl.constexpr,
-    HAS_ATTN_SCALE: tl.constexpr,
     IS_DELTA_Q: tl.constexpr,
     ALLOW_TF32: tl.constexpr,
     BLOCK_D_Q: tl.constexpr,
@@ -783,7 +761,6 @@ def _ragged_hstu_attn_fwd(  # noqa C901
         seq2_offsets=seq2_offsets,
         delta_x_offsets=delta_x_offsets,
         num_targets=num_targets,
-        Scale=Scale,
         Out=Out,
         stride_qm=stride_qm,
         stride_qh=stride_qh,
@@ -791,8 +768,6 @@ def _ragged_hstu_attn_fwd(  # noqa C901
         stride_kh=stride_kh,
         stride_vn=stride_vn,
         stride_vh=stride_vh,
-        stride_sz=stride_sz,
-        stride_sm=stride_sm,
         stride_ts=stride_ts,
         stride_om=stride_om,
         stride_oh=stride_oh,
@@ -820,7 +795,6 @@ def _ragged_hstu_attn_fwd(  # noqa C901
         USE_POS_BIAS=USE_POS_BIAS,
         HAS_MAX_POS_IND=HAS_MAX_POS_IND,
         HAS_MULTIPLE_TARGETS=HAS_MULTIPLE_TARGETS,
-        HAS_ATTN_SCALE=HAS_ATTN_SCALE,
         IS_DELTA_Q=IS_DELTA_Q,
         ALLOW_TF32=ALLOW_TF32,
         BLOCK_D_Q=BLOCK_D_Q,
@@ -860,7 +834,6 @@ def _ragged_hstu_attn_fwd_persistent(  # noqa C901
     seq2_offsets,
     delta_x_offsets,
     num_targets,
-    Scale,
     Out,
     stride_qm,
     stride_qh,
@@ -868,8 +841,6 @@ def _ragged_hstu_attn_fwd_persistent(  # noqa C901
     stride_kh,
     stride_vn,
     stride_vh,
-    stride_sz,
-    stride_sm,
     stride_ts,
     stride_om,
     stride_oh,
@@ -895,7 +866,6 @@ def _ragged_hstu_attn_fwd_persistent(  # noqa C901
     USE_POS_BIAS: tl.constexpr,
     HAS_MAX_POS_IND: tl.constexpr,
     HAS_MULTIPLE_TARGETS: tl.constexpr,
-    HAS_ATTN_SCALE: tl.constexpr,
     IS_DELTA_Q: tl.constexpr,
     ALLOW_TF32: tl.constexpr,
     BLOCK_D_Q: tl.constexpr,
@@ -934,7 +904,6 @@ def _ragged_hstu_attn_fwd_persistent(  # noqa C901
             seq2_offsets=seq2_offsets,
             delta_x_offsets=delta_x_offsets,
             num_targets=num_targets,
-            Scale=Scale,
             Out=Out,
             stride_qm=stride_qm,
             stride_qh=stride_qh,
@@ -942,8 +911,6 @@ def _ragged_hstu_attn_fwd_persistent(  # noqa C901
             stride_kh=stride_kh,
             stride_vn=stride_vn,
             stride_vh=stride_vh,
-            stride_sz=stride_sz,
-            stride_sm=stride_sm,
             stride_ts=stride_ts,
             stride_om=stride_om,
             stride_oh=stride_oh,
@@ -971,7 +938,6 @@ def _ragged_hstu_attn_fwd_persistent(  # noqa C901
             USE_POS_BIAS=USE_POS_BIAS,
             HAS_MAX_POS_IND=HAS_MAX_POS_IND,
             HAS_MULTIPLE_TARGETS=HAS_MULTIPLE_TARGETS,
-            HAS_ATTN_SCALE=HAS_ATTN_SCALE,
             IS_DELTA_Q=IS_DELTA_Q,
             ALLOW_TF32=ALLOW_TF32,
             BLOCK_D_Q=BLOCK_D_Q,
@@ -988,7 +954,6 @@ def _get_named_specs() -> List[VersionedSpec]:
     s: int = 16
     INVALID_MASK_TYPE: str = "lower_triangular"
     CAUSAL: bool = True
-    HAS_ATTN_SCALE: bool = False
     USE_TIME_BIAS: bool = True
     USE_POS_BIAS: bool = True
 
@@ -1001,7 +966,6 @@ def _get_named_specs() -> List[VersionedSpec]:
             "TS": ("*i64", s),
             "Bias": (dtype, s, False),
             "seq2_offsets": ("*i64", s, False),
-            "Scale": (dtype, s, False),
             "Out": (dtype, s),
             "stride_qm": ("i32", s),
             "stride_qh": ("i32", s),
@@ -1009,8 +973,6 @@ def _get_named_specs() -> List[VersionedSpec]:
             "stride_kh": ("i32", s),
             "stride_vn": ("i32", s),
             "stride_vh": ("i32", s),
-            "stride_sz": ("i32", s),
-            "stride_sm": ("i32", s),
             "stride_ts": "i32",
             "stride_om": ("i32", s),
             "stride_oh": ("i32", s),
@@ -1033,7 +995,6 @@ def _get_named_specs() -> List[VersionedSpec]:
             "CAUSAL": CAUSAL,
             "USE_TIME_BIAS": USE_TIME_BIAS,
             "USE_POS_BIAS": USE_POS_BIAS,
-            "HAS_ATTN_SCALE": HAS_ATTN_SCALE,
             "BLOCK_M": -1,  # autotuned
             "BLOCK_N": -1,  # autotuned
             "MAX_ATTN_LEN": 0,
@@ -1399,7 +1360,6 @@ def _ragged_hstu_attn_bwd_one_block(  # noqa C901
     q_ptrs_trans,
     dq_ptrs_trans,
     mask_n,
-    scale_ptrs,
     ts_0_ptrs,
     ts_1,
     bias_ptrs_trans,
@@ -1419,7 +1379,6 @@ def _ragged_hstu_attn_bwd_one_block(  # noqa C901
     DPW,
     LOCK,
     stride_qm,
-    stride_sm,
     stride_dom,
     stride_dqm,
     alpha,
@@ -1439,7 +1398,6 @@ def _ragged_hstu_attn_bwd_one_block(  # noqa C901
     FUSED_BIAS_BWD: tl.constexpr,
     HAS_MAX_POS_IND: tl.constexpr,
     HAS_MULTIPLE_TARGETS: tl.constexpr,
-    HAS_ATTN_SCALE: tl.constexpr,
     HAS_CONTEXTUAL_SEQ_LEN: tl.constexpr,
     ALLOW_TF32: tl.constexpr,
     BLOCK_M: tl.constexpr,
@@ -1551,9 +1509,6 @@ def _ragged_hstu_attn_bwd_one_block(  # noqa C901
             row_filter[None, :] and col_filter[:, None]
         )
     silu_trans = tl.where(invalid_mask_trans, silu_trans, 0)
-    if HAS_ATTN_SCALE:
-        attn_scale = tl.load(scale_ptrs + start_m * stride_sm, mask=mask_m)
-        silu_trans = silu_trans * attn_scale[None, :]
     silu_trans = silu_trans.to(k.dtype)
     # compute dv
     do = tl.load(
@@ -1565,9 +1520,6 @@ def _ragged_hstu_attn_bwd_one_block(  # noqa C901
 
     # compute dk and dq
     dqk_trans = tl.dot(v, tl.trans(do), allow_tf32=ALLOW_TF32)
-    if HAS_ATTN_SCALE:
-        # pyre-fixme[61]: `attn_scale` is undefined, or not always defined.
-        dqk_trans = dqk_trans * attn_scale[None, :]
     dqk_trans = (
         dqk_trans * sig_trans * (1 + qk_trans * (1 - sig_trans)) * (1.0 / MAX_SEQ_LEN)
     )
@@ -1638,7 +1590,6 @@ def _ragged_hstu_attn_bwd_one_col_block(  # noqa C901
     TW,
     PW,
     Bias,
-    Scale,
     DOut,
     DQ,
     DK,
@@ -1650,8 +1601,6 @@ def _ragged_hstu_attn_bwd_one_col_block(  # noqa C901
     stride_qm,
     stride_kn,
     stride_vn,
-    stride_sz,
-    stride_sm,
     stride_dom,
     stride_dqm,
     stride_dkn,
@@ -1673,7 +1622,6 @@ def _ragged_hstu_attn_bwd_one_col_block(  # noqa C901
     FUSED_BIAS_BWD: tl.constexpr,
     HAS_MAX_POS_IND: tl.constexpr,
     HAS_MULTIPLE_TARGETS: tl.constexpr,
-    HAS_ATTN_SCALE: tl.constexpr,
     HAS_CONTEXTUAL_SEQ_LEN: tl.constexpr,
     ALLOW_TF32: tl.constexpr,
     BLOCK_D_Q: tl.constexpr,
@@ -1719,15 +1667,12 @@ def _ragged_hstu_attn_bwd_one_col_block(  # noqa C901
     v_ptrs = V + (offs_n[:, None] * stride_vn + offs_v_d[None, :])
     mask_n = offs_n < seq_len
 
-    scale_ptrs = None
     ts_0_ptrs = None
     ts_1_ptrs = None
     ts_1 = None
     off_bias_trans = None
     bias_ptrs_trans = None
     dbias_ptrs_trans = None
-    if HAS_ATTN_SCALE:
-        scale_ptrs = Scale + offs_m * stride_sm
     if ATTN_BIAS_TYPE == "fused" and USE_TIME_BIAS:
         ts_0_ptrs = TS + offs_m
         ts_1_ptrs = TS + offs_n
@@ -1768,7 +1713,6 @@ def _ragged_hstu_attn_bwd_one_col_block(  # noqa C901
                 q_ptrs_trans=q_ptrs_trans,
                 dq_ptrs_trans=dq_ptrs_trans,
                 mask_n=mask_n,
-                scale_ptrs=scale_ptrs,
                 ts_0_ptrs=ts_0_ptrs,
                 ts_1=ts_1,
                 bias_ptrs_trans=bias_ptrs_trans,
@@ -1789,7 +1733,6 @@ def _ragged_hstu_attn_bwd_one_col_block(  # noqa C901
                 DPW=DPW,
                 LOCK=LOCK,
                 stride_qm=stride_qm,
-                stride_sm=stride_sm,
                 stride_dom=stride_dom,
                 stride_dqm=stride_dqm,
                 alpha=alpha,
@@ -1809,7 +1752,6 @@ def _ragged_hstu_attn_bwd_one_col_block(  # noqa C901
                 FUSED_BIAS_BWD=FUSED_BIAS_BWD,
                 HAS_MAX_POS_IND=HAS_MAX_POS_IND,
                 HAS_MULTIPLE_TARGETS=HAS_MULTIPLE_TARGETS,
-                HAS_ATTN_SCALE=HAS_ATTN_SCALE,
                 HAS_CONTEXTUAL_SEQ_LEN=HAS_CONTEXTUAL_SEQ_LEN,
                 ALLOW_TF32=ALLOW_TF32,
                 BLOCK_M=BLOCK_M,
@@ -1826,7 +1768,6 @@ def _ragged_hstu_attn_bwd_one_col_block(  # noqa C901
             q_ptrs_trans=q_ptrs_trans,
             dq_ptrs_trans=dq_ptrs_trans,
             mask_n=mask_n,
-            scale_ptrs=scale_ptrs,
             ts_0_ptrs=ts_0_ptrs,
             ts_1=ts_1,
             bias_ptrs_trans=bias_ptrs_trans,
@@ -1847,7 +1788,6 @@ def _ragged_hstu_attn_bwd_one_col_block(  # noqa C901
             DPW=DPW,
             LOCK=LOCK,
             stride_qm=stride_qm,
-            stride_sm=stride_sm,
             stride_dom=stride_dom,
             stride_dqm=stride_dqm,
             alpha=alpha,
@@ -1867,7 +1807,6 @@ def _ragged_hstu_attn_bwd_one_col_block(  # noqa C901
             FUSED_BIAS_BWD=FUSED_BIAS_BWD,
             HAS_MAX_POS_IND=HAS_MAX_POS_IND,
             HAS_MULTIPLE_TARGETS=HAS_MULTIPLE_TARGETS,
-            HAS_ATTN_SCALE=HAS_ATTN_SCALE,
             HAS_CONTEXTUAL_SEQ_LEN=HAS_CONTEXTUAL_SEQ_LEN,
             ALLOW_TF32=ALLOW_TF32,
             BLOCK_M=BLOCK_M,
@@ -1882,7 +1821,7 @@ def _ragged_hstu_attn_bwd_one_col_block(  # noqa C901
     tl.store(dk_ptrs, dk.to(k.dtype), mask=mask_n[:, None])
 
 
-def bwd_pre_hook(nargs):
+def _bwd_pre_hook(nargs):
     nargs["DQ"].zero_()
     if nargs["DTW"] is not None:
         nargs["DTW"].zero_()
@@ -1913,7 +1852,7 @@ def _get_bw_configs() -> List[triton.Config]:
                                             },
                                             num_stages=num_stages,
                                             num_warps=num_warps,
-                                            pre_hook=bwd_pre_hook,
+                                            pre_hook=_bwd_pre_hook,
                                         )
                                     )
         return configs
@@ -1923,157 +1862,157 @@ def _get_bw_configs() -> List[triton.Config]:
             {"BLOCK_M": 16, "BLOCK_N": 32, "SEQUENCE_PARALLEL": False},
             num_stages=2,
             num_warps=2,
-            pre_hook=bwd_pre_hook,
+            pre_hook=_bwd_pre_hook,
         ),
         triton.Config(
             {"BLOCK_M": 16, "BLOCK_N": 16, "SEQUENCE_PARALLEL": False},
             num_stages=2,
             num_warps=2,
-            pre_hook=bwd_pre_hook,
+            pre_hook=_bwd_pre_hook,
         ),
         triton.Config(
             {"BLOCK_M": 16, "BLOCK_N": 32, "SEQUENCE_PARALLEL": False},
             num_stages=2,
             num_warps=4,
-            pre_hook=bwd_pre_hook,
+            pre_hook=_bwd_pre_hook,
         ),
         triton.Config(
             {"BLOCK_M": 16, "BLOCK_N": 32, "SEQUENCE_PARALLEL": False},
             num_stages=1,
             num_warps=8,
-            pre_hook=bwd_pre_hook,
+            pre_hook=_bwd_pre_hook,
         ),
         triton.Config(
             {"BLOCK_M": 16, "BLOCK_N": 64, "SEQUENCE_PARALLEL": False},
             num_stages=1,
             num_warps=4,
-            pre_hook=bwd_pre_hook,
+            pre_hook=_bwd_pre_hook,
         ),
         triton.Config(
             {"BLOCK_M": 32, "BLOCK_N": 32, "SEQUENCE_PARALLEL": False},
             num_stages=1,
             num_warps=4,
-            pre_hook=bwd_pre_hook,
+            pre_hook=_bwd_pre_hook,
         ),
         triton.Config(
             {"BLOCK_M": 32, "BLOCK_N": 32, "SEQUENCE_PARALLEL": False},
             num_stages=2,
             num_warps=4,
-            pre_hook=bwd_pre_hook,
+            pre_hook=_bwd_pre_hook,
         ),
         triton.Config(
             {"BLOCK_M": 32, "BLOCK_N": 64, "SEQUENCE_PARALLEL": False},
             num_stages=1,
             num_warps=4,
-            pre_hook=bwd_pre_hook,
+            pre_hook=_bwd_pre_hook,
         ),
         triton.Config(
             {"BLOCK_M": 32, "BLOCK_N": 64, "SEQUENCE_PARALLEL": False},
             num_stages=2,
             num_warps=4,
-            pre_hook=bwd_pre_hook,
+            pre_hook=_bwd_pre_hook,
         ),
         triton.Config(
             {"BLOCK_M": 32, "BLOCK_N": 64, "SEQUENCE_PARALLEL": False},
             num_stages=1,
             num_warps=8,
-            pre_hook=bwd_pre_hook,
+            pre_hook=_bwd_pre_hook,
         ),
         triton.Config(
             {"BLOCK_M": 32, "BLOCK_N": 64, "SEQUENCE_PARALLEL": False},
             num_stages=2,
             num_warps=8,
-            pre_hook=bwd_pre_hook,
+            pre_hook=_bwd_pre_hook,
         ),
         triton.Config(
             {"BLOCK_M": 64, "BLOCK_N": 64, "SEQUENCE_PARALLEL": False},
             num_stages=1,
             num_warps=4,
-            pre_hook=bwd_pre_hook,
+            pre_hook=_bwd_pre_hook,
         ),
         triton.Config(
             {"BLOCK_M": 64, "BLOCK_N": 64, "SEQUENCE_PARALLEL": False},
             num_stages=2,
             num_warps=4,
-            pre_hook=bwd_pre_hook,
+            pre_hook=_bwd_pre_hook,
         ),
         triton.Config(
             {"BLOCK_M": 64, "BLOCK_N": 64, "SEQUENCE_PARALLEL": False},
             num_stages=1,
             num_warps=8,
-            pre_hook=bwd_pre_hook,
+            pre_hook=_bwd_pre_hook,
         ),
         triton.Config(
             {"BLOCK_M": 64, "BLOCK_N": 64, "SEQUENCE_PARALLEL": False},
             num_stages=2,
             num_warps=8,
-            pre_hook=bwd_pre_hook,
+            pre_hook=_bwd_pre_hook,
         ),
         triton.Config(
             {"BLOCK_M": 32, "BLOCK_N": 128, "SEQUENCE_PARALLEL": False},
             num_stages=2,
             num_warps=8,
-            pre_hook=bwd_pre_hook,
+            pre_hook=_bwd_pre_hook,
         ),
         triton.Config(
             {"BLOCK_M": 32, "BLOCK_N": 128, "SEQUENCE_PARALLEL": False},
             num_stages=3,
             num_warps=8,
-            pre_hook=bwd_pre_hook,
+            pre_hook=_bwd_pre_hook,
         ),
         triton.Config(
             {"BLOCK_M": 16, "BLOCK_N": 32, "SEQUENCE_PARALLEL": True},
             num_stages=2,
             num_warps=2,
-            pre_hook=bwd_pre_hook,
+            pre_hook=_bwd_pre_hook,
         ),
         triton.Config(
             {"BLOCK_M": 32, "BLOCK_N": 32, "SEQUENCE_PARALLEL": True},
             num_stages=1,
             num_warps=4,
-            pre_hook=bwd_pre_hook,
+            pre_hook=_bwd_pre_hook,
         ),
         triton.Config(
             {"BLOCK_M": 32, "BLOCK_N": 32, "SEQUENCE_PARALLEL": True},
             num_stages=2,
             num_warps=4,
-            pre_hook=bwd_pre_hook,
+            pre_hook=_bwd_pre_hook,
         ),
         triton.Config(
             {"BLOCK_M": 32, "BLOCK_N": 64, "SEQUENCE_PARALLEL": True},
             num_stages=1,
             num_warps=4,
-            pre_hook=bwd_pre_hook,
+            pre_hook=_bwd_pre_hook,
         ),
         triton.Config(
             {"BLOCK_M": 32, "BLOCK_N": 64, "SEQUENCE_PARALLEL": True},
             num_stages=2,
             num_warps=4,
-            pre_hook=bwd_pre_hook,
+            pre_hook=_bwd_pre_hook,
         ),
         triton.Config(
             {"BLOCK_M": 32, "BLOCK_N": 64, "SEQUENCE_PARALLEL": True},
             num_stages=1,
             num_warps=8,
-            pre_hook=bwd_pre_hook,
+            pre_hook=_bwd_pre_hook,
         ),
         triton.Config(
             {"BLOCK_M": 64, "BLOCK_N": 64, "SEQUENCE_PARALLEL": True},
             num_stages=1,
             num_warps=4,
-            pre_hook=bwd_pre_hook,
+            pre_hook=_bwd_pre_hook,
         ),
         triton.Config(
             {"BLOCK_M": 64, "BLOCK_N": 64, "SEQUENCE_PARALLEL": True},
             num_stages=2,
             num_warps=4,
-            pre_hook=bwd_pre_hook,
+            pre_hook=_bwd_pre_hook,
         ),
         triton.Config(
             {"BLOCK_M": 32, "BLOCK_N": 128, "SEQUENCE_PARALLEL": True},
             num_stages=3,
             num_warps=8,
-            pre_hook=bwd_pre_hook,
+            pre_hook=_bwd_pre_hook,
         ),
     ]
     return configs
@@ -2104,7 +2043,6 @@ def _ragged_hstu_attn_bwd(  # noqa C901
     Bias,
     seq2_offsets,
     num_targets,
-    Scale,
     DOut,
     DQ,
     DK,
@@ -2119,8 +2057,6 @@ def _ragged_hstu_attn_bwd(  # noqa C901
     stride_kh,
     stride_vn,
     stride_vh,
-    stride_sz,
-    stride_sm,
     stride_ts,
     stride_dom,
     stride_doh,
@@ -2153,7 +2089,6 @@ def _ragged_hstu_attn_bwd(  # noqa C901
     FUSED_BIAS_BWD: tl.constexpr,
     HAS_MAX_POS_IND: tl.constexpr,
     HAS_MULTIPLE_TARGETS: tl.constexpr,
-    HAS_ATTN_SCALE: tl.constexpr,
     HAS_CONTEXTUAL_SEQ_LEN: tl.constexpr,
     ALLOW_TF32: tl.constexpr,
     BLOCK_D_Q: tl.constexpr,
@@ -2180,8 +2115,6 @@ def _ragged_hstu_attn_bwd(  # noqa C901
     Q = Q + seq_start * stride_qm + off_h * stride_qh
     K = K + seq_start * stride_kn + off_h * stride_kh
     V = V + seq_start * stride_vn + off_h * stride_vh
-    if HAS_ATTN_SCALE:
-        Scale = Scale + off_z * stride_sz
     DOut = DOut + seq_start * stride_dom + off_h * stride_doh
     DQ = DQ + seq_start * stride_dqm + off_h * stride_dqh
     DK = DK + seq_start * stride_dkn + off_h * stride_dkh
@@ -2219,7 +2152,6 @@ def _ragged_hstu_attn_bwd(  # noqa C901
             TW=TW,
             PW=PW,
             Bias=Bias,
-            Scale=Scale,
             DOut=DOut,
             DQ=DQ,
             DK=DK,
@@ -2231,8 +2163,6 @@ def _ragged_hstu_attn_bwd(  # noqa C901
             stride_qm=stride_qm,
             stride_kn=stride_kn,
             stride_vn=stride_vn,
-            stride_sz=stride_sz,
-            stride_sm=stride_sm,
             stride_dom=stride_dom,
             stride_dqm=stride_dqm,
             stride_dkn=stride_dkn,
@@ -2254,7 +2184,6 @@ def _ragged_hstu_attn_bwd(  # noqa C901
             FUSED_BIAS_BWD=FUSED_BIAS_BWD,
             HAS_MAX_POS_IND=HAS_MAX_POS_IND,
             HAS_MULTIPLE_TARGETS=HAS_MULTIPLE_TARGETS,
-            HAS_ATTN_SCALE=HAS_ATTN_SCALE,
             HAS_CONTEXTUAL_SEQ_LEN=HAS_CONTEXTUAL_SEQ_LEN,
             ALLOW_TF32=ALLOW_TF32,
             BLOCK_D_Q=BLOCK_D_Q,
@@ -2277,7 +2206,6 @@ def _ragged_hstu_attn_bwd(  # noqa C901
                 TW=TW,
                 PW=PW,
                 Bias=Bias,
-                Scale=Scale,
                 DOut=DOut,
                 DQ=DQ,
                 DK=DK,
@@ -2289,8 +2217,6 @@ def _ragged_hstu_attn_bwd(  # noqa C901
                 stride_qm=stride_qm,
                 stride_kn=stride_kn,
                 stride_vn=stride_vn,
-                stride_sz=stride_sz,
-                stride_sm=stride_sm,
                 stride_dom=stride_dom,
                 stride_dqm=stride_dqm,
                 stride_dkn=stride_dkn,
@@ -2312,7 +2238,6 @@ def _ragged_hstu_attn_bwd(  # noqa C901
                 FUSED_BIAS_BWD=FUSED_BIAS_BWD,
                 HAS_MAX_POS_IND=HAS_MAX_POS_IND,
                 HAS_MULTIPLE_TARGETS=HAS_MULTIPLE_TARGETS,
-                HAS_ATTN_SCALE=HAS_ATTN_SCALE,
                 HAS_CONTEXTUAL_SEQ_LEN=HAS_CONTEXTUAL_SEQ_LEN,
                 ALLOW_TF32=ALLOW_TF32,
                 BLOCK_D_Q=BLOCK_D_Q,
@@ -2334,7 +2259,6 @@ def triton_ragged_attention_fwd(
     num_targets: Optional[torch.Tensor],
     attn_bias: Optional[torch.Tensor],
     seq2_offsets: Optional[torch.Tensor],
-    attn_scale: Optional[torch.Tensor],
     max_attn_len: Optional[int],
     contextual_seq_len: Optional[int],
     sort_by_length_indices: Optional[torch.Tensor],
@@ -2353,7 +2277,6 @@ def triton_ragged_attention_fwd(
     max_attn_len = max_attn_len or 0
     has_multiple_targets = num_targets is not None
     has_attn_bias = attn_bias is not None
-    has_attn_scale = attn_scale is not None
     has_contextual_seq_len = contextual_seq_len is not None and contextual_seq_len > 0
     has_sort_by_length_indices = sort_by_length_indices is not None
     if L == 0:
@@ -2363,15 +2286,6 @@ def triton_ragged_attention_fwd(
         triton.cdiv(N, meta["BLOCK_M"]),
         Z * H,
     )
-
-    stride_sz = 0
-    stride_sm = 0
-    if attn_scale is not None:
-        if attn_scale.dim() == 1:
-            stride_sm = attn_scale.stride(0)
-        else:
-            stride_sz = attn_scale.stride(0)
-            stride_sm = attn_scale.stride(1)
 
     _ragged_hstu_attn_fwd[grid](
         Q=q,
@@ -2386,7 +2300,6 @@ def triton_ragged_attention_fwd(
         seq2_offsets=seq2_offsets,
         delta_x_offsets=None,
         num_targets=num_targets,
-        Scale=attn_scale,
         Out=out,
         stride_qm=q.stride(0),
         stride_qh=q.stride(1),
@@ -2394,8 +2307,6 @@ def triton_ragged_attention_fwd(
         stride_kh=k.stride(1),
         stride_vn=v.stride(0),
         stride_vh=v.stride(1),
-        stride_sz=stride_sz,
-        stride_sm=stride_sm,
         stride_ts=None,
         stride_om=out.stride(0),
         stride_oh=out.stride(1),
@@ -2421,7 +2332,6 @@ def triton_ragged_attention_fwd(
         USE_POS_BIAS=False,
         HAS_MAX_POS_IND=False,
         HAS_MULTIPLE_TARGETS=has_multiple_targets,
-        HAS_ATTN_SCALE=has_attn_scale,
         IS_DELTA_Q=False,
         ALLOW_TF32=torch.backends.cuda.matmul.allow_tf32,
         BLOCK_D_Q=DimQ,
@@ -2445,7 +2355,6 @@ def triton_ragged_attention_bwd(
     attn_bias: Optional[torch.Tensor],
     seq2_offsets: Optional[torch.Tensor],
     num_targets: Optional[torch.Tensor],
-    attn_scale: Optional[torch.Tensor],
     N: int,
     alpha: float,
     max_attn_len: int,
@@ -2464,16 +2373,6 @@ def triton_ragged_attention_bwd(
         else:
             dbias = None
         return torch.zeros_like(q), torch.zeros_like(k), torch.zeros_like(v), dbias
-
-    stride_sz = 0
-    stride_sm = 0
-    if attn_scale is not None:
-        if attn_scale.dim() == 1:
-            stride_sm = attn_scale.stride(0)
-        else:
-            stride_sz = attn_scale.stride(0)
-            stride_sm = attn_scale.stride(1)
-
     Z = seq_offsets.numel() - 1
     _, H, DimQ = q.shape
     _, _, DimV = v.shape
@@ -2506,7 +2405,6 @@ def triton_ragged_attention_bwd(
         Bias=attn_bias,
         seq2_offsets=seq2_offsets,
         num_targets=num_targets,
-        Scale=attn_scale,
         DOut=dout,
         DQ=dq,
         DK=dk,
@@ -2521,8 +2419,6 @@ def triton_ragged_attention_bwd(
         stride_kh=k.stride(1),
         stride_vn=v.stride(0),
         stride_vh=v.stride(1),
-        stride_sz=stride_sz,
-        stride_sm=stride_sm,
         stride_ts=None,
         stride_dom=dout.stride(0),
         stride_doh=dout.stride(1),
@@ -2555,7 +2451,6 @@ def triton_ragged_attention_bwd(
         FUSED_BIAS_BWD=None,
         HAS_MAX_POS_IND=False,
         HAS_MULTIPLE_TARGETS=num_targets is not None,
-        HAS_ATTN_SCALE=attn_scale is not None,
         HAS_CONTEXTUAL_SEQ_LEN=contextual_seq_len is not None
         and contextual_seq_len > 0,
         ALLOW_TF32=torch.backends.cuda.matmul.allow_tf32,
@@ -2567,7 +2462,7 @@ def triton_ragged_attention_bwd(
     return dq, dk, dv, dbias
 
 
-class _RaggedAttentionFunction(torch.autograd.Function):
+class RaggedAttentionFunction(torch.autograd.Function):
     @staticmethod
     # pyre-ignore[14]
     def forward(
@@ -2582,7 +2477,6 @@ class _RaggedAttentionFunction(torch.autograd.Function):
         num_targets: Optional[torch.Tensor],
         attn_bias: Optional[torch.Tensor],
         seq2_offsets: Optional[torch.Tensor],
-        attn_scale: Optional[torch.Tensor],
         max_attn_len: Optional[int],
         contextual_seq_len: Optional[int],
         sort_by_length: bool,
@@ -2599,8 +2493,6 @@ class _RaggedAttentionFunction(torch.autograd.Function):
         if attn_bias is not None:
             assert seq2_offsets is not None
             saved_tensors.extend([attn_bias, seq2_offsets])
-        if attn_scale is not None:
-            saved_tensors.append(attn_scale)
         contextual_seq_len = 0 if contextual_seq_len else contextual_seq_len
         max_attn_len = max_attn_len or 0
         if sort_by_length_indices is not None:
@@ -2609,7 +2501,6 @@ class _RaggedAttentionFunction(torch.autograd.Function):
         ctx.alpha = alpha
         ctx.invalid_attn_mask_type = invalid_attn_mask_type
         ctx.has_multiple_targets = num_targets is not None
-        ctx.has_attn_scale = attn_scale is not None
         ctx.has_attn_bias = attn_bias is not None
         ctx.max_attn_len = max_attn_len
         ctx.N = N
@@ -2626,7 +2517,6 @@ class _RaggedAttentionFunction(torch.autograd.Function):
             num_targets=num_targets,
             attn_bias=attn_bias,
             seq2_offsets=seq2_offsets,
-            attn_scale=attn_scale,
             max_attn_len=max_attn_len,
             contextual_seq_len=contextual_seq_len,
             sort_by_length_indices=sort_by_length_indices,
@@ -2648,7 +2538,6 @@ class _RaggedAttentionFunction(torch.autograd.Function):
         None,
         None,
         None,
-        None,
     ]:
         with torch.inference_mode():
             q, k, v, seq_offsets = ctx.saved_tensors[:4]
@@ -2664,11 +2553,6 @@ class _RaggedAttentionFunction(torch.autograd.Function):
             else:
                 attn_bias = None
                 seq2_offsets = None
-            if ctx.has_attn_scale:
-                attn_scale = ctx.saved_tensors[idx]
-                idx += 1
-            else:
-                attn_scale = None
             if ctx.sort_by_length:
                 sort_by_length_indices = ctx.saved_tensors[idx]
             else:
@@ -2689,7 +2573,6 @@ class _RaggedAttentionFunction(torch.autograd.Function):
                 attn_bias=attn_bias,
                 seq2_offsets=seq2_offsets,
                 num_targets=num_targets,
-                attn_scale=attn_scale,
                 N=ctx.N,
                 alpha=ctx.alpha,
                 max_attn_len=ctx.max_attn_len,
@@ -2711,7 +2594,6 @@ class _RaggedAttentionFunction(torch.autograd.Function):
                 None,
                 None,
                 None,
-                None,
             )
 
 
@@ -2725,7 +2607,6 @@ def _attn_bias_bwd(  # noqa C901
     TW,
     PW,
     num_targets,
-    Scale,
     DOut,
     DTW,
     DPW,
@@ -2735,8 +2616,6 @@ def _attn_bias_bwd(  # noqa C901
     stride_kh,
     stride_vn,
     stride_vh,
-    stride_sz,
-    stride_sm,
     stride_ts,
     stride_dom,
     stride_doh,
@@ -2760,7 +2639,6 @@ def _attn_bias_bwd(  # noqa C901
     USE_POS_BIAS: tl.constexpr,
     HAS_MAX_POS_IND: tl.constexpr,
     HAS_MULTIPLE_TARGETS: tl.constexpr,
-    HAS_ATTN_SCALE: tl.constexpr,
     HAS_CONTEXTUAL_SEQ_LEN: tl.constexpr,
     ALLOW_TF32: tl.constexpr,
     BLOCK_D_Q: tl.constexpr,
@@ -2860,9 +2738,6 @@ def _attn_bias_bwd(  # noqa C901
                 + offs_m[:, None] * stride_dom
                 + offs_v_d[None, :]
             )
-            if HAS_ATTN_SCALE:
-                scale_ptrs = Scale + off_z * stride_sz + offs_m * stride_sm
-                attn_scale = tl.load(scale_ptrs, mask=offs_m < seq_len)
             mask_m = offs_m < seq_len
             mask_n = offs_n < seq_len
 
@@ -3050,9 +2925,6 @@ def _attn_bias_bwd(  # noqa C901
                 )
                 v = tl.load(v_ptrs + off_h * stride_vh, mask=mask_n[:, None], other=0.0)
                 dqk = tl.dot(do, tl.trans(v), allow_tf32=ALLOW_TF32)
-                if HAS_ATTN_SCALE:
-                    # pyre-fixme[61]: `attn_scale` is undefined, or not always defined.
-                    dqk = dqk * attn_scale[:, None]
                 dqk = dqk * sig * (1 + qk * (1 - sig)) * (1.0 / MAX_SEQ_LEN)
                 dbias = dbias + dqk
 
@@ -3112,7 +2984,6 @@ def triton_ragged_attention_relative_bias_fwd(
     time_delta: float,
     max_pos_ind: Optional[int],
     num_targets: Optional[torch.Tensor],
-    attn_scale: Optional[torch.Tensor],
     relative_bias_type: str,
     max_attn_len: Optional[int],
     use_time_bias: bool,
@@ -3122,7 +2993,6 @@ def triton_ragged_attention_relative_bias_fwd(
 ) -> torch.Tensor:
     Z = timestamps.size(0)
     N = timestamps.size(1) - 1
-    has_attn_scale = attn_scale is not None
     has_multiple_targets = num_targets is not None
     has_max_pos_id = max_pos_ind is not None
     has_contextual_seq_len = contextual_seq_len is not None and contextual_seq_len > 0
@@ -3136,14 +3006,6 @@ def triton_ragged_attention_relative_bias_fwd(
         triton.cdiv(N, meta["BLOCK_M"]),
         Z * H,
     )
-    stride_sz = 0
-    stride_sm = 0
-    if attn_scale is not None:
-        if attn_scale.dim() == 1:
-            stride_sm = attn_scale.stride(0)
-        else:
-            stride_sz = attn_scale.stride(0)
-            stride_sm = attn_scale.stride(1)
 
     contextual_seq_len = 0 if contextual_seq_len is None else contextual_seq_len
 
@@ -3160,7 +3022,6 @@ def triton_ragged_attention_relative_bias_fwd(
         seq2_offsets=None,
         delta_x_offsets=None,
         num_targets=num_targets,
-        Scale=attn_scale,
         Out=out,
         stride_qm=q.stride(0),
         stride_qh=q.stride(1),
@@ -3168,8 +3029,6 @@ def triton_ragged_attention_relative_bias_fwd(
         stride_kh=k.stride(1),
         stride_vn=v.stride(0),
         stride_vh=v.stride(1),
-        stride_sz=stride_sz,
-        stride_sm=stride_sm,
         stride_ts=timestamps.stride(0),
         stride_om=out.stride(0),
         stride_oh=out.stride(1),
@@ -3195,7 +3054,6 @@ def triton_ragged_attention_relative_bias_fwd(
         USE_POS_BIAS=use_pos_bias,
         HAS_MAX_POS_IND=has_max_pos_id,
         HAS_MULTIPLE_TARGETS=has_multiple_targets,
-        HAS_ATTN_SCALE=has_attn_scale,
         IS_DELTA_Q=False,
         ALLOW_TF32=torch.backends.cuda.matmul.allow_tf32,
         BLOCK_D_Q=DimQ,
@@ -3220,7 +3078,6 @@ def triton_ragged_attention_relative_bias_bwd(
     timestamps: torch.Tensor,
     seq_offsets: torch.Tensor,
     num_targets: Optional[torch.Tensor],
-    attn_scale: Optional[torch.Tensor],
     use_time_bias: bool,
     use_pos_bias: bool,
     N: int,
@@ -3235,7 +3092,6 @@ def triton_ragged_attention_relative_bias_bwd(
     causal: bool,
     time_bucket_fn: str,
     has_multiple_targets: bool,
-    has_attn_scale: bool,
     contextual_seq_len: Optional[int],
     sort_by_length_indices: Optional[torch.Tensor],
 ) -> Tuple[
@@ -3257,15 +3113,6 @@ def triton_ragged_attention_relative_bias_bwd(
             torch.zeros_like(ts_weights) if use_time_bias else None,
             torch.zeros_like(pos_weights) if use_pos_bias else None,
         )
-
-    stride_sz = 0
-    stride_sm = 0
-    if attn_scale is not None:
-        if attn_scale.dim() == 1:
-            stride_sm = attn_scale.stride(0)
-        else:
-            stride_sz = attn_scale.stride(0)
-            stride_sm = attn_scale.stride(1)
 
     Z = seq_offsets.numel() - 1
     _, H, DimQ = q.shape
@@ -3316,7 +3163,6 @@ def triton_ragged_attention_relative_bias_bwd(
             TW=ts_weights,
             PW=pos_weights,
             num_targets=num_targets,
-            Scale=attn_scale,
             DOut=dout,
             DTW=d_ts_weights,
             DPW=d_pos_weights,
@@ -3326,8 +3172,6 @@ def triton_ragged_attention_relative_bias_bwd(
             stride_kh=k.stride(1),
             stride_vn=v.stride(0),
             stride_vh=v.stride(1),
-            stride_sz=stride_sz,
-            stride_sm=stride_sm,
             stride_ts=timestamps.stride(0),
             stride_dom=dout.stride(0),
             stride_doh=dout.stride(1),
@@ -3351,7 +3195,6 @@ def triton_ragged_attention_relative_bias_bwd(
             USE_POS_BIAS=use_pos_bias,
             HAS_MAX_POS_IND=max_pos_ind is not None,
             HAS_MULTIPLE_TARGETS=has_multiple_targets,
-            HAS_ATTN_SCALE=has_attn_scale,
             HAS_CONTEXTUAL_SEQ_LEN=contextual_seq_len is not None
             and contextual_seq_len > 0,
             ALLOW_TF32=torch.backends.cuda.matmul.allow_tf32,
@@ -3387,7 +3230,6 @@ def triton_ragged_attention_relative_bias_bwd(
         Bias=None,
         seq2_offsets=None,
         num_targets=num_targets,
-        Scale=attn_scale,
         DOut=dout,
         DQ=dq,
         DK=dk,
@@ -3402,8 +3244,6 @@ def triton_ragged_attention_relative_bias_bwd(
         stride_kh=k.stride(1),
         stride_vn=v.stride(0),
         stride_vh=v.stride(1),
-        stride_sz=stride_sz,
-        stride_sm=stride_sm,
         stride_ts=timestamps.stride(0),
         stride_dom=dout.stride(0),
         stride_doh=dout.stride(1),
@@ -3436,7 +3276,6 @@ def triton_ragged_attention_relative_bias_bwd(
         FUSED_BIAS_BWD=fused_bias_bwd,
         HAS_MAX_POS_IND=max_pos_ind is not None,
         HAS_MULTIPLE_TARGETS=has_multiple_targets,
-        HAS_ATTN_SCALE=has_attn_scale,
         HAS_CONTEXTUAL_SEQ_LEN=contextual_seq_len is not None
         and contextual_seq_len > 0,
         ALLOW_TF32=torch.backends.cuda.matmul.allow_tf32,
@@ -3453,7 +3292,7 @@ def triton_ragged_attention_relative_bias_bwd(
     )
 
 
-class _RaggedAttentionRelativeBiasFunction(torch.autograd.Function):
+class RaggedAttentionRelativeBiasFunction(torch.autograd.Function):
     @staticmethod
     # pyre-ignore[14]
     def forward(
@@ -3476,7 +3315,6 @@ class _RaggedAttentionRelativeBiasFunction(torch.autograd.Function):
         time_delta: float,
         max_pos_ind: Optional[int],
         num_targets: Optional[torch.Tensor],
-        attn_scale: Optional[torch.Tensor],
         relative_bias_type: str,
         max_attn_len: Optional[int],
         contextual_seq_len: Optional[int],
@@ -3503,14 +3341,11 @@ class _RaggedAttentionRelativeBiasFunction(torch.autograd.Function):
         max_attn_len = max_attn_len or 0
         if num_targets is not None:
             saved_tensors.append(num_targets)
-        if attn_scale is not None:
-            saved_tensors.append(attn_scale)
         if sort_by_length_indices is not None:
             saved_tensors.append(sort_by_length_indices)
         ctx.save_for_backward(*saved_tensors)
         ctx.alpha = alpha
         ctx.invalid_attn_mask_type = invalid_attn_mask_type
-        ctx.has_attn_scale = attn_scale is not None
         ctx.has_multiple_targets = num_targets is not None
         ctx.max_pos_ind = max_pos_ind
         ctx.N = N
@@ -3544,7 +3379,6 @@ class _RaggedAttentionRelativeBiasFunction(torch.autograd.Function):
             time_delta=time_delta,
             max_pos_ind=max_pos_ind,
             num_targets=num_targets,
-            attn_scale=attn_scale,
             relative_bias_type=relative_bias_type,
             max_attn_len=max_attn_len,
             use_time_bias=use_time_bias,
@@ -3578,7 +3412,6 @@ class _RaggedAttentionRelativeBiasFunction(torch.autograd.Function):
         None,
         None,
         None,
-        None,
     ]:
         with torch.inference_mode():
             (
@@ -3596,11 +3429,6 @@ class _RaggedAttentionRelativeBiasFunction(torch.autograd.Function):
                 idx += 1
             else:
                 num_targets = None
-            if ctx.has_attn_scale:
-                attn_scale = ctx.saved_tensors[idx]
-                idx += 1
-            else:
-                attn_scale = None
             if ctx.sort_by_length:
                 sort_by_length_indices = ctx.saved_tensors[idx]
             else:
@@ -3623,7 +3451,6 @@ class _RaggedAttentionRelativeBiasFunction(torch.autograd.Function):
                     timestamps=timestamps,
                     seq_offsets=seq_offsets,
                     num_targets=num_targets,
-                    attn_scale=attn_scale,
                     use_time_bias=ctx.use_time_bias,
                     use_pos_bias=ctx.use_pos_bias,
                     N=ctx.N,
@@ -3638,7 +3465,6 @@ class _RaggedAttentionRelativeBiasFunction(torch.autograd.Function):
                     causal=ctx.causal,
                     time_bucket_fn=ctx.time_bucket_fn,
                     has_multiple_targets=ctx.has_multiple_targets,
-                    has_attn_scale=ctx.has_attn_scale,
                     contextual_seq_len=ctx.contextual_seq_len,
                     sort_by_length_indices=sort_by_length_indices,
                 )
@@ -3654,7 +3480,6 @@ class _RaggedAttentionRelativeBiasFunction(torch.autograd.Function):
             None,
             d_ts_weights,
             d_pos_weights,
-            None,
             None,
             None,
             None,
