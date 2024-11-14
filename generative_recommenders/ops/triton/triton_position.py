@@ -25,6 +25,7 @@ import triton
 
 # @manual=//triton:triton
 import triton.language as tl
+from hammer.ops.triton.utils import prev_power_of_2
 
 try:
     from hammer.ops.triton.utils import (
@@ -571,7 +572,7 @@ def _add_embeddings_bwd_configs() -> List[triton.Config]:
 
 @triton_autotune(
     configs=_add_embeddings_bwd_configs(),
-    key=["AUTOTUNE_MAX_SEQ_LEN", "B", "D"],
+    key=["AUTOTUNE_MAX_SEQ_LEN", "AUTOTUNE_B", "D"],
 )
 @triton.jit
 def _add_embeddings_bwd_kernel(
@@ -581,6 +582,7 @@ def _add_embeddings_bwd_kernel(
     Out,
     AUTOTUNE_MAX_SEQ_LEN,
     B,
+    AUTOTUNE_B,
     D,
     jagged_size,
     stride_in,
@@ -752,13 +754,16 @@ class _AddTimestampPositionEmbeddingsFunction(torch.autograd.Function):
             (ctx.ts_emb_size, ctx.D), device=d_out.device, dtype=torch.float32
         )
         grid = lambda meta: (triton.cdiv(d_out.shape[0], meta["BLOCK"]),)  # noqa E731
+        B = ctx.B
+        AUTOTUNE_B = prev_power_of_2(B)
         _add_embeddings_bwd_kernel[grid](
             In=d_out,
             KeyInds=sorted_pos_key_inds,
             ValueInds=sorted_pos_value_inds,
             Out=d_pos_embeddings,
             AUTOTUNE_MAX_SEQ_LEN=autotune_max_seq_len(ctx.max_seq_len),
-            B=ctx.B,
+            B=B,
+            AUTOTUNE_B=AUTOTUNE_B,
             D=ctx.D,
             jagged_size=d_out.shape[0],
             stride_in=d_out.stride(0),
@@ -771,7 +776,8 @@ class _AddTimestampPositionEmbeddingsFunction(torch.autograd.Function):
             ValueInds=sorted_ts_value_inds,
             Out=d_ts_embeddings,
             AUTOTUNE_MAX_SEQ_LEN=autotune_max_seq_len(ctx.max_seq_len),
-            B=ctx.B,
+            B=B,
+            AUTOTUNE_B=AUTOTUNE_B,
             D=ctx.D,
             jagged_size=d_out.shape[0],
             stride_in=d_out.stride(0),
