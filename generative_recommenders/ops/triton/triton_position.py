@@ -35,6 +35,8 @@ try:
         triton_autotune,
         VersionedSpec,
     )
+
+    torch.ops.load_library("//hammer/ops/cuda:cuda_ops")
 except ImportError:
     from hammer.oss.generative_recommenders.ops.triton.utils import (
         _switch_to_contiguous_if_needed,
