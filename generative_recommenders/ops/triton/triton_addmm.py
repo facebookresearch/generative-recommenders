@@ -40,7 +40,7 @@ def get_mm_configs() -> List[triton.Config]:
             waves_per_eu_range = [0]
             kpack_range = [1, 2]
             num_warps_range = [4, 8]
-            num_stage_range = [0]
+            num_stage_range = [2] if triton.__version__ >= "3.2.0" else [0]
         else:
             block_m_range = [256]
             block_n_range = [256]
@@ -50,7 +50,7 @@ def get_mm_configs() -> List[triton.Config]:
             waves_per_eu_range = [0]
             kpack_range = [2]
             num_warps_range = [8]
-            num_stage_range = [0]
+            num_stage_range = [2] if triton.__version__ >= "3.2.0" else [0]
 
         return [
             triton.Config(
