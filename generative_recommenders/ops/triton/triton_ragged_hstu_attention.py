@@ -2493,7 +2493,7 @@ class RaggedAttentionFunction(torch.autograd.Function):
         if attn_bias is not None:
             assert seq2_offsets is not None
             saved_tensors.extend([attn_bias, seq2_offsets])
-        contextual_seq_len = 0 if contextual_seq_len else contextual_seq_len
+        contextual_seq_len = 0 if contextual_seq_len is None else contextual_seq_len
         max_attn_len = max_attn_len or 0
         if sort_by_length_indices is not None:
             saved_tensors.append(sort_by_length_indices)
