@@ -170,13 +170,18 @@ class InBatchNegativesSampler(NegativesSampler):
                 valid_ids.numel(), dtype=torch.int64, device=device
             )
             unique_embeddings = embeddings[presences][unique_embedding_offsets, :]
+            # pyre-fixme[16]: `InBatchNegativesSampler` has no attribute
+            #  `_cached_embeddings`.
             self._cached_embeddings = self._maybe_l2_norm(unique_embeddings)
+            # pyre-fixme[16]: `InBatchNegativesSampler` has no attribute `_cached_ids`.
             self._cached_ids = unique_ids
         else:
             self._cached_embeddings = self._maybe_l2_norm(embeddings[presences])
             self._cached_ids = ids[presences]
 
     def get_all_ids_and_embeddings(self) -> Tuple[torch.Tensor, torch.Tensor]:
+        # pyre-fixme[7]: Expected `Tuple[Tensor, Tensor]` but got
+        #  `Tuple[Union[Tensor, Module], Union[Tensor, Module]]`.
         return self._cached_ids, self._cached_embeddings
 
     def forward(
@@ -197,7 +202,9 @@ class InBatchNegativesSampler(NegativesSampler):
             device=positive_ids.device,
         )
         return (
+            # pyre-fixme[29]: `Union[(self: TensorBase, indices: Union[None, slice[An...
             self._cached_ids[sampled_offsets],
+            # pyre-fixme[29]: `Union[(self: TensorBase, indices: Union[None, slice[An...
             self._cached_embeddings[sampled_offsets],
         )
 
@@ -287,6 +294,7 @@ class BCELoss(AutoregressiveLoss):
         )
 
         positive_logits = (
+            # pyre-fixme[29]: `Union[Tensor, Module]` is not a function.
             self._model.interaction(
                 input_embeddings=output_embeddings,  # [B, D] = [N', D]
                 target_ids=supervision_ids.unsqueeze(1),  # [N', 1]
@@ -298,6 +306,7 @@ class BCELoss(AutoregressiveLoss):
         )  # [N']
 
         sampled_negatives_logits = (
+            # pyre-fixme[29]: `Union[Tensor, Module]` is not a function.
             self._model.interaction(
                 input_embeddings=output_embeddings,  # [N', D]
                 target_ids=sampled_ids,  # [N', 1]
@@ -403,6 +412,7 @@ class BCELossWithRatings(AutoregressiveLoss):
         assert supervision_ids.size() == supervision_weights.size()
 
         target_logits = (
+            # pyre-fixme[29]: `Union[Tensor, Module]` is not a function.
             self._model.interaction(
                 input_embeddings=output_embeddings,  # [B, D] = [N', D]
                 target_ids=supervision_ids.unsqueeze(1),  # [N', 1]
@@ -516,6 +526,7 @@ class SampledSoftmaxLoss(AutoregressiveLoss):
             supervision_embeddings
         )
         positive_logits = (
+            # pyre-fixme[29]: `Union[Tensor, Module]` is not a function.
             self._model.interaction(
                 input_embeddings=output_embeddings,  # [B, D] = [N', D]
                 target_ids=supervision_ids.unsqueeze(1),  # [N', 1]
@@ -525,6 +536,7 @@ class SampledSoftmaxLoss(AutoregressiveLoss):
             )
             / self._softmax_temperature
         )  # [0]
+        # pyre-fixme[29]: `Union[Tensor, Module]` is not a function.
         sampled_negatives_logits = self._model.interaction(
             input_embeddings=output_embeddings,  # [N', D]
             target_ids=sampled_ids,  # [N', R]
