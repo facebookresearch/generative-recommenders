@@ -26,11 +26,8 @@ from generative_recommenders.modeling.sequential.output_postprocessors import (
     OutputPostprocessorModule,
 )
 from generative_recommenders.modeling.sequential.sasrec import SASRec
-
-from generative_recommenders.modeling.similarity_module import (
-    GeneralizedInteractionModule,
-    InteractionModule,
-)
+from generative_recommenders.modeling.similarity_module import SequentialEncoderWithLearnedSimilarityModule
+from generative_recommenders.rails.similarities.module import SimilarityModule
 
 
 @gin.configurable
@@ -38,7 +35,7 @@ def sasrec_encoder(
     max_sequence_length: int,
     max_output_length: int,
     embedding_module: EmbeddingModule,
-    interaction_module: InteractionModule,
+    similarity_module: SimilarityModule,
     input_preproc_module: InputFeaturesPreprocessorModule,
     output_postproc_module: OutputPostprocessorModule,
     activation_checkpoint: bool,
@@ -48,7 +45,7 @@ def sasrec_encoder(
     ffn_dropout_rate: float = 0.2,
     num_blocks: int = 2,
     num_heads: int = 1,
-) -> GeneralizedInteractionModule:
+) -> SequentialEncoderWithLearnedSimilarityModule:
     return SASRec(
         embedding_module=embedding_module,
         max_sequence_len=max_sequence_length,
@@ -59,7 +56,7 @@ def sasrec_encoder(
         ffn_dropout_rate=ffn_dropout_rate,
         num_blocks=num_blocks,
         num_heads=num_heads,
-        similarity_module=interaction_module,  # pyre-ignore [6]
+        similarity_module=similarity_module,  # pyre-ignore [6]
         input_features_preproc_module=input_preproc_module,
         output_postproc_module=output_postproc_module,
         activation_checkpoint=activation_checkpoint,
@@ -72,7 +69,7 @@ def hstu_encoder(
     max_sequence_length: int,
     max_output_length: int,
     embedding_module: EmbeddingModule,
-    interaction_module: InteractionModule,
+    similarity_module: SimilarityModule,
     input_preproc_module: InputFeaturesPreprocessorModule,
     output_postproc_module: OutputPostprocessorModule,
     activation_checkpoint: bool,
@@ -88,10 +85,10 @@ def hstu_encoder(
     linear_activation: str = "silu",
     concat_ua: bool = False,
     enable_relative_attention_bias: bool = True,
-) -> GeneralizedInteractionModule:
+) -> SequentialEncoderWithLearnedSimilarityModule:
     return HSTU(
         embedding_module=embedding_module,
-        similarity_module=interaction_module,  # pyre-ignore [6]
+        similarity_module=similarity_module,  # pyre-ignore [6]
         input_features_preproc_module=input_preproc_module,
         output_postproc_module=output_postproc_module,
         max_sequence_len=max_sequence_length,
@@ -118,18 +115,18 @@ def get_sequential_encoder(
     max_sequence_length: int,
     max_output_length: int,
     embedding_module: EmbeddingModule,
-    interaction_module: InteractionModule,
+    interaction_module: SimilarityModule,
     input_preproc_module: InputFeaturesPreprocessorModule,
     output_postproc_module: OutputPostprocessorModule,
     verbose: bool,
     activation_checkpoint: bool = False,
-) -> GeneralizedInteractionModule:
+) -> SequentialEncoderWithLearnedSimilarityModule:
     if module_type == "SASRec":
         model = sasrec_encoder(
             max_sequence_length=max_sequence_length,
             max_output_length=max_output_length,
             embedding_module=embedding_module,
-            interaction_module=interaction_module,
+            similarity_module=interaction_module,
             input_preproc_module=input_preproc_module,
             output_postproc_module=output_postproc_module,
             activation_checkpoint=activation_checkpoint,
@@ -140,7 +137,7 @@ def get_sequential_encoder(
             max_sequence_length=max_sequence_length,
             max_output_length=max_output_length,
             embedding_module=embedding_module,
-            interaction_module=interaction_module,
+            similarity_module=interaction_module,
             input_preproc_module=input_preproc_module,
             output_postproc_module=output_postproc_module,
             activation_checkpoint=activation_checkpoint,

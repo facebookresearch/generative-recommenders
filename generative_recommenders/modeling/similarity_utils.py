@@ -22,7 +22,9 @@ import torch
 from generative_recommenders.modeling.initialization import (
     init_mlp_xavier_weights_zero_bias,
 )
-from generative_recommenders.modeling.similarity.dot_product import DotProductSimilarity
+from generative_recommenders.rails.similarities.dot_product_similarity_fn import (
+    DotProductSimilarity,
+)
 from generative_recommenders.modeling.similarity.mol import (
     GeGLU,
     IdentityMLPProjectionFn,

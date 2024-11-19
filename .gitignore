@@ -1,5 +1,7 @@
-# Don't check in parsed data files
+# Don't check in parsed data files and other temporary files
 tmp/
+exps/
+ckpts/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

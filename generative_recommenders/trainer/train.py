@@ -41,6 +41,8 @@ from generative_recommenders.modeling.sequential.autoregressive_losses import (
     BCELoss,
     InBatchNegativesSampler,
     LocalNegativesSampler,
+)
+from generative_recommenders.modeling.sequential.losses.sampled_softmax import (
     SampledSoftmaxLoss,
 )
 from generative_recommenders.modeling.sequential.embedding_modules import (
@@ -366,14 +368,20 @@ def train_fn(
                 negatives_sampler._item_emb = model.module._embedding_module._item_emb
 
             ar_mask = supervision_ids[:, 1:] != 0
-            loss = ar_loss(
+            loss, aux_losses = ar_loss(
                 lengths=seq_features.past_lengths,  # [B],
                 output_embeddings=seq_embeddings[:, :-1, :],  # [B, N-1, D]
                 supervision_ids=supervision_ids[:, 1:],  # [B, N-1]
                 supervision_embeddings=input_embeddings[:, 1:, :],  # [B, N - 1, D]
                 supervision_weights=ar_mask.float(),
                 negatives_sampler=negatives_sampler,
+                **seq_features.past_payloads,
             )  # [B, N]
+
+            # TODO: needed for learned similarities (e.g., MoL). To be integrated in
+            # future refactorings.
+            del aux_losses
+
             if rank == 0:
                 assert writer is not None
                 writer.add_scalar("losses/ar_loss", loss, batch_id)

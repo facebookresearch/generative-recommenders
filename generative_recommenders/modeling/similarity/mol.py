@@ -417,56 +417,6 @@ class MoLSimilarity(torch.nn.Module):
         self._eps: float = eps
         self._bf16_training: bool = bf16_training
 
-    def _frequency_estimator_old(self, ids: torch.Tensor) -> torch.Tensor:
-        ids_shape = ids.size()
-        ids = ids.reshape(-1)
-        temp = (1 - self._lnx_estimator_alpha) * self._B[
-            ids
-        ] + self._lnx_estimator_alpha * (self._lnx_num_batches + 1 - self._A[ids])
-        temp = torch.clamp(temp, max=self._lnx_estimator_b_cap)  # pyre-ignore [6]
-        if self.train:
-            self._lnx_num_batches = self._lnx_num_batches + 1
-            self._B[ids] = temp
-            self._A[ids] = self._lnx_num_batches
-        return torch.div(1.0, temp.reshape(ids_shape))
-
-    def _frequency_estimator(self, ids: torch.Tensor, update: bool) -> torch.Tensor:
-        ids_shape = ids.size()
-        ids = ids.reshape(-1)
-        sorted_id_values, sorted_id_indices = ids.sort()
-        (
-            sorted_unique_ids,
-            sorted_unique_inverses,
-            sorted_unique_cnts,
-        ) = sorted_id_values.unique_consecutive(
-            return_counts=True,
-            return_inverse=True,
-        )
-        most_recent_batches = torch.zeros_like(sorted_unique_ids, dtype=torch.int64)
-        most_recent_batches[sorted_unique_inverses] = (
-            sorted_id_indices + self._lnx_estimator_num_elements
-        )
-        delta_batches = torch.zeros_like(ids, dtype=torch.float32)
-        delta_batches[sorted_id_indices] = torch.gather(
-            input=(most_recent_batches - self._A[sorted_unique_ids]).float()
-            / sorted_unique_cnts.float(),
-            dim=0,
-            index=sorted_unique_inverses,
-        )
-
-        temp = (1 - self._lnx_estimator_alpha) * self._B[
-            ids
-        ] + self._lnx_estimator_alpha * delta_batches
-        temp = torch.clamp(temp, max=self._lnx_estimator_b_cap)  # pyre-ignore [6]
-
-        if update:
-            self._B[ids] = temp
-            self._A[sorted_unique_ids] = most_recent_batches
-            self._lnx_estimator_num_elements = (
-                self._lnx_estimator_num_elements + ids.numel()
-            )
-        return torch.div(1.0, temp.reshape(ids_shape))
-
     def get_query_component_embeddings(
         self,
         input_embeddings: torch.Tensor,
