@@ -1586,7 +1586,14 @@ class HSTUComputeOutputFunction(torch.autograd.Function):
                 concat_ux=concat_ux,
                 seed=seed,
             )
-        out = triton_addmm_fwd(x=y, w=output_weight, y=x)
+
+        # NOTE: for AMD training, we go with torch.addmm instead of the triton
+        # version before Triton on AMD achieves on-par perf with NV GPU.
+        if torch.version.hip:
+            out = torch.addmm(x, y, output_weight)
+        else:
+            out = triton_addmm_fwd(x=y, w=output_weight, y=x)
+
         saved_tensors = [attn, u, norm_weight, norm_bias, mean, rstd, output_weight]
         if not recompute_y_in_backward:
             saved_tensors.append(y)
