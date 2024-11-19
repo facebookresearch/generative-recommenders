@@ -26,6 +26,7 @@ from typing import List, Optional
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "1"  # Hide excessive tensorflow debug messages
 import sys
 
+import fbgemm_gpu  # noqa: F401, E402
 import gin
 
 import torch
