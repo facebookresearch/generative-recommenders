@@ -49,11 +49,15 @@ class SequentialEncoderWithLearnedSimilarityModule(torch.nn.Module):
         item_embeddings: Optional[torch.Tensor] = None,
         **kwargs,
     ) -> torch.Tensor:
-        torch._assert(len(query_embeddings.size()) == 2, "len(query_embeddings.size()) must be 2")
+        torch._assert(
+            len(query_embeddings.size()) == 2, "len(query_embeddings.size()) must be 2"
+        )
         torch._assert(len(item_ids.size()) == 2, "len(item_ids.size()) must be 2")
         if item_embeddings is None:
             item_embeddings = self.get_item_embeddings(item_ids)
-        torch._assert(len(item_embeddings.size()) == 3, "len(item_embeddings.size()) must be 3")
+        torch._assert(
+            len(item_embeddings.size()) == 3, "len(item_embeddings.size()) must be 3"
+        )
 
         return self._ndp_module(
             query_embeddings=query_embeddings,  # (B, query_embedding_dim)

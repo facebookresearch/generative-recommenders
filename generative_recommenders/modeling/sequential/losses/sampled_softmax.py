@@ -23,6 +23,8 @@ from generative_recommenders.modeling.sequential.autoregressive_losses import (
     NegativesSampler,
 )
 
+from torch.utils.checkpoint import checkpoint
+
 
 class SampledSoftmaxLoss(AutoregressiveLoss):
 
