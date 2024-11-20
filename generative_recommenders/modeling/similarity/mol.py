@@ -420,13 +420,24 @@ class MoLSimilarity(torch.nn.Module):
     def _frequency_estimator_old(self, ids: torch.Tensor) -> torch.Tensor:
         ids_shape = ids.size()
         ids = ids.reshape(-1)
+        # pyre-fixme[58]: `-` is not supported for operand types `int` and
+        #  `Union[Tensor, Module]`.
+        # pyre-fixme[29]: `Union[(self: TensorBase, indices: Union[None, slice[Any, A...
         temp = (1 - self._lnx_estimator_alpha) * self._B[
             ids
+            # pyre-fixme[29]: `Union[(self: TensorBase, other: Union[bool, complex,
+            #  float, int, Tensor]) -> Tensor, Tensor, Module]` is not a function.
+            # pyre-fixme[29]: `Union[(self: TensorBase, indices: Union[None, slice[Any, A...
         ] + self._lnx_estimator_alpha * (self._lnx_num_batches + 1 - self._A[ids])
         temp = torch.clamp(temp, max=self._lnx_estimator_b_cap)  # pyre-ignore [6]
         if self.train:
+            # pyre-fixme[16]: `MoLSimilarity` has no attribute `_lnx_num_batches`.
+            # pyre-fixme[29]: `Union[(self: TensorBase, other: Union[bool, complex,
+            #  float, int, Tensor]) -> Tensor, Tensor, Module]` is not a function.
             self._lnx_num_batches = self._lnx_num_batches + 1
+            # pyre-fixme[29]: `Union[(self: TensorBase, indices: Union[None, slice[An...
             self._B[ids] = temp
+            # pyre-fixme[29]: `Union[(self: TensorBase, indices: Union[None, slice[An...
             self._A[ids] = self._lnx_num_batches
         return torch.div(1.0, temp.reshape(ids_shape))
 
@@ -448,22 +459,36 @@ class MoLSimilarity(torch.nn.Module):
         )
         delta_batches = torch.zeros_like(ids, dtype=torch.float32)
         delta_batches[sorted_id_indices] = torch.gather(
+            # pyre-fixme[29]: `Union[(self: TensorBase, indices: Union[None, slice[An...
             input=(most_recent_batches - self._A[sorted_unique_ids]).float()
             / sorted_unique_cnts.float(),
             dim=0,
             index=sorted_unique_inverses,
         )
 
+        # pyre-fixme[58]: `-` is not supported for operand types `int` and
+        #  `Union[Tensor, Module]`.
+        # pyre-fixme[29]: `Union[(self: TensorBase, indices: Union[None, slice[Any, A...
         temp = (1 - self._lnx_estimator_alpha) * self._B[
             ids
+            # pyre-fixme[29]: `Union[(self: TensorBase, other: Union[bool, complex,
+            #  float, int, Tensor]) -> Tensor, Tensor, Module]` is not a function.
         ] + self._lnx_estimator_alpha * delta_batches
         temp = torch.clamp(temp, max=self._lnx_estimator_b_cap)  # pyre-ignore [6]
 
         if update:
+            # pyre-fixme[29]: `Union[(self: TensorBase, indices: Union[None, slice[An...
             self._B[ids] = temp
+            # pyre-fixme[29]: `Union[(self: TensorBase, indices: Union[None, slice[An...
             self._A[sorted_unique_ids] = most_recent_batches
+            # pyre-fixme[16]: `MoLSimilarity` has no attribute
+            #  `_lnx_estimator_num_elements`.
             self._lnx_estimator_num_elements = (
-                self._lnx_estimator_num_elements + ids.numel()
+                # pyre-fixme[29]: `Union[(self: TensorBase, other: Union[bool,
+                #  complex, float, int, Tensor]) -> Tensor, Tensor, Module]` is not a
+                #  function.
+                self._lnx_estimator_num_elements
+                + ids.numel()
             )
         return torch.div(1.0, temp.reshape(ids_shape))
 
