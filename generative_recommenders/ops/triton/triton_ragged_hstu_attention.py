@@ -31,6 +31,7 @@ try:
         _switch_to_contiguous_if_needed,
         autotune_max_seq_len,
         NamedSpecType,
+        prev_power_of_2,
         register_tritoncc_specs,
         triton_autotune,
         VersionedSpec,
@@ -40,6 +41,7 @@ except ImportError:
         _switch_to_contiguous_if_needed,
         autotune_max_seq_len,
         NamedSpecType,
+        prev_power_of_2,
         register_tritoncc_specs,
         triton_autotune,
         VersionedSpec,
@@ -676,7 +678,7 @@ def _ragged_hstu_attn_fwd_compute(  # noqa C901
 @triton.autotune(
     configs=_get_fw_configs(),
     key=[
-        "Z",
+        "AUTOTUNE_Z",
         "H",
         "AUTOTUNE_MAX_SEQ_LEN",
         "DimQ",
@@ -713,6 +715,7 @@ def _ragged_hstu_attn_fwd(  # noqa C901
     stride_oh,
     alpha,
     Z,
+    AUTOTUNE_Z,
     H,
     MAX_SEQ_LEN,
     AUTOTUNE_MAX_SEQ_LEN,  # Quantized MAX_SEQ_LEN used as an autotuning key
@@ -809,7 +812,7 @@ def _ragged_hstu_attn_fwd(  # noqa C901
 @triton.autotune(
     configs=_get_fw_configs(),
     key=[
-        "Z",
+        "AUTOTUNE_Z",
         "H",
         "AUTOTUNE_MAX_SEQ_LEN",
         "DimQ",
@@ -846,6 +849,7 @@ def _ragged_hstu_attn_fwd_persistent(  # noqa C901
     stride_oh,
     alpha,
     Z,
+    AUTOTUNE_Z,
     H,
     MAX_SEQ_LEN,
     AUTOTUNE_MAX_SEQ_LEN,  # Quantized MAX_SEQ_LEN used as an autotuning key
@@ -979,6 +983,7 @@ def _get_named_specs() -> List[VersionedSpec]:
             "alpha": "fp32",
             "contextual_seq_len": "i32",
             "Z": "i32",
+            "AUTOTUNE_Z": "i32",
             "H": "i32",
             "MAX_SEQ_LEN": "i32",
             "AUTOTUNE_MAX_SEQ_LEN": "i32",
@@ -1321,7 +1326,7 @@ _ragged_hstu_attn_fwd = register_tritoncc_specs(
 _ragged_hstu_attn_fwd = triton_autotune(
     configs=_get_fw_configs(),
     key=[
-        "Z",
+        "AUTOTUNE_Z",
         "H",
         "AUTOTUNE_MAX_SEQ_LEN",
         "DimQ",
@@ -1339,7 +1344,7 @@ _ragged_hstu_attn_fwd_persistent = register_tritoncc_specs(
 _ragged_hstu_attn_fwd_persistent = triton_autotune(
     configs=_get_fw_configs(),
     key=[
-        "Z",
+        "AUTOTUNE_Z",
         "H",
         "AUTOTUNE_MAX_SEQ_LEN",
         "DimQ",
@@ -2021,7 +2026,7 @@ def _get_bw_configs() -> List[triton.Config]:
 @triton_autotune(
     configs=_get_bw_configs(),
     key=[
-        "Z",
+        "AUTOTUNE_Z",
         "H",
         "AUTOTUNE_MAX_SEQ_LEN",
         "DimQ",
@@ -2069,6 +2074,7 @@ def _ragged_hstu_attn_bwd(  # noqa C901
     alpha,
     contextual_seq_len,
     Z,
+    AUTOTUNE_Z,
     H,
     MAX_SEQ_LEN,
     AUTOTUNE_MAX_SEQ_LEN,  # Quantized MAX_SEQ_LEN used as an autotuning key
@@ -2270,6 +2276,7 @@ def triton_ragged_attention_fwd(
     if invalid_attn_mask_type != "lower_triangular":
         assert contextual_seq_len is None or contextual_seq_len == 0
     Z = seq_offsets.numel() - 1
+    AUTOTUNE_Z = prev_power_of_2(Z)
     L, H, DimQ = q.shape
     _, _, DimV = v.shape
 
@@ -2312,6 +2319,7 @@ def triton_ragged_attention_fwd(
         stride_oh=out.stride(1),
         alpha=alpha,
         Z=Z,
+        AUTOTUNE_Z=AUTOTUNE_Z,
         H=H,
         MAX_SEQ_LEN=N,
         AUTOTUNE_MAX_SEQ_LEN=autotune_max_seq_len(N),
@@ -2393,6 +2401,7 @@ def triton_ragged_attention_bwd(
         dtype=torch.int32,
         device=q.device,
     )
+    AUTOTUNE_Z = prev_power_of_2(Z)
     _ragged_hstu_attn_bwd[grid](
         Q=q,
         K=k,
@@ -2431,6 +2440,7 @@ def triton_ragged_attention_bwd(
         alpha=alpha,
         contextual_seq_len=0 if contextual_seq_len is None else contextual_seq_len,
         Z=Z,
+        AUTOTUNE_Z=AUTOTUNE_Z,
         H=H,
         MAX_SEQ_LEN=N,
         AUTOTUNE_MAX_SEQ_LEN=autotune_max_seq_len(N),
@@ -2992,6 +3002,7 @@ def triton_ragged_attention_relative_bias_fwd(
     sort_by_length_indices: Optional[torch.Tensor],
 ) -> torch.Tensor:
     Z = timestamps.size(0)
+    AUTOTUNE_Z = prev_power_of_2(Z)
     N = timestamps.size(1) - 1
     has_multiple_targets = num_targets is not None
     has_max_pos_id = max_pos_ind is not None
@@ -3034,6 +3045,7 @@ def triton_ragged_attention_relative_bias_fwd(
         stride_oh=out.stride(1),
         alpha=alpha,
         Z=Z,
+        AUTOTUNE_Z=AUTOTUNE_Z,
         H=H,
         MAX_SEQ_LEN=N,
         AUTOTUNE_MAX_SEQ_LEN=autotune_max_seq_len(N),
@@ -3115,6 +3127,7 @@ def triton_ragged_attention_relative_bias_bwd(
         )
 
     Z = seq_offsets.numel() - 1
+    AUTOTUNE_Z = prev_power_of_2(Z)
     _, H, DimQ = q.shape
     _, _, DimV = v.shape
 
@@ -3256,6 +3269,7 @@ def triton_ragged_attention_relative_bias_bwd(
         alpha=alpha,
         contextual_seq_len=contextual_seq_len,
         Z=Z,
+        AUTOTUNE_Z=AUTOTUNE_Z,
         H=H,
         MAX_SEQ_LEN=N,
         AUTOTUNE_MAX_SEQ_LEN=autotune_max_seq_len(N),
