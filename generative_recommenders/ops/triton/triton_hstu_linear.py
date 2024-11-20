@@ -591,11 +591,31 @@ def _ln_mul_dropout_bwd_dx_du(
             y = ln * u
             if TRAINING:
                 if CONCAT_UX:
-                    u = tl.where(du_keep, u / (1.0 - dropout_ratio), 0.0)  # pyre-ignore [61]
-                    x = tl.where(dx_keep, x / (1.0 - dropout_ratio), 0.0)  # pyre-ignore [61]
-                    y = tl.where(dy_keep, y / (1.0 - dropout_ratio), 0.0)  # pyre-ignore [61]
+                    u = tl.where(
+                        # pyre-fixme[61]: `du_keep` is undefined, or not always defined.
+                        du_keep,
+                        u / (1.0 - dropout_ratio),
+                        0.0,
+                    )  # pyre-ignore [61]
+                    x = tl.where(
+                        # pyre-fixme[61]: `dx_keep` is undefined, or not always defined.
+                        dx_keep,
+                        x / (1.0 - dropout_ratio),
+                        0.0,
+                    )  # pyre-ignore [61]
+                    y = tl.where(
+                        # pyre-fixme[61]: `dy_keep` is undefined, or not always defined.
+                        dy_keep,
+                        y / (1.0 - dropout_ratio),
+                        0.0,
+                    )  # pyre-ignore [61]
                 else:
-                    y = tl.where(dy_keep, y / (1.0 - dropout_ratio), 0.0)  # pyre-ignore [61]
+                    y = tl.where(
+                        # pyre-fixme[61]: `dy_keep` is undefined, or not always defined.
+                        dy_keep,
+                        y / (1.0 - dropout_ratio),
+                        0.0,
+                    )  # pyre-ignore [61]
             if CONCAT_UX:
                 tl.store(Y + cols, u.to(Y.dtype.element_ty), mask=mask)
                 tl.store(Y + D + cols, x.to(Y.dtype.element_ty), mask=mask)
@@ -868,7 +888,9 @@ class LayerNormMulDropoutFunction(torch.autograd.Function):
 
     @staticmethod
     # pyre-ignore[14]
-    def backward(ctx, dy: torch.Tensor) -> Tuple[
+    def backward(
+        ctx, dy: torch.Tensor
+    ) -> Tuple[
         torch.Tensor,
         torch.Tensor,
         torch.Tensor,
@@ -1089,11 +1111,31 @@ def _group_norm_mul_dropout_bwd_dx_du(
         y = ln * u
         if TRAINING:
             if CONCAT_UX:
-                u = tl.where(du_keep, u / (1.0 - dropout_ratio), 0.0)  # pyre-ignore [61]
-                x = tl.where(dx_keep, x / (1.0 - dropout_ratio), 0.0)  # pyre-ignore [61]
-                y = tl.where(dy_keep, y / (1.0 - dropout_ratio), 0.0)  # pyre-ignore [61]
+                u = tl.where(
+                    # pyre-fixme[61]: `du_keep` is undefined, or not always defined.
+                    du_keep,
+                    u / (1.0 - dropout_ratio),
+                    0.0,
+                )  # pyre-ignore [61]
+                x = tl.where(
+                    # pyre-fixme[61]: `dx_keep` is undefined, or not always defined.
+                    dx_keep,
+                    x / (1.0 - dropout_ratio),
+                    0.0,
+                )  # pyre-ignore [61]
+                y = tl.where(
+                    # pyre-fixme[61]: `dy_keep` is undefined, or not always defined.
+                    dy_keep,
+                    y / (1.0 - dropout_ratio),
+                    0.0,
+                )  # pyre-ignore [61]
             else:
-                y = tl.where(dy_keep, y / (1.0 - dropout_ratio), 0.0)  # pyre-ignore [61]
+                y = tl.where(
+                    # pyre-fixme[61]: `dy_keep` is undefined, or not always defined.
+                    dy_keep,
+                    y / (1.0 - dropout_ratio),
+                    0.0,
+                )  # pyre-ignore [61]
         if CONCAT_UX:
             tl.store(Y + offsets, u.to(Y.dtype.element_ty), mask=mask)
             tl.store(Y + Heads * D + offsets, x.to(Y.dtype.element_ty), mask=mask)
@@ -1392,7 +1434,9 @@ class GroupNormMulDropoutFunction(torch.autograd.Function):
 
     @staticmethod
     # pyre-ignore[14]
-    def backward(ctx, dy: torch.Tensor) -> Tuple[
+    def backward(
+        ctx, dy: torch.Tensor
+    ) -> Tuple[
         torch.Tensor,
         torch.Tensor,
         torch.Tensor,
@@ -1613,7 +1657,9 @@ class HSTUComputeOutputFunction(torch.autograd.Function):
 
     @staticmethod
     # pyre-ignore[14]
-    def backward(ctx, dout: torch.Tensor) -> Tuple[
+    def backward(
+        ctx, dout: torch.Tensor
+    ) -> Tuple[
         torch.Tensor,  # dattn
         torch.Tensor,  # du
         torch.Tensor,  # dx

@@ -22,7 +22,6 @@ from generative_recommenders.indexing.candidate_index import TopKModule
 
 
 class MIPSTopKModule(TopKModule):
-
     def __init__(
         self,
         item_embeddings: torch.Tensor,
@@ -40,7 +39,6 @@ class MIPSTopKModule(TopKModule):
 
 
 class MIPSBruteForceTopK(MIPSTopKModule):
-
     def __init__(
         self,
         item_embeddings: torch.Tensor,

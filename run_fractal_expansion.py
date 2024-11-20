@@ -442,7 +442,6 @@ def main(
     visualize: bool,
     write_dataset: bool,
 ):
-
     np.random.seed(random_seed)
 
     logger.info(f"Loading and preprocessing MovieLens-20m from {input_csv_file}")

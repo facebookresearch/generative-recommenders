@@ -23,7 +23,6 @@ from generative_recommenders.modeling.sequential.utils import batch_gather_embed
 
 
 class TopKModule(torch.nn.Module):
-
     @abc.abstractmethod
     def forward(
         self,
@@ -44,7 +43,6 @@ class TopKModule(torch.nn.Module):
 
 
 class CandidateIndex(object):
-
     def __init__(
         self,
         ids: torch.Tensor,
@@ -226,7 +224,9 @@ class CandidateIndex(object):
                 else self.embeddings
             )
             top_k_embeddings = batch_gather_embeddings(
-                rowwise_indices=top_k_indices, embeddings=expanded_embeddings  # pyre-ignore[10]
+                # pyre-fixme[10]: Name `top_k_indices` is used but not defined.
+                rowwise_indices=top_k_indices,
+                embeddings=expanded_embeddings,  # pyre-ignore[10]
             )
         else:
             top_k_embeddings = None

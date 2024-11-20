@@ -133,7 +133,10 @@ def create_mol_interaction_module(
                 ).apply(init_mlp_xavier_weights_zero_bias)
             )
         ),
-        gating_context_only_partial_fn=lambda input_dim, output_dim: (  # pyre-ignore [6]
+        # pyre-fixme[6]: For 12th argument expected `Optional[(int, int) -> Module]`
+        #  but got `(input_dim: Any, output_dim: Any) -> Optional[Sequential]`.
+        gating_context_only_partial_fn=lambda input_dim,
+        output_dim: (  # pyre-ignore [6]
             torch.nn.Sequential(
                 torch.nn.Linear(
                     in_features=input_dim,

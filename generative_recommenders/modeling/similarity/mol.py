@@ -15,9 +15,10 @@
 # pyre-unsafe
 
 """
-Implements MoL (Mixture-of-Logits) in 
+Implements MoL (Mixture-of-Logits) in
 Revisiting Neural Retrieval on Accelerators (https://arxiv.org/abs/2306.04039, KDD'23).
 """
+
 from typing import Callable, Dict, Optional, Tuple
 
 import torch
@@ -29,7 +30,6 @@ from generative_recommenders.modeling.initialization import (
 
 
 class SoftmaxDropout(torch.nn.Module):
-
     def __init__(
         self,
         dropout_rate: float,
@@ -51,7 +51,6 @@ class SoftmaxDropout(torch.nn.Module):
 
 
 class SoftmaxDropoutCombiner(torch.nn.Module):
-
     def __init__(
         self,
         dropout_rate: float,
@@ -110,7 +109,6 @@ class IdentityMLPProjectionFn(torch.nn.Module):
 
 
 class TauFn(torch.nn.Module):
-
     def __init__(
         self,
         alpha: float,
@@ -132,7 +130,6 @@ class TauFn(torch.nn.Module):
 
 
 class GeGLU(torch.nn.Module):
-
     def __init__(
         self,
         in_features: int,
@@ -201,7 +198,6 @@ class SwiGLU(torch.nn.Module):
 
 
 class MoLGatingFn(torch.nn.Module):
-
     def __init__(
         self,
         num_logits: int,
@@ -291,7 +287,10 @@ class MoLGatingFn(torch.nn.Module):
         if self._item_only_partial_module is not None:
             if item_sideinfo is not None:
                 item_embeddings = torch.cat([item_embeddings, item_sideinfo], dim=-1)
-            item_partial_inputs = self._item_only_partial_module(item_embeddings)  # pyre-ignore [29]
+            # pyre-fixme[29]: `Optional[Module]` is not a function.
+            item_partial_inputs = self._item_only_partial_module(
+                item_embeddings
+            )  # pyre-ignore [29]
         if self._ci_partial_module is not None:
             if self._combine_item_sideinfo_into_ci:
                 assert item_sideinfo is not None
