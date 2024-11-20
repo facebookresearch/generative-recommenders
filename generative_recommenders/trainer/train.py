@@ -42,9 +42,6 @@ from generative_recommenders.modeling.sequential.autoregressive_losses import (
     InBatchNegativesSampler,
     LocalNegativesSampler,
 )
-from generative_recommenders.modeling.sequential.losses.sampled_softmax import (
-    SampledSoftmaxLoss,
-)
 from generative_recommenders.modeling.sequential.embedding_modules import (
     EmbeddingModule,
     LocalEmbeddingModule,
@@ -57,6 +54,9 @@ from generative_recommenders.modeling.sequential.features import (
 )
 from generative_recommenders.modeling.sequential.input_features_preprocessors import (
     LearnablePositionalEmbeddingInputFeaturesPreprocessor,
+)
+from generative_recommenders.modeling.sequential.losses.sampled_softmax import (
+    SampledSoftmaxLoss,
 )
 from generative_recommenders.modeling.sequential.output_postprocessors import (
     L2NormEmbeddingPostprocessor,

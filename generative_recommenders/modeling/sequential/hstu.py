@@ -24,11 +24,8 @@ import abc
 import math
 from typing import Callable, Dict, List, Optional, Tuple, Union
 
-import fbgemm_gpu
-
 import torch
 import torch.nn.functional as F
-from generative_recommenders.rails.similarities.module import SimilarityModule
 
 from generative_recommenders.modeling.sequential.embedding_modules import (
     EmbeddingModule,
@@ -43,6 +40,7 @@ from generative_recommenders.modeling.sequential.utils import get_current_embedd
 from generative_recommenders.modeling.similarity_module import (
     SequentialEncoderWithLearnedSimilarityModule,
 )
+from generative_recommenders.rails.similarities.module import SimilarityModule
 
 
 TIMESTAMPS_KEY = "timestamps"

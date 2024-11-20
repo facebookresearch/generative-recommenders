@@ -18,7 +18,10 @@ from typing import Dict, Optional, Tuple
 import torch
 import torch.nn.functional as F
 
-from generative_recommenders.modeling.sequential.autoregressive_losses import AutoregressiveLoss, NegativesSampler
+from generative_recommenders.modeling.sequential.autoregressive_losses import (
+    AutoregressiveLoss,
+    NegativesSampler,
+)
 
 
 class SampledSoftmaxLoss(AutoregressiveLoss):
@@ -60,12 +63,10 @@ class SampledSoftmaxLoss(AutoregressiveLoss):
         positive_logits, aux_losses = self._model.similarity_fn(
             query_embeddings=output_embeddings,  # [B, D] = [N', D]
             item_ids=supervision_ids.unsqueeze(1),  # [N', 1]
-            item_embeddings=positive_embeddings.unsqueeze(
-                1
-            ),  # [N', D] -> [N', 1, D]
+            item_embeddings=positive_embeddings.unsqueeze(1),  # [N', D] -> [N', 1, D]
             **kwargs,
         )
-        positive_logits = positive_logits / self._softmax_temperature # [0]
+        positive_logits = positive_logits / self._softmax_temperature  # [0]
         sampled_negatives_logits, _ = self._model.similarity_fn(
             query_embeddings=output_embeddings,  # [N', D]
             item_ids=sampled_ids,  # [N', R]
@@ -80,7 +81,9 @@ class SampledSoftmaxLoss(AutoregressiveLoss):
         jagged_loss = -F.log_softmax(
             torch.cat([positive_logits, sampled_negatives_logits], dim=1), dim=1
         )[:, 0]
-        return (jagged_loss * supervision_weights).sum() / supervision_weights.sum(), aux_losses
+        return (
+            jagged_loss * supervision_weights
+        ).sum() / supervision_weights.sum(), aux_losses
 
     def forward(
         self,
@@ -107,8 +110,14 @@ class SampledSoftmaxLoss(AutoregressiveLoss):
         Returns:
             Tuple of (loss for the current engaged sequence, str-keyed aux_losses).
         """
-        torch._assert(output_embeddings.size() == supervision_embeddings.size(), "Invalid supervision embeddings size.")
-        torch._assert(supervision_ids.size() == supervision_embeddings.size()[:-1], "Invalid supervision ids size.")
+        torch._assert(
+            output_embeddings.size() == supervision_embeddings.size(),
+            "Invalid supervision embeddings size.",
+        )
+        torch._assert(
+            supervision_ids.size() == supervision_embeddings.size()[:-1],
+            "Invalid supervision ids size.",
+        )
 
         jagged_id_offsets = torch.ops.fbgemm.asynchronous_complete_cumsum(lengths)
         jagged_supervision_ids = (
@@ -122,10 +131,11 @@ class SampledSoftmaxLoss(AutoregressiveLoss):
             # expand to jagged.
             max_length: int = int(lengths.max())
             kwargs["user_ids"] = torch.ops.fbgemm.dense_to_jagged(
-                kwargs["user_ids"].unsqueeze(1).expand(
-                    -1, max_length
-                ).unsqueeze(2),  # (B, max_length, 1)
-                [jagged_id_offsets]
+                kwargs["user_ids"]
+                .unsqueeze(1)
+                .expand(-1, max_length)
+                .unsqueeze(2),  # (B, max_length, 1)
+                [jagged_id_offsets],
             )[0].squeeze(1)
 
         args = OrderedDict(

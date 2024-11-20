@@ -23,8 +23,8 @@ import torch
 import torch.distributed as dist
 
 from generative_recommenders.indexing.candidate_index import CandidateIndex, TopKModule
-from generative_recommenders.rails.similarities.module import SimilarityModule
 from generative_recommenders.modeling.sequential.features import SequentialFeatures
+from generative_recommenders.rails.similarities.module import SimilarityModule
 from torch.utils.tensorboard import SummaryWriter
 
 

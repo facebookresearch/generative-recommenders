@@ -26,7 +26,9 @@ from generative_recommenders.modeling.sequential.output_postprocessors import (
     OutputPostprocessorModule,
 )
 from generative_recommenders.modeling.sequential.sasrec import SASRec
-from generative_recommenders.modeling.similarity_module import SequentialEncoderWithLearnedSimilarityModule
+from generative_recommenders.modeling.similarity_module import (
+    SequentialEncoderWithLearnedSimilarityModule,
+)
 from generative_recommenders.rails.similarities.module import SimilarityModule
 
 

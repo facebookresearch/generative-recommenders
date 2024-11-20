@@ -20,9 +20,10 @@ from typing import List, Tuple
 
 import torch
 import torch.nn.functional as F
-from torch.utils.checkpoint import checkpoint
 
 from generative_recommenders.rails.similarities.module import SimilarityModule
+
+from torch.utils.checkpoint import checkpoint
 
 
 class NegativesSampler(torch.nn.Module):
