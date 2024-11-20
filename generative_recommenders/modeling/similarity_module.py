@@ -12,50 +12,29 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# pyre-unsafe
-
 import abc
-from typing import Optional, Tuple
+from typing import Optional
 
 import torch
 
-from generative_recommenders.modeling.ndp_module import NDPModule
+from generative_recommenders.rails.similarities.module import SimilarityModule
 
 
-class InteractionModule(torch.nn.Module):
+class SequentialEncoderWithLearnedSimilarityModule(torch.nn.Module):
+    """
+    Interface enabling using various similarity functions (besides inner products)
+    as part of a sequential encoder/decoder.
 
-    @abc.abstractmethod
-    def get_item_embeddings(
-        self,
-        item_ids: torch.Tensor,
-    ) -> torch.Tensor:
-        pass
+    See rails/ for more details.
+    """
 
-    @abc.abstractmethod
-    def get_item_sideinfo(
-        self,
-        item_ids: torch.Tensor,
-    ) -> Optional[torch.Tensor]:
-        pass
-
-    @abc.abstractmethod
-    def interaction(
-        self,
-        input_embeddings: torch.Tensor,  # [B, D]
-        target_ids: torch.Tensor,  # [1, X] or [B, X]
-        target_embeddings: Optional[torch.Tensor] = None,  # [1, X, D'] or [B, X, D']
-    ) -> torch.Tensor:
-        pass
-
-
-class GeneralizedInteractionModule(InteractionModule):
     def __init__(
         self,
-        ndp_module: NDPModule,
+        ndp_module: SimilarityModule,
     ) -> None:
         super().__init__()
 
-        self._ndp_module: NDPModule = ndp_module
+        self._ndp_module: SimilarityModule = ndp_module
 
     @abc.abstractmethod
     def debug_str(
@@ -63,30 +42,26 @@ class GeneralizedInteractionModule(InteractionModule):
     ) -> str:
         pass
 
-    def interaction(
+    def similarity_fn(
         self,
-        input_embeddings: torch.Tensor,
-        target_ids: torch.Tensor,
-        target_embeddings: Optional[torch.Tensor] = None,
+        query_embeddings: torch.Tensor,
+        item_ids: torch.Tensor,
+        item_embeddings: Optional[torch.Tensor] = None,
+        **kwargs,
     ) -> torch.Tensor:
         torch._assert(
-            len(input_embeddings.size()) == 2, "len(input_embeddings.size()) must be 2"
+            len(query_embeddings.size()) == 2, "len(query_embeddings.size()) must be 2"
         )
-        torch._assert(len(target_ids.size()) == 2, "len(target_ids.size()) must be 2")
-        if target_embeddings is None:
-            target_embeddings = self.get_item_embeddings(target_ids)
+        torch._assert(len(item_ids.size()) == 2, "len(item_ids.size()) must be 2")
+        if item_embeddings is None:
+            item_embeddings = self.get_item_embeddings(item_ids)
         torch._assert(
-            len(target_embeddings.size()) == 3,
-            "len(target_embeddings.size()) must be 3",
+            len(item_embeddings.size()) == 3, "len(item_embeddings.size()) must be 3"
         )
 
-        with torch.autocast(enabled=True, dtype=torch.bfloat16, device_type="cuda"):
-            return self._ndp_module(
-                input_embeddings=input_embeddings,  # [B, self._input_embedding_dim]
-                item_embeddings=target_embeddings,  # [1/B, X, self._item_embedding_dim]
-                item_sideinfo=self.get_item_sideinfo(
-                    item_ids=target_ids
-                ),  # [1/B, X, self._item_sideinfo_dim]
-                item_ids=target_ids,
-                precomputed_logits=None,
-            )
+        return self._ndp_module(
+            query_embeddings=query_embeddings,  # (B, query_embedding_dim)
+            item_embeddings=item_embeddings,  # (1/B, X, item_embedding_dim)
+            item_ids=item_ids,
+            **kwargs,
+        )

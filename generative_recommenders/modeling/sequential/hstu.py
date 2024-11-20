@@ -17,7 +17,7 @@
 """
 Implements HSTU (Hierarchical Sequential Transduction Unit) in
 Actions Speak Louder than Words: Trillion-Parameter Sequential Transducers for Generative Recommendations
-(https://arxiv.org/abs/2402.17152).
+(https://arxiv.org/abs/2402.17152, ICML'24).
 """
 
 import abc
@@ -26,7 +26,6 @@ from typing import Callable, Dict, List, Optional, Tuple, Union
 
 import torch
 import torch.nn.functional as F
-from generative_recommenders.modeling.ndp_module import NDPModule
 
 from generative_recommenders.modeling.sequential.embedding_modules import (
     EmbeddingModule,
@@ -39,8 +38,9 @@ from generative_recommenders.modeling.sequential.output_postprocessors import (
 )
 from generative_recommenders.modeling.sequential.utils import get_current_embeddings
 from generative_recommenders.modeling.similarity_module import (
-    GeneralizedInteractionModule,
+    SequentialEncoderWithLearnedSimilarityModule,
 )
+from generative_recommenders.rails.similarities.module import SimilarityModule
 
 
 TIMESTAMPS_KEY = "timestamps"
@@ -541,7 +541,7 @@ class HSTUJagged(torch.nn.Module):
         return y, cache_states
 
 
-class HSTU(GeneralizedInteractionModule):
+class HSTU(SequentialEncoderWithLearnedSimilarityModule):
     """
     Implements HSTU (Hierarchical Sequential Transduction Unit) in
     Actions Speak Louder than Words: Trillion-Parameter Sequential Transducers for Generative Recommendations,
@@ -567,7 +567,7 @@ class HSTU(GeneralizedInteractionModule):
         linear_dropout_rate: float,
         attn_dropout_rate: float,
         embedding_module: EmbeddingModule,
-        similarity_module: NDPModule,
+        similarity_module: SimilarityModule,
         input_features_preproc_module: InputFeaturesPreprocessorModule,
         output_postproc_module: OutputPostprocessorModule,
         enable_relative_attention_bias: bool = True,

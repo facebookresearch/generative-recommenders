@@ -23,8 +23,8 @@ import torch
 import torch.distributed as dist
 
 from generative_recommenders.indexing.candidate_index import CandidateIndex, TopKModule
-from generative_recommenders.modeling.ndp_module import NDPModule
 from generative_recommenders.modeling.sequential.features import SequentialFeatures
+from generative_recommenders.rails.similarities.module import SimilarityModule
 from torch.utils.tensorboard import SummaryWriter
 
 
@@ -39,7 +39,7 @@ class EvalState:
 
 
 def get_eval_state(
-    model: NDPModule,
+    model: SimilarityModule,
     all_item_ids: List[int],  # [X]
     negatives_sampler: torch.nn.Module,
     top_k_module_fn: Callable[[torch.Tensor, torch.Tensor], TopKModule],
@@ -67,7 +67,7 @@ def get_eval_state(
 @torch.inference_mode  # pyre-ignore [56]
 def eval_metrics_v2_from_tensors(
     eval_state: EvalState,
-    model: NDPModule,
+    model: SimilarityModule,
     seq_features: SequentialFeatures,
     target_ids: torch.Tensor,  # [B, 1]
     min_positive_rating: int = 4,
@@ -210,7 +210,7 @@ def eval_metrics_v2_from_tensors(
 
 def eval_recall_metrics_from_tensors(
     eval_state: EvalState,
-    model: NDPModule,
+    model: SimilarityModule,
     seq_features: SequentialFeatures,
     user_max_batch_size: Optional[int] = None,
     dtype: Optional[torch.dtype] = None,

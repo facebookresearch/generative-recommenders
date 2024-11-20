@@ -29,7 +29,6 @@ from typing import Dict, Optional, Tuple
 import torch
 import torch.nn.functional as F
 
-from generative_recommenders.modeling.ndp_module import NDPModule
 from generative_recommenders.modeling.sequential.embedding_modules import (
     EmbeddingModule,
 )
@@ -41,8 +40,9 @@ from generative_recommenders.modeling.sequential.output_postprocessors import (
 )
 from generative_recommenders.modeling.sequential.utils import get_current_embeddings
 from generative_recommenders.modeling.similarity_module import (
-    GeneralizedInteractionModule,
+    SequentialEncoderWithLearnedSimilarityModule,
 )
+from generative_recommenders.rails.similarities.module import SimilarityModule
 
 
 class StandardAttentionFF(torch.nn.Module):
@@ -80,7 +80,7 @@ class StandardAttentionFF(torch.nn.Module):
         return self._conv1d(inputs.transpose(-1, -2)).transpose(-1, -2) + inputs
 
 
-class SASRec(GeneralizedInteractionModule):
+class SASRec(SequentialEncoderWithLearnedSimilarityModule):
     """
     Implements SASRec (Self-Attentive Sequential Recommendation, https://arxiv.org/abs/1808.09781, ICDM'18).
 
@@ -102,7 +102,7 @@ class SASRec(GeneralizedInteractionModule):
         ffn_activation_fn: str,
         ffn_dropout_rate: float,
         embedding_module: EmbeddingModule,
-        similarity_module: NDPModule,
+        similarity_module: SimilarityModule,
         input_features_preproc_module: InputFeaturesPreprocessorModule,
         output_postproc_module: OutputPostprocessorModule,
         activation_checkpoint: bool = False,

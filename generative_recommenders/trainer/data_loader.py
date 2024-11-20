@@ -35,7 +35,6 @@ def create_data_loader(
     Optional[torch.utils.data.distributed.DistributedSampler[torch.utils.data.Dataset]],
     torch.utils.data.DataLoader,
 ]:
-    # print(f"num_workers={num_workers}")
     if shuffle:
         sampler = torch.utils.data.distributed.DistributedSampler(
             dataset,
