@@ -48,7 +48,9 @@ def get_eval_state(
 ) -> EvalState:
     # Exhaustively eval all items (incl. seen ids).
     eval_negatives_ids = torch.as_tensor(all_item_ids).to(device).unsqueeze(0)  # [1, X]
+    # pyre-fixme[29]: `Union[Tensor, Module]` is not a function.
     eval_negative_embeddings = negatives_sampler.normalize_embeddings(
+        # pyre-fixme[29]: `Union[Tensor, Module]` is not a function.
         model.get_item_embeddings(eval_negatives_ids)
     )
     if float_dtype is not None:
@@ -97,9 +99,11 @@ def eval_metrics_v2_from_tensors(
             print(f"missing target_id {target_id}")
 
     # computes ro- part exactly once.
+    # pyre-fixme[29]: `Union[Tensor, Module]` is not a function.
     shared_input_embeddings = model.encode(
         past_lengths=seq_features.past_lengths,
         past_ids=seq_features.past_ids,
+        # pyre-fixme[29]: `Union[Tensor, Module]` is not a function.
         past_embeddings=model.get_item_embeddings(seq_features.past_ids),
         past_payloads=seq_features.past_payloads,
     )

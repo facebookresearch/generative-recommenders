@@ -365,6 +365,8 @@ def train_fn(
                     embeddings=model.module.get_item_embeddings(in_batch_ids),
                 )
             else:
+                # pyre-fixme[16]: `InBatchNegativesSampler` has no attribute
+                #  `_item_emb`.
                 negatives_sampler._item_emb = model.module._embedding_module._item_emb
 
             ar_mask = supervision_ids[:, 1:] != 0
