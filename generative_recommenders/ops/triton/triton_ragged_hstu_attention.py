@@ -1308,6 +1308,55 @@ def _get_named_specs() -> List[VersionedSpec]:
             for block in [64, 128]
             for is_delta_q in [True, False]
         ]
+        + [
+            # with RAB
+            VersionedSpec(
+                spec={
+                    "TW": "*bf16",
+                    "PW": "*bf16",
+                    "delta_x_offsets": ("*i64", s, is_delta_q),
+                    "num_targets": ("*i32", s, True),
+                    "HAS_MAX_POS_IND": has_max_pos_ind,
+                    "HAS_MULTIPLE_TARGETS": True,
+                    "ATTN_BIAS_TYPE": "fused",
+                    "BUCKET_FN": "sqrt",
+                    "IS_DELTA_Q": is_delta_q,
+                    "BLOCK_D_Q": block,
+                    "BLOCK_D_V": block,
+                    "ALLOW_TF32": True,
+                    **_common_specs(dtype="*bf16"),
+                },
+                default_values=default_values,
+                version="standalone_cint_v4",
+            )
+            for has_max_pos_ind in [True, False]
+            for block in [64, 128]
+            for is_delta_q in [True, False]
+        ]
+        + [
+            # no RAB
+            VersionedSpec(
+                spec={
+                    "TW": "*bf16",
+                    "PW": "*bf16",
+                    "delta_x_offsets": ("*i64", s, is_delta_q),
+                    "num_targets": ("*i32", s, True),
+                    "HAS_MAX_POS_IND": False,
+                    "HAS_MULTIPLE_TARGETS": True,
+                    "ATTN_BIAS_TYPE": "none",
+                    "BUCKET_FN": "none",
+                    "IS_DELTA_Q": is_delta_q,
+                    "BLOCK_D_Q": block,
+                    "BLOCK_D_V": block,
+                    "ALLOW_TF32": True,
+                    **_common_specs(dtype="*bf16"),
+                },
+                default_values=default_values,
+                version="standalone_cint_v4",
+            )
+            for block in [64, 128]
+            for is_delta_q in [True, False]
+        ]
     )
 
 
