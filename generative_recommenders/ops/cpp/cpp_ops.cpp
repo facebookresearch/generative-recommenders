@@ -44,7 +44,11 @@ at::Tensor batched_complete_cumsum_cuda(const at::Tensor& values);
 
 at::Tensor batched_complete_cumsum_meta(const at::Tensor& values);
 
+at::Tensor complete_cumsum_cpu(const at::Tensor& values);
+
 at::Tensor complete_cumsum_cuda(const at::Tensor& values);
+
+at::Tensor complete_cumsum_meta(const at::Tensor& values);
 
 at::Tensor concat_1d_jagged_jagged_cpu(
     const at::Tensor& lengths_left,
@@ -78,6 +82,7 @@ TORCH_LIBRARY_IMPL(gr, CPU, m) {
   m.impl("expand_1d_jagged_to_dense", gr::expand_1d_jagged_to_dense_cpu);
   m.impl("batched_complete_cumsum", gr::batched_complete_cumsum_cpu);
   m.impl("concat_1d_jagged_jagged", gr::concat_1d_jagged_jagged_cpu);
+  m.impl("complete_cumsum", gr::complete_cumsum_cpu);
 }
 
 TORCH_LIBRARY_IMPL(gr, CUDA, m) {
@@ -91,6 +96,7 @@ TORCH_LIBRARY_IMPL(gr, Meta, m) {
   m.impl("expand_1d_jagged_to_dense", gr::expand_1d_jagged_to_dense_meta);
   m.impl("batched_complete_cumsum", gr::batched_complete_cumsum_meta);
   m.impl("concat_1d_jagged_jagged", gr::concat_1d_jagged_jagged_meta);
+  m.impl("complete_cumsum", gr::complete_cumsum_meta);
 }
 
 TORCH_LIBRARY_IMPL(gr, Autograd, m) {
