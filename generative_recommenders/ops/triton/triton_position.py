@@ -425,6 +425,47 @@ def _add_timestamp_position_embeddings_tritoncc_named_specs() -> List[VersionedS
                     "BLOCK_D": BLOCK_D,
                     "BLOCK_N": -1,  # autotuned
                 },
+                version="standalone_cint_v4",
+            )
+            for dtype in ["*bf16", "*fp32"]
+            for has_multiple_targets in [True, False]
+            for interleave_targets in [True, False]
+            for time_bucket_fn in ["log", "sqrt"]
+            for BLOCK_D in [32, 64]
+        ]
+        + [
+            VersionedSpec(
+                spec={
+                    "SeqEmb": (dtype, s),
+                    "Offsets": ("*i64", s),
+                    "Lengths": ("*i64", s),
+                    "PosEmb": (dtype, s),
+                    "TsEmb": (dtype, s),
+                    "Out": (dtype, s),
+                    "TS": ("*i64", s),
+                    "PosInds": ("*i32", s),
+                    "TsInds": ("*i32", s),
+                    "NumTargets": ("*i64", s),
+                    "AUTOTUNE_MAX_SEQ_LEN": "i32",
+                    "D": "i32",
+                    "num_time_buckets": "i32",
+                    "time_bucket_increments": "fp32",
+                    "time_bucket_scale": "fp32",
+                    "time_delta": "i32",
+                    "max_contextual_seq_len": "i32",
+                    "max_pos_ind": "i32",
+                    "stride_sn": ("i32", s),
+                    "stride_pn": ("i32", s),
+                    "stride_tn": ("i32", s),
+                    "stride_ts": "i32",
+                    "stride_on": ("i32", s),
+                    "TRAINING": False,
+                    "HAS_MULTIPLE_TARGETS": has_multiple_targets,
+                    "INTERLEAVE_TARGETS": interleave_targets,
+                    "TIME_BUCKET_FN": time_bucket_fn,
+                    "BLOCK_D": BLOCK_D,
+                    "BLOCK_N": -1,  # autotuned
+                },
                 version="amd_standalone_cint_v2",
             )
             for dtype in ["*bf16", "*fp32"]
