@@ -1671,6 +1671,7 @@ def _ragged_hstu_attn_bwd_one_col_block(  # noqa C901
     BLOCK_D_V: tl.constexpr,
     BLOCK_M: tl.constexpr,
     BLOCK_N: tl.constexpr,
+    UNROLL: tl.constexpr,
     ATOMIC_ADD: tl.constexpr,
 ):
     # Work on the subsequence dv[start_n, start_n + BLOCK_N, :]
@@ -1801,7 +1802,7 @@ def _ragged_hstu_attn_bwd_one_col_block(  # noqa C901
                 ATOMIC_ADD=ATOMIC_ADD,
             )
     # pyre-ignore[61]
-    for start_m in range(low, high, BLOCK_M):
+    for start_m in tl.range(low, high, BLOCK_M, loop_unroll_factor=UNROLL):
         start_m = tl.multiple_of(start_m, BLOCK_M)
         dk, dv = _ragged_hstu_attn_bwd_one_block(
             start_m=start_m,
@@ -1890,6 +1891,7 @@ def _get_bw_configs() -> List[triton.Config]:
                                                 "matrix_instr_nonkdim": matrix_instr_nonkdim,
                                                 "waves_per_eu": waves_per_eu,
                                                 "SEQUENCE_PARALLEL": sp,
+                                                "UNROLL": 1,
                                             },
                                             num_stages=num_stages,
                                             num_warps=num_warps,
@@ -1900,157 +1902,169 @@ def _get_bw_configs() -> List[triton.Config]:
 
     configs = [
         triton.Config(
-            {"BLOCK_M": 16, "BLOCK_N": 32, "SEQUENCE_PARALLEL": False},
+            {"BLOCK_M": 16, "BLOCK_N": 32, "SEQUENCE_PARALLEL": False, "UNROLL": 1},
             num_stages=2,
             num_warps=2,
             pre_hook=_bwd_pre_hook,
         ),
         triton.Config(
-            {"BLOCK_M": 16, "BLOCK_N": 16, "SEQUENCE_PARALLEL": False},
+            {"BLOCK_M": 16, "BLOCK_N": 16, "SEQUENCE_PARALLEL": False, "UNROLL": 1},
             num_stages=2,
             num_warps=2,
             pre_hook=_bwd_pre_hook,
         ),
         triton.Config(
-            {"BLOCK_M": 16, "BLOCK_N": 32, "SEQUENCE_PARALLEL": False},
+            {"BLOCK_M": 16, "BLOCK_N": 32, "SEQUENCE_PARALLEL": False, "UNROLL": 1},
             num_stages=2,
             num_warps=4,
             pre_hook=_bwd_pre_hook,
         ),
         triton.Config(
-            {"BLOCK_M": 16, "BLOCK_N": 32, "SEQUENCE_PARALLEL": False},
+            {"BLOCK_M": 16, "BLOCK_N": 32, "SEQUENCE_PARALLEL": False, "UNROLL": 1},
             num_stages=1,
             num_warps=8,
             pre_hook=_bwd_pre_hook,
         ),
         triton.Config(
-            {"BLOCK_M": 16, "BLOCK_N": 64, "SEQUENCE_PARALLEL": False},
+            {"BLOCK_M": 16, "BLOCK_N": 64, "SEQUENCE_PARALLEL": False, "UNROLL": 1},
             num_stages=1,
             num_warps=4,
             pre_hook=_bwd_pre_hook,
         ),
         triton.Config(
-            {"BLOCK_M": 32, "BLOCK_N": 32, "SEQUENCE_PARALLEL": False},
+            {"BLOCK_M": 32, "BLOCK_N": 32, "SEQUENCE_PARALLEL": False, "UNROLL": 1},
             num_stages=1,
             num_warps=4,
             pre_hook=_bwd_pre_hook,
         ),
         triton.Config(
-            {"BLOCK_M": 32, "BLOCK_N": 32, "SEQUENCE_PARALLEL": False},
+            {"BLOCK_M": 32, "BLOCK_N": 32, "SEQUENCE_PARALLEL": False, "UNROLL": 1},
             num_stages=2,
             num_warps=4,
             pre_hook=_bwd_pre_hook,
         ),
         triton.Config(
-            {"BLOCK_M": 32, "BLOCK_N": 64, "SEQUENCE_PARALLEL": False},
+            {"BLOCK_M": 32, "BLOCK_N": 64, "SEQUENCE_PARALLEL": False, "UNROLL": 1},
             num_stages=1,
             num_warps=4,
             pre_hook=_bwd_pre_hook,
         ),
         triton.Config(
-            {"BLOCK_M": 32, "BLOCK_N": 64, "SEQUENCE_PARALLEL": False},
+            {"BLOCK_M": 32, "BLOCK_N": 64, "SEQUENCE_PARALLEL": False, "UNROLL": 1},
             num_stages=2,
             num_warps=4,
             pre_hook=_bwd_pre_hook,
         ),
         triton.Config(
-            {"BLOCK_M": 32, "BLOCK_N": 64, "SEQUENCE_PARALLEL": False},
-            num_stages=1,
-            num_warps=8,
-            pre_hook=_bwd_pre_hook,
-        ),
-        triton.Config(
-            {"BLOCK_M": 32, "BLOCK_N": 64, "SEQUENCE_PARALLEL": False},
-            num_stages=2,
-            num_warps=8,
-            pre_hook=_bwd_pre_hook,
-        ),
-        triton.Config(
-            {"BLOCK_M": 64, "BLOCK_N": 64, "SEQUENCE_PARALLEL": False},
-            num_stages=1,
-            num_warps=4,
-            pre_hook=_bwd_pre_hook,
-        ),
-        triton.Config(
-            {"BLOCK_M": 64, "BLOCK_N": 64, "SEQUENCE_PARALLEL": False},
-            num_stages=2,
-            num_warps=4,
-            pre_hook=_bwd_pre_hook,
-        ),
-        triton.Config(
-            {"BLOCK_M": 64, "BLOCK_N": 64, "SEQUENCE_PARALLEL": False},
+            {"BLOCK_M": 32, "BLOCK_N": 64, "SEQUENCE_PARALLEL": False, "UNROLL": 1},
             num_stages=1,
             num_warps=8,
             pre_hook=_bwd_pre_hook,
         ),
         triton.Config(
-            {"BLOCK_M": 64, "BLOCK_N": 64, "SEQUENCE_PARALLEL": False},
+            {"BLOCK_M": 32, "BLOCK_N": 64, "SEQUENCE_PARALLEL": False, "UNROLL": 1},
             num_stages=2,
             num_warps=8,
             pre_hook=_bwd_pre_hook,
         ),
         triton.Config(
-            {"BLOCK_M": 32, "BLOCK_N": 128, "SEQUENCE_PARALLEL": False},
+            {"BLOCK_M": 64, "BLOCK_N": 64, "SEQUENCE_PARALLEL": False, "UNROLL": 1},
+            num_stages=1,
+            num_warps=4,
+            pre_hook=_bwd_pre_hook,
+        ),
+        triton.Config(
+            {"BLOCK_M": 64, "BLOCK_N": 64, "SEQUENCE_PARALLEL": False, "UNROLL": 1},
+            num_stages=2,
+            num_warps=4,
+            pre_hook=_bwd_pre_hook,
+        ),
+        triton.Config(
+            {"BLOCK_M": 64, "BLOCK_N": 64, "SEQUENCE_PARALLEL": False, "UNROLL": 1},
+            num_stages=1,
+            num_warps=8,
+            pre_hook=_bwd_pre_hook,
+        ),
+        triton.Config(
+            {"BLOCK_M": 64, "BLOCK_N": 64, "SEQUENCE_PARALLEL": False, "UNROLL": 1},
             num_stages=2,
             num_warps=8,
             pre_hook=_bwd_pre_hook,
         ),
         triton.Config(
-            {"BLOCK_M": 32, "BLOCK_N": 128, "SEQUENCE_PARALLEL": False},
+            {"BLOCK_M": 32, "BLOCK_N": 128, "SEQUENCE_PARALLEL": False, "UNROLL": 1},
+            num_stages=2,
+            num_warps=8,
+            pre_hook=_bwd_pre_hook,
+        ),
+        triton.Config(
+            {"BLOCK_M": 32, "BLOCK_N": 128, "SEQUENCE_PARALLEL": False, "UNROLL": 1},
             num_stages=3,
             num_warps=8,
             pre_hook=_bwd_pre_hook,
         ),
         triton.Config(
-            {"BLOCK_M": 16, "BLOCK_N": 32, "SEQUENCE_PARALLEL": True},
+            {"BLOCK_M": 32, "BLOCK_N": 128, "SEQUENCE_PARALLEL": False, "UNROLL": 2},
+            num_stages=2,
+            num_warps=8,
+            pre_hook=_bwd_pre_hook,
+        ),
+        triton.Config(
+            {"BLOCK_M": 32, "BLOCK_N": 128, "SEQUENCE_PARALLEL": False, "UNROLL": 4},
+            num_stages=2,
+            num_warps=8,
+            pre_hook=_bwd_pre_hook,
+        ),
+        triton.Config(
+            {"BLOCK_M": 16, "BLOCK_N": 32, "SEQUENCE_PARALLEL": True, "UNROLL": 1},
             num_stages=2,
             num_warps=2,
             pre_hook=_bwd_pre_hook,
         ),
         triton.Config(
-            {"BLOCK_M": 32, "BLOCK_N": 32, "SEQUENCE_PARALLEL": True},
+            {"BLOCK_M": 32, "BLOCK_N": 32, "SEQUENCE_PARALLEL": True, "UNROLL": 1},
             num_stages=1,
             num_warps=4,
             pre_hook=_bwd_pre_hook,
         ),
         triton.Config(
-            {"BLOCK_M": 32, "BLOCK_N": 32, "SEQUENCE_PARALLEL": True},
+            {"BLOCK_M": 32, "BLOCK_N": 32, "SEQUENCE_PARALLEL": True, "UNROLL": 1},
             num_stages=2,
             num_warps=4,
             pre_hook=_bwd_pre_hook,
         ),
         triton.Config(
-            {"BLOCK_M": 32, "BLOCK_N": 64, "SEQUENCE_PARALLEL": True},
+            {"BLOCK_M": 32, "BLOCK_N": 64, "SEQUENCE_PARALLEL": True, "UNROLL": 1},
             num_stages=1,
             num_warps=4,
             pre_hook=_bwd_pre_hook,
         ),
         triton.Config(
-            {"BLOCK_M": 32, "BLOCK_N": 64, "SEQUENCE_PARALLEL": True},
+            {"BLOCK_M": 32, "BLOCK_N": 64, "SEQUENCE_PARALLEL": True, "UNROLL": 1},
             num_stages=2,
             num_warps=4,
             pre_hook=_bwd_pre_hook,
         ),
         triton.Config(
-            {"BLOCK_M": 32, "BLOCK_N": 64, "SEQUENCE_PARALLEL": True},
+            {"BLOCK_M": 32, "BLOCK_N": 64, "SEQUENCE_PARALLEL": True, "UNROLL": 1},
             num_stages=1,
             num_warps=8,
             pre_hook=_bwd_pre_hook,
         ),
         triton.Config(
-            {"BLOCK_M": 64, "BLOCK_N": 64, "SEQUENCE_PARALLEL": True},
+            {"BLOCK_M": 64, "BLOCK_N": 64, "SEQUENCE_PARALLEL": True, "UNROLL": 1},
             num_stages=1,
             num_warps=4,
             pre_hook=_bwd_pre_hook,
         ),
         triton.Config(
-            {"BLOCK_M": 64, "BLOCK_N": 64, "SEQUENCE_PARALLEL": True},
+            {"BLOCK_M": 64, "BLOCK_N": 64, "SEQUENCE_PARALLEL": True, "UNROLL": 1},
             num_stages=2,
             num_warps=4,
             pre_hook=_bwd_pre_hook,
         ),
         triton.Config(
-            {"BLOCK_M": 32, "BLOCK_N": 128, "SEQUENCE_PARALLEL": True},
+            {"BLOCK_M": 32, "BLOCK_N": 128, "SEQUENCE_PARALLEL": True, "UNROLL": 1},
             num_stages=3,
             num_warps=8,
             pre_hook=_bwd_pre_hook,
@@ -2137,6 +2151,7 @@ def _ragged_hstu_attn_bwd(  # noqa C901
     SEQUENCE_PARALLEL: tl.constexpr,
     BLOCK_M: tl.constexpr,
     BLOCK_N: tl.constexpr,
+    UNROLL: tl.constexpr,
     HAS_SORT_BY_LENGTH_INDICES: tl.constexpr,
 ):
     off_hz = tl.program_id(0)
@@ -2230,6 +2245,7 @@ def _ragged_hstu_attn_bwd(  # noqa C901
             BLOCK_D_V=BLOCK_D_V,
             BLOCK_M=BLOCK_M,
             BLOCK_N=BLOCK_N,
+            UNROLL=UNROLL,
             ATOMIC_ADD=True,
         )
     else:
@@ -2283,6 +2299,7 @@ def _ragged_hstu_attn_bwd(  # noqa C901
                 BLOCK_D_V=BLOCK_D_V,
                 BLOCK_M=BLOCK_M,
                 BLOCK_N=BLOCK_N,
+                UNROLL=UNROLL,
                 ATOMIC_ADD=False,
             )
 
