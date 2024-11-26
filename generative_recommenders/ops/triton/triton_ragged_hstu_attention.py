@@ -256,7 +256,6 @@ def _ragged_hstu_attn_fwd_one_block(  # noqa: C901
     time_bucket_div,
     time_delta,
     bias_ptrs,
-    contextual_seq_len,
     MAX_ATTN_LEN: tl.constexpr,
     INVALID_MASK_TYPE: tl.constexpr,
     CAUSAL: tl.constexpr,
@@ -266,7 +265,7 @@ def _ragged_hstu_attn_fwd_one_block(  # noqa: C901
     USE_POS_BIAS: tl.constexpr,
     HAS_MAX_POS_IND: tl.constexpr,
     HAS_MULTIPLE_TARGETS: tl.constexpr,
-    HAS_CONTEXTUAL_SEQ_LEN: tl.constexpr,
+    CONTEXTUAL_SEQ_LEN: tl.constexpr,
     IS_DELTA_Q: tl.constexpr,
     ALLOW_TF32: tl.constexpr,
     BLOCK_M: tl.constexpr,
@@ -307,11 +306,11 @@ def _ragged_hstu_attn_fwd_one_block(  # noqa: C901
             invalid_mask = invalid_mask or offs_n_minus_m < 0
         elif INVALID_MASK_TYPE == "upper_triangular":
             invalid_mask = invalid_mask or offs_n_minus_m > 0
-    if HAS_CONTEXTUAL_SEQ_LEN:
+    if CONTEXTUAL_SEQ_LEN > 0:
         if INVALID_MASK_TYPE == "lower_triangular":
             # offs_m[:, None]: [BLOCK_M, BLOCK_N] global row indices shortcut at seq_len - n_targets
             # offs_n[None, :]: [BLOCK_M, BLOCK_N] global col indices shortcut at seq_len - n_targets
-            row_filter = offs_m < contextual_seq_len
+            row_filter = offs_m < CONTEXTUAL_SEQ_LEN
             if HAS_MULTIPLE_TARGETS:
                 col_filter = offs_n < seq_len - n_targets
             else:
@@ -408,7 +407,6 @@ def _ragged_hstu_attn_fwd_compute(  # noqa C901
     time_bucket_incr,
     time_bucket_div,
     time_delta,
-    contextual_seq_len,
     off_z,
     off_h,
     pid,
@@ -427,7 +425,7 @@ def _ragged_hstu_attn_fwd_compute(  # noqa C901
     BLOCK_M: tl.constexpr,
     BLOCK_N: tl.constexpr,
     MAX_ATTN_LEN: tl.constexpr,
-    HAS_CONTEXTUAL_SEQ_LEN: tl.constexpr,
+    CONTEXTUAL_SEQ_LEN: tl.constexpr,
 ):
     seq_start = tl.load(seq_offsets + off_z).to(tl.int64)
     off_h = off_h.to(tl.int64)
@@ -517,8 +515,8 @@ def _ragged_hstu_attn_fwd_compute(  # noqa C901
                     high = seq_len - n_targets
                 else:
                     high = start_m + BLOCK_M
-                if HAS_CONTEXTUAL_SEQ_LEN:
-                    if start_m < contextual_seq_len:
+                if CONTEXTUAL_SEQ_LEN > 0:
+                    if start_m < CONTEXTUAL_SEQ_LEN:
                         high = seq_len - n_targets
             else:
                 if MAX_ATTN_LEN > 0:
@@ -527,8 +525,8 @@ def _ragged_hstu_attn_fwd_compute(  # noqa C901
                 else:
                     low = 0
                 high = start_m + BLOCK_M
-                if HAS_CONTEXTUAL_SEQ_LEN:
-                    if start_m < contextual_seq_len:
+                if CONTEXTUAL_SEQ_LEN > 0:
+                    if start_m < CONTEXTUAL_SEQ_LEN:
                         high = seq_len
         elif INVALID_MASK_TYPE == "upper_triangular":
             low = start_m
@@ -574,7 +572,7 @@ def _ragged_hstu_attn_fwd_compute(  # noqa C901
                 time_delta=time_delta,
                 # pyre-ignore[61]
                 bias_ptrs=bias_ptrs if ATTN_BIAS_TYPE == "separate" else None,
-                contextual_seq_len=contextual_seq_len,
+                CONTEXTUAL_SEQ_LEN=CONTEXTUAL_SEQ_LEN,
                 INVALID_MASK_TYPE=INVALID_MASK_TYPE,
                 CAUSAL=CAUSAL,
                 BUCKET_FN=BUCKET_FN,
@@ -583,7 +581,6 @@ def _ragged_hstu_attn_fwd_compute(  # noqa C901
                 USE_POS_BIAS=USE_POS_BIAS,
                 HAS_MAX_POS_IND=HAS_MAX_POS_IND,
                 HAS_MULTIPLE_TARGETS=HAS_MULTIPLE_TARGETS,
-                HAS_CONTEXTUAL_SEQ_LEN=HAS_CONTEXTUAL_SEQ_LEN,
                 IS_DELTA_Q=IS_DELTA_Q,
                 ALLOW_TF32=ALLOW_TF32,
                 BLOCK_M=BLOCK_M,
@@ -640,7 +637,7 @@ def _ragged_hstu_attn_fwd_compute(  # noqa C901
                         time_delta=time_delta,
                         # pyre-ignore[61]
                         bias_ptrs=bias_ptrs if ATTN_BIAS_TYPE == "separate" else None,
-                        contextual_seq_len=contextual_seq_len,
+                        CONTEXTUAL_SEQ_LEN=CONTEXTUAL_SEQ_LEN,
                         INVALID_MASK_TYPE=INVALID_MASK_TYPE,
                         CAUSAL=CAUSAL,
                         BUCKET_FN=BUCKET_FN,
@@ -649,7 +646,6 @@ def _ragged_hstu_attn_fwd_compute(  # noqa C901
                         USE_POS_BIAS=USE_POS_BIAS,
                         HAS_MAX_POS_IND=HAS_MAX_POS_IND,
                         HAS_MULTIPLE_TARGETS=HAS_MULTIPLE_TARGETS,
-                        HAS_CONTEXTUAL_SEQ_LEN=HAS_CONTEXTUAL_SEQ_LEN,
                         IS_DELTA_Q=IS_DELTA_Q,
                         ALLOW_TF32=ALLOW_TF32,
                         BLOCK_M=BLOCK_M,
@@ -727,7 +723,6 @@ def _ragged_hstu_attn_fwd(  # noqa C901
     time_bucket_incr,
     time_bucket_div,
     time_delta,
-    contextual_seq_len,
     INVALID_MASK_TYPE: tl.constexpr,
     CAUSAL: tl.constexpr,
     BUCKET_FN: tl.constexpr,
@@ -743,7 +738,7 @@ def _ragged_hstu_attn_fwd(  # noqa C901
     BLOCK_M: tl.constexpr,
     BLOCK_N: tl.constexpr,
     MAX_ATTN_LEN: tl.constexpr,
-    HAS_CONTEXTUAL_SEQ_LEN: tl.constexpr,
+    CONTEXTUAL_SEQ_LEN: tl.constexpr,
     HAS_SORT_BY_LENGTH_INDICES: tl.constexpr,
 ):
     off_hz = tl.program_id(1)
@@ -786,7 +781,6 @@ def _ragged_hstu_attn_fwd(  # noqa C901
         time_bucket_incr=time_bucket_incr,
         time_bucket_div=time_bucket_div,
         time_delta=time_delta,
-        contextual_seq_len=contextual_seq_len,
         off_z=off_z,
         off_h=off_h,
         pid=pid,
@@ -803,7 +797,7 @@ def _ragged_hstu_attn_fwd(  # noqa C901
         BLOCK_D_Q=BLOCK_D_Q,
         BLOCK_D_V=BLOCK_D_V,
         MAX_ATTN_LEN=MAX_ATTN_LEN,
-        HAS_CONTEXTUAL_SEQ_LEN=HAS_CONTEXTUAL_SEQ_LEN,
+        CONTEXTUAL_SEQ_LEN=CONTEXTUAL_SEQ_LEN,
         BLOCK_M=BLOCK_M,
         BLOCK_N=BLOCK_N,
     )
@@ -861,7 +855,6 @@ def _ragged_hstu_attn_fwd_persistent(  # noqa C901
     time_bucket_incr,
     time_bucket_div,
     time_delta,
-    contextual_seq_len,
     INVALID_MASK_TYPE: tl.constexpr,
     CAUSAL: tl.constexpr,
     BUCKET_FN: tl.constexpr,
@@ -877,7 +870,7 @@ def _ragged_hstu_attn_fwd_persistent(  # noqa C901
     BLOCK_M: tl.constexpr,
     BLOCK_N: tl.constexpr,
     MAX_ATTN_LEN: tl.constexpr,
-    HAS_CONTEXTUAL_SEQ_LEN: tl.constexpr,
+    CONTEXTUAL_SEQ_LEN: tl.constexpr,
     HAS_SORT_BY_LENGTH_INDICES: tl.constexpr,
 ):
     n_tile_num = tl.cdiv(MAX_SEQ_LEN, BLOCK_M)
@@ -930,7 +923,6 @@ def _ragged_hstu_attn_fwd_persistent(  # noqa C901
             time_bucket_incr=time_bucket_incr,
             time_bucket_div=time_bucket_div,
             time_delta=time_delta,
-            contextual_seq_len=contextual_seq_len,
             off_z=off_z,
             off_h=off_h,
             pid=pid,
@@ -947,7 +939,7 @@ def _ragged_hstu_attn_fwd_persistent(  # noqa C901
             BLOCK_D_Q=BLOCK_D_Q,
             BLOCK_D_V=BLOCK_D_V,
             MAX_ATTN_LEN=MAX_ATTN_LEN,
-            HAS_CONTEXTUAL_SEQ_LEN=HAS_CONTEXTUAL_SEQ_LEN,
+            CONTEXTUAL_SEQ_LEN=CONTEXTUAL_SEQ_LEN,
             BLOCK_M=BLOCK_M,
             BLOCK_N=BLOCK_N,
         )
@@ -981,7 +973,6 @@ def _get_named_specs() -> List[VersionedSpec]:
             "stride_om": ("i32", s),
             "stride_oh": ("i32", s),
             "alpha": "fp32",
-            "contextual_seq_len": "i32",
             "Z": "i32",
             "AUTOTUNE_Z": "i32",
             "H": "i32",
@@ -1003,13 +994,13 @@ def _get_named_specs() -> List[VersionedSpec]:
             "BLOCK_M": -1,  # autotuned
             "BLOCK_N": -1,  # autotuned
             "MAX_ATTN_LEN": 0,
-            "HAS_CONTEXTUAL_SEQ_LEN": False,
+            "CONTEXTUAL_SEQ_LEN": 0,
             "HAS_SORT_BY_LENGTH_INDICES": False,
         }
 
     default_values = {
         "MAX_ATTN_LEN": 0,
-        "HAS_CONTEXTUAL_SEQ_LEN": 0,
+        "CONTEXTUAL_SEQ_LEN": 0,
         "HAS_SORT_BY_LENGTH_INDICES": 0,
     }
 
@@ -1317,6 +1308,55 @@ def _get_named_specs() -> List[VersionedSpec]:
             for block in [64, 128]
             for is_delta_q in [True, False]
         ]
+        + [
+            # with RAB
+            VersionedSpec(
+                spec={
+                    "TW": "*bf16",
+                    "PW": "*bf16",
+                    "delta_x_offsets": ("*i64", s, is_delta_q),
+                    "num_targets": ("*i32", s, True),
+                    "HAS_MAX_POS_IND": has_max_pos_ind,
+                    "HAS_MULTIPLE_TARGETS": True,
+                    "ATTN_BIAS_TYPE": "fused",
+                    "BUCKET_FN": "sqrt",
+                    "IS_DELTA_Q": is_delta_q,
+                    "BLOCK_D_Q": block,
+                    "BLOCK_D_V": block,
+                    "ALLOW_TF32": True,
+                    **_common_specs(dtype="*bf16"),
+                },
+                default_values=default_values,
+                version="standalone_cint_v4",
+            )
+            for has_max_pos_ind in [True, False]
+            for block in [64, 128]
+            for is_delta_q in [True, False]
+        ]
+        + [
+            # no RAB
+            VersionedSpec(
+                spec={
+                    "TW": "*bf16",
+                    "PW": "*bf16",
+                    "delta_x_offsets": ("*i64", s, is_delta_q),
+                    "num_targets": ("*i32", s, True),
+                    "HAS_MAX_POS_IND": False,
+                    "HAS_MULTIPLE_TARGETS": True,
+                    "ATTN_BIAS_TYPE": "none",
+                    "BUCKET_FN": "none",
+                    "IS_DELTA_Q": is_delta_q,
+                    "BLOCK_D_Q": block,
+                    "BLOCK_D_V": block,
+                    "ALLOW_TF32": True,
+                    **_common_specs(dtype="*bf16"),
+                },
+                default_values=default_values,
+                version="standalone_cint_v4",
+            )
+            for block in [64, 128]
+            for is_delta_q in [True, False]
+        ]
     )
 
 
@@ -1377,7 +1417,6 @@ def _ragged_hstu_attn_bwd_one_block(  # noqa C901
     pos_offs_n,
     seq_len,
     n_targets,
-    contextual_seq_len,
     TW,
     PW,
     DTW,
@@ -1403,7 +1442,7 @@ def _ragged_hstu_attn_bwd_one_block(  # noqa C901
     FUSED_BIAS_BWD: tl.constexpr,
     HAS_MAX_POS_IND: tl.constexpr,
     HAS_MULTIPLE_TARGETS: tl.constexpr,
-    HAS_CONTEXTUAL_SEQ_LEN: tl.constexpr,
+    CONTEXTUAL_SEQ_LEN: tl.constexpr,
     ALLOW_TF32: tl.constexpr,
     BLOCK_M: tl.constexpr,
     BLOCK_N: tl.constexpr,
@@ -1504,8 +1543,8 @@ def _ragged_hstu_attn_bwd_one_block(  # noqa C901
             invalid_mask_trans = (
                 invalid_mask_trans or pos_offs_m[None, :] < pos_offs_n[:, None]
             )
-    if HAS_CONTEXTUAL_SEQ_LEN and INVALID_MASK_TYPE == "lower_triangular":
-        row_filter = pos_offs_m < contextual_seq_len
+    if CONTEXTUAL_SEQ_LEN > 0 and INVALID_MASK_TYPE == "lower_triangular":
+        row_filter = pos_offs_m < CONTEXTUAL_SEQ_LEN
         if HAS_MULTIPLE_TARGETS:
             col_filter = pos_offs_n < seq_len - n_targets
         else:
@@ -1587,7 +1626,6 @@ def _ragged_hstu_attn_bwd_one_col_block(  # noqa C901
     start_n,
     seq_len,
     n_targets,
-    contextual_seq_len,
     Q,
     K,
     V,
@@ -1627,12 +1665,13 @@ def _ragged_hstu_attn_bwd_one_col_block(  # noqa C901
     FUSED_BIAS_BWD: tl.constexpr,
     HAS_MAX_POS_IND: tl.constexpr,
     HAS_MULTIPLE_TARGETS: tl.constexpr,
-    HAS_CONTEXTUAL_SEQ_LEN: tl.constexpr,
+    CONTEXTUAL_SEQ_LEN: tl.constexpr,
     ALLOW_TF32: tl.constexpr,
     BLOCK_D_Q: tl.constexpr,
     BLOCK_D_V: tl.constexpr,
     BLOCK_M: tl.constexpr,
     BLOCK_N: tl.constexpr,
+    UNROLL: tl.constexpr,
     ATOMIC_ADD: tl.constexpr,
 ):
     # Work on the subsequence dv[start_n, start_n + BLOCK_N, :]
@@ -1651,8 +1690,8 @@ def _ragged_hstu_attn_bwd_one_col_block(  # noqa C901
                 high = high if high < seq_len else seq_len
             else:
                 high = seq_len
-        if HAS_CONTEXTUAL_SEQ_LEN:
-            contextual_block_end = tl.cdiv(contextual_seq_len, BLOCK_M) * BLOCK_M
+        if CONTEXTUAL_SEQ_LEN > 0:
+            contextual_block_end = tl.cdiv(CONTEXTUAL_SEQ_LEN, BLOCK_M) * BLOCK_M
             if low < contextual_block_end:
                 low = contextual_block_end
     elif INVALID_MASK_TYPE == "upper_triangular":
@@ -1708,8 +1747,8 @@ def _ragged_hstu_attn_bwd_one_col_block(  # noqa C901
     else:
         pos_offs_n = offs_n
     # loop over rows
-    if HAS_CONTEXTUAL_SEQ_LEN and INVALID_MASK_TYPE == "lower_triangular":
-        for start_m in range(0, contextual_seq_len, BLOCK_M):
+    if CONTEXTUAL_SEQ_LEN > 0 and INVALID_MASK_TYPE == "lower_triangular":
+        for start_m in range(0, CONTEXTUAL_SEQ_LEN, BLOCK_M):
             start_m = tl.multiple_of(start_m, BLOCK_M)
             dk, dv = _ragged_hstu_attn_bwd_one_block(
                 start_m=start_m,
@@ -1731,7 +1770,6 @@ def _ragged_hstu_attn_bwd_one_col_block(  # noqa C901
                 pos_offs_n=pos_offs_n,
                 seq_len=seq_len,
                 n_targets=n_targets,
-                contextual_seq_len=contextual_seq_len,
                 TW=TW,
                 PW=PW,
                 DTW=DTW,
@@ -1757,14 +1795,14 @@ def _ragged_hstu_attn_bwd_one_col_block(  # noqa C901
                 FUSED_BIAS_BWD=FUSED_BIAS_BWD,
                 HAS_MAX_POS_IND=HAS_MAX_POS_IND,
                 HAS_MULTIPLE_TARGETS=HAS_MULTIPLE_TARGETS,
-                HAS_CONTEXTUAL_SEQ_LEN=HAS_CONTEXTUAL_SEQ_LEN,
+                CONTEXTUAL_SEQ_LEN=CONTEXTUAL_SEQ_LEN,
                 ALLOW_TF32=ALLOW_TF32,
                 BLOCK_M=BLOCK_M,
                 BLOCK_N=BLOCK_N,
                 ATOMIC_ADD=ATOMIC_ADD,
             )
     # pyre-ignore[61]
-    for start_m in range(low, high, BLOCK_M):
+    for start_m in tl.range(low, high, BLOCK_M, loop_unroll_factor=UNROLL):
         start_m = tl.multiple_of(start_m, BLOCK_M)
         dk, dv = _ragged_hstu_attn_bwd_one_block(
             start_m=start_m,
@@ -1786,7 +1824,6 @@ def _ragged_hstu_attn_bwd_one_col_block(  # noqa C901
             pos_offs_n=pos_offs_n,
             seq_len=seq_len,
             n_targets=n_targets,
-            contextual_seq_len=contextual_seq_len,
             TW=TW,
             PW=PW,
             DTW=DTW,
@@ -1812,7 +1849,7 @@ def _ragged_hstu_attn_bwd_one_col_block(  # noqa C901
             FUSED_BIAS_BWD=FUSED_BIAS_BWD,
             HAS_MAX_POS_IND=HAS_MAX_POS_IND,
             HAS_MULTIPLE_TARGETS=HAS_MULTIPLE_TARGETS,
-            HAS_CONTEXTUAL_SEQ_LEN=HAS_CONTEXTUAL_SEQ_LEN,
+            CONTEXTUAL_SEQ_LEN=CONTEXTUAL_SEQ_LEN,
             ALLOW_TF32=ALLOW_TF32,
             BLOCK_M=BLOCK_M,
             BLOCK_N=BLOCK_N,
@@ -1854,6 +1891,7 @@ def _get_bw_configs() -> List[triton.Config]:
                                                 "matrix_instr_nonkdim": matrix_instr_nonkdim,
                                                 "waves_per_eu": waves_per_eu,
                                                 "SEQUENCE_PARALLEL": sp,
+                                                "UNROLL": 1,
                                             },
                                             num_stages=num_stages,
                                             num_warps=num_warps,
@@ -1864,157 +1902,169 @@ def _get_bw_configs() -> List[triton.Config]:
 
     configs = [
         triton.Config(
-            {"BLOCK_M": 16, "BLOCK_N": 32, "SEQUENCE_PARALLEL": False},
+            {"BLOCK_M": 16, "BLOCK_N": 32, "SEQUENCE_PARALLEL": False, "UNROLL": 1},
             num_stages=2,
             num_warps=2,
             pre_hook=_bwd_pre_hook,
         ),
         triton.Config(
-            {"BLOCK_M": 16, "BLOCK_N": 16, "SEQUENCE_PARALLEL": False},
+            {"BLOCK_M": 16, "BLOCK_N": 16, "SEQUENCE_PARALLEL": False, "UNROLL": 1},
             num_stages=2,
             num_warps=2,
             pre_hook=_bwd_pre_hook,
         ),
         triton.Config(
-            {"BLOCK_M": 16, "BLOCK_N": 32, "SEQUENCE_PARALLEL": False},
+            {"BLOCK_M": 16, "BLOCK_N": 32, "SEQUENCE_PARALLEL": False, "UNROLL": 1},
             num_stages=2,
             num_warps=4,
             pre_hook=_bwd_pre_hook,
         ),
         triton.Config(
-            {"BLOCK_M": 16, "BLOCK_N": 32, "SEQUENCE_PARALLEL": False},
+            {"BLOCK_M": 16, "BLOCK_N": 32, "SEQUENCE_PARALLEL": False, "UNROLL": 1},
             num_stages=1,
             num_warps=8,
             pre_hook=_bwd_pre_hook,
         ),
         triton.Config(
-            {"BLOCK_M": 16, "BLOCK_N": 64, "SEQUENCE_PARALLEL": False},
+            {"BLOCK_M": 16, "BLOCK_N": 64, "SEQUENCE_PARALLEL": False, "UNROLL": 1},
             num_stages=1,
             num_warps=4,
             pre_hook=_bwd_pre_hook,
         ),
         triton.Config(
-            {"BLOCK_M": 32, "BLOCK_N": 32, "SEQUENCE_PARALLEL": False},
+            {"BLOCK_M": 32, "BLOCK_N": 32, "SEQUENCE_PARALLEL": False, "UNROLL": 1},
             num_stages=1,
             num_warps=4,
             pre_hook=_bwd_pre_hook,
         ),
         triton.Config(
-            {"BLOCK_M": 32, "BLOCK_N": 32, "SEQUENCE_PARALLEL": False},
+            {"BLOCK_M": 32, "BLOCK_N": 32, "SEQUENCE_PARALLEL": False, "UNROLL": 1},
             num_stages=2,
             num_warps=4,
             pre_hook=_bwd_pre_hook,
         ),
         triton.Config(
-            {"BLOCK_M": 32, "BLOCK_N": 64, "SEQUENCE_PARALLEL": False},
+            {"BLOCK_M": 32, "BLOCK_N": 64, "SEQUENCE_PARALLEL": False, "UNROLL": 1},
             num_stages=1,
             num_warps=4,
             pre_hook=_bwd_pre_hook,
         ),
         triton.Config(
-            {"BLOCK_M": 32, "BLOCK_N": 64, "SEQUENCE_PARALLEL": False},
+            {"BLOCK_M": 32, "BLOCK_N": 64, "SEQUENCE_PARALLEL": False, "UNROLL": 1},
             num_stages=2,
             num_warps=4,
             pre_hook=_bwd_pre_hook,
         ),
         triton.Config(
-            {"BLOCK_M": 32, "BLOCK_N": 64, "SEQUENCE_PARALLEL": False},
-            num_stages=1,
-            num_warps=8,
-            pre_hook=_bwd_pre_hook,
-        ),
-        triton.Config(
-            {"BLOCK_M": 32, "BLOCK_N": 64, "SEQUENCE_PARALLEL": False},
-            num_stages=2,
-            num_warps=8,
-            pre_hook=_bwd_pre_hook,
-        ),
-        triton.Config(
-            {"BLOCK_M": 64, "BLOCK_N": 64, "SEQUENCE_PARALLEL": False},
-            num_stages=1,
-            num_warps=4,
-            pre_hook=_bwd_pre_hook,
-        ),
-        triton.Config(
-            {"BLOCK_M": 64, "BLOCK_N": 64, "SEQUENCE_PARALLEL": False},
-            num_stages=2,
-            num_warps=4,
-            pre_hook=_bwd_pre_hook,
-        ),
-        triton.Config(
-            {"BLOCK_M": 64, "BLOCK_N": 64, "SEQUENCE_PARALLEL": False},
+            {"BLOCK_M": 32, "BLOCK_N": 64, "SEQUENCE_PARALLEL": False, "UNROLL": 1},
             num_stages=1,
             num_warps=8,
             pre_hook=_bwd_pre_hook,
         ),
         triton.Config(
-            {"BLOCK_M": 64, "BLOCK_N": 64, "SEQUENCE_PARALLEL": False},
+            {"BLOCK_M": 32, "BLOCK_N": 64, "SEQUENCE_PARALLEL": False, "UNROLL": 1},
             num_stages=2,
             num_warps=8,
             pre_hook=_bwd_pre_hook,
         ),
         triton.Config(
-            {"BLOCK_M": 32, "BLOCK_N": 128, "SEQUENCE_PARALLEL": False},
+            {"BLOCK_M": 64, "BLOCK_N": 64, "SEQUENCE_PARALLEL": False, "UNROLL": 1},
+            num_stages=1,
+            num_warps=4,
+            pre_hook=_bwd_pre_hook,
+        ),
+        triton.Config(
+            {"BLOCK_M": 64, "BLOCK_N": 64, "SEQUENCE_PARALLEL": False, "UNROLL": 1},
+            num_stages=2,
+            num_warps=4,
+            pre_hook=_bwd_pre_hook,
+        ),
+        triton.Config(
+            {"BLOCK_M": 64, "BLOCK_N": 64, "SEQUENCE_PARALLEL": False, "UNROLL": 1},
+            num_stages=1,
+            num_warps=8,
+            pre_hook=_bwd_pre_hook,
+        ),
+        triton.Config(
+            {"BLOCK_M": 64, "BLOCK_N": 64, "SEQUENCE_PARALLEL": False, "UNROLL": 1},
             num_stages=2,
             num_warps=8,
             pre_hook=_bwd_pre_hook,
         ),
         triton.Config(
-            {"BLOCK_M": 32, "BLOCK_N": 128, "SEQUENCE_PARALLEL": False},
+            {"BLOCK_M": 32, "BLOCK_N": 128, "SEQUENCE_PARALLEL": False, "UNROLL": 1},
+            num_stages=2,
+            num_warps=8,
+            pre_hook=_bwd_pre_hook,
+        ),
+        triton.Config(
+            {"BLOCK_M": 32, "BLOCK_N": 128, "SEQUENCE_PARALLEL": False, "UNROLL": 1},
             num_stages=3,
             num_warps=8,
             pre_hook=_bwd_pre_hook,
         ),
         triton.Config(
-            {"BLOCK_M": 16, "BLOCK_N": 32, "SEQUENCE_PARALLEL": True},
+            {"BLOCK_M": 32, "BLOCK_N": 128, "SEQUENCE_PARALLEL": False, "UNROLL": 2},
+            num_stages=2,
+            num_warps=8,
+            pre_hook=_bwd_pre_hook,
+        ),
+        triton.Config(
+            {"BLOCK_M": 32, "BLOCK_N": 128, "SEQUENCE_PARALLEL": False, "UNROLL": 4},
+            num_stages=2,
+            num_warps=8,
+            pre_hook=_bwd_pre_hook,
+        ),
+        triton.Config(
+            {"BLOCK_M": 16, "BLOCK_N": 32, "SEQUENCE_PARALLEL": True, "UNROLL": 1},
             num_stages=2,
             num_warps=2,
             pre_hook=_bwd_pre_hook,
         ),
         triton.Config(
-            {"BLOCK_M": 32, "BLOCK_N": 32, "SEQUENCE_PARALLEL": True},
+            {"BLOCK_M": 32, "BLOCK_N": 32, "SEQUENCE_PARALLEL": True, "UNROLL": 1},
             num_stages=1,
             num_warps=4,
             pre_hook=_bwd_pre_hook,
         ),
         triton.Config(
-            {"BLOCK_M": 32, "BLOCK_N": 32, "SEQUENCE_PARALLEL": True},
+            {"BLOCK_M": 32, "BLOCK_N": 32, "SEQUENCE_PARALLEL": True, "UNROLL": 1},
             num_stages=2,
             num_warps=4,
             pre_hook=_bwd_pre_hook,
         ),
         triton.Config(
-            {"BLOCK_M": 32, "BLOCK_N": 64, "SEQUENCE_PARALLEL": True},
+            {"BLOCK_M": 32, "BLOCK_N": 64, "SEQUENCE_PARALLEL": True, "UNROLL": 1},
             num_stages=1,
             num_warps=4,
             pre_hook=_bwd_pre_hook,
         ),
         triton.Config(
-            {"BLOCK_M": 32, "BLOCK_N": 64, "SEQUENCE_PARALLEL": True},
+            {"BLOCK_M": 32, "BLOCK_N": 64, "SEQUENCE_PARALLEL": True, "UNROLL": 1},
             num_stages=2,
             num_warps=4,
             pre_hook=_bwd_pre_hook,
         ),
         triton.Config(
-            {"BLOCK_M": 32, "BLOCK_N": 64, "SEQUENCE_PARALLEL": True},
+            {"BLOCK_M": 32, "BLOCK_N": 64, "SEQUENCE_PARALLEL": True, "UNROLL": 1},
             num_stages=1,
             num_warps=8,
             pre_hook=_bwd_pre_hook,
         ),
         triton.Config(
-            {"BLOCK_M": 64, "BLOCK_N": 64, "SEQUENCE_PARALLEL": True},
+            {"BLOCK_M": 64, "BLOCK_N": 64, "SEQUENCE_PARALLEL": True, "UNROLL": 1},
             num_stages=1,
             num_warps=4,
             pre_hook=_bwd_pre_hook,
         ),
         triton.Config(
-            {"BLOCK_M": 64, "BLOCK_N": 64, "SEQUENCE_PARALLEL": True},
+            {"BLOCK_M": 64, "BLOCK_N": 64, "SEQUENCE_PARALLEL": True, "UNROLL": 1},
             num_stages=2,
             num_warps=4,
             pre_hook=_bwd_pre_hook,
         ),
         triton.Config(
-            {"BLOCK_M": 32, "BLOCK_N": 128, "SEQUENCE_PARALLEL": True},
+            {"BLOCK_M": 32, "BLOCK_N": 128, "SEQUENCE_PARALLEL": True, "UNROLL": 1},
             num_stages=3,
             num_warps=8,
             pre_hook=_bwd_pre_hook,
@@ -2072,7 +2122,6 @@ def _ragged_hstu_attn_bwd(  # noqa C901
     stride_dvn,
     stride_dvh,
     alpha,
-    contextual_seq_len,
     Z,
     AUTOTUNE_Z,
     H,
@@ -2085,6 +2134,7 @@ def _ragged_hstu_attn_bwd(  # noqa C901
     time_bucket_incr,
     time_bucket_div,
     time_delta,
+    CONTEXTUAL_SEQ_LEN: tl.constexpr,
     MAX_ATTN_LEN: tl.constexpr,
     INVALID_MASK_TYPE: tl.constexpr,
     CAUSAL: tl.constexpr,
@@ -2095,13 +2145,13 @@ def _ragged_hstu_attn_bwd(  # noqa C901
     FUSED_BIAS_BWD: tl.constexpr,
     HAS_MAX_POS_IND: tl.constexpr,
     HAS_MULTIPLE_TARGETS: tl.constexpr,
-    HAS_CONTEXTUAL_SEQ_LEN: tl.constexpr,
     ALLOW_TF32: tl.constexpr,
     BLOCK_D_Q: tl.constexpr,
     BLOCK_D_V: tl.constexpr,
     SEQUENCE_PARALLEL: tl.constexpr,
     BLOCK_M: tl.constexpr,
     BLOCK_N: tl.constexpr,
+    UNROLL: tl.constexpr,
     HAS_SORT_BY_LENGTH_INDICES: tl.constexpr,
 ):
     off_hz = tl.program_id(0)
@@ -2150,7 +2200,6 @@ def _ragged_hstu_attn_bwd(  # noqa C901
             start_n=start_n,
             seq_len=seq_len,
             n_targets=n_targets,
-            contextual_seq_len=contextual_seq_len,
             Q=Q,
             K=K,
             V=V,
@@ -2190,12 +2239,13 @@ def _ragged_hstu_attn_bwd(  # noqa C901
             FUSED_BIAS_BWD=FUSED_BIAS_BWD,
             HAS_MAX_POS_IND=HAS_MAX_POS_IND,
             HAS_MULTIPLE_TARGETS=HAS_MULTIPLE_TARGETS,
-            HAS_CONTEXTUAL_SEQ_LEN=HAS_CONTEXTUAL_SEQ_LEN,
+            CONTEXTUAL_SEQ_LEN=CONTEXTUAL_SEQ_LEN,
             ALLOW_TF32=ALLOW_TF32,
             BLOCK_D_Q=BLOCK_D_Q,
             BLOCK_D_V=BLOCK_D_V,
             BLOCK_M=BLOCK_M,
             BLOCK_N=BLOCK_N,
+            UNROLL=UNROLL,
             ATOMIC_ADD=True,
         )
     else:
@@ -2204,7 +2254,6 @@ def _ragged_hstu_attn_bwd(  # noqa C901
                 start_n=start_n,
                 seq_len=seq_len,
                 n_targets=n_targets,
-                contextual_seq_len=contextual_seq_len,
                 Q=Q,
                 K=K,
                 V=V,
@@ -2244,12 +2293,13 @@ def _ragged_hstu_attn_bwd(  # noqa C901
                 FUSED_BIAS_BWD=FUSED_BIAS_BWD,
                 HAS_MAX_POS_IND=HAS_MAX_POS_IND,
                 HAS_MULTIPLE_TARGETS=HAS_MULTIPLE_TARGETS,
-                HAS_CONTEXTUAL_SEQ_LEN=HAS_CONTEXTUAL_SEQ_LEN,
+                CONTEXTUAL_SEQ_LEN=CONTEXTUAL_SEQ_LEN,
                 ALLOW_TF32=ALLOW_TF32,
                 BLOCK_D_Q=BLOCK_D_Q,
                 BLOCK_D_V=BLOCK_D_V,
                 BLOCK_M=BLOCK_M,
                 BLOCK_N=BLOCK_N,
+                UNROLL=UNROLL,
                 ATOMIC_ADD=False,
             )
 
@@ -2282,9 +2332,9 @@ def triton_ragged_attention_fwd(
 
     out = torch.empty_like(v)
     max_attn_len = max_attn_len or 0
+    contextual_seq_len = contextual_seq_len or 0
     has_multiple_targets = num_targets is not None
     has_attn_bias = attn_bias is not None
-    has_contextual_seq_len = contextual_seq_len is not None and contextual_seq_len > 0
     has_sort_by_length_indices = sort_by_length_indices is not None
     if L == 0:
         return out
@@ -2331,7 +2381,6 @@ def triton_ragged_attention_fwd(
         time_bucket_incr=None,
         time_bucket_div=None,
         time_delta=None,
-        contextual_seq_len=0 if contextual_seq_len is None else contextual_seq_len,
         INVALID_MASK_TYPE=invalid_attn_mask_type,
         CAUSAL=None,
         BUCKET_FN="none",
@@ -2345,7 +2394,7 @@ def triton_ragged_attention_fwd(
         BLOCK_D_Q=DimQ,
         BLOCK_D_V=DimV,
         MAX_ATTN_LEN=max_attn_len,
-        HAS_CONTEXTUAL_SEQ_LEN=has_contextual_seq_len,
+        CONTEXTUAL_SEQ_LEN=contextual_seq_len,
         HAS_SORT_BY_LENGTH_INDICES=has_sort_by_length_indices,
     )
     return out
@@ -2438,7 +2487,7 @@ def triton_ragged_attention_bwd(
         stride_dvn=dv.stride(0),
         stride_dvh=dv.stride(1),
         alpha=alpha,
-        contextual_seq_len=0 if contextual_seq_len is None else contextual_seq_len,
+        CONTEXTUAL_SEQ_LEN=0 if contextual_seq_len is None else contextual_seq_len,
         Z=Z,
         AUTOTUNE_Z=AUTOTUNE_Z,
         H=H,
@@ -2461,8 +2510,6 @@ def triton_ragged_attention_bwd(
         FUSED_BIAS_BWD=None,
         HAS_MAX_POS_IND=False,
         HAS_MULTIPLE_TARGETS=num_targets is not None,
-        HAS_CONTEXTUAL_SEQ_LEN=contextual_seq_len is not None
-        and contextual_seq_len > 0,
         ALLOW_TF32=torch.backends.cuda.matmul.allow_tf32,
         BLOCK_D_Q=DimQ,
         BLOCK_D_V=DimV,
@@ -2503,7 +2550,7 @@ class RaggedAttentionFunction(torch.autograd.Function):
         if attn_bias is not None:
             assert seq2_offsets is not None
             saved_tensors.extend([attn_bias, seq2_offsets])
-        contextual_seq_len = 0 if contextual_seq_len is None else contextual_seq_len
+        contextual_seq_len = contextual_seq_len or 0
         max_attn_len = max_attn_len or 0
         if sort_by_length_indices is not None:
             saved_tensors.append(sort_by_length_indices)
@@ -2630,7 +2677,6 @@ def _attn_bias_bwd(  # noqa C901
     stride_dom,
     stride_doh,
     alpha,
-    contextual_seq_len,
     Z,
     H,
     MAX_SEQ_LEN,
@@ -2649,7 +2695,7 @@ def _attn_bias_bwd(  # noqa C901
     USE_POS_BIAS: tl.constexpr,
     HAS_MAX_POS_IND: tl.constexpr,
     HAS_MULTIPLE_TARGETS: tl.constexpr,
-    HAS_CONTEXTUAL_SEQ_LEN: tl.constexpr,
+    CONTEXTUAL_SEQ_LEN: tl.constexpr,
     ALLOW_TF32: tl.constexpr,
     BLOCK_D_Q: tl.constexpr,
     BLOCK_D_V: tl.constexpr,
@@ -2871,9 +2917,9 @@ def _attn_bias_bwd(  # noqa C901
             else:
                 # pyre-ignore[61]
                 mt_invalid_mask = invalid_mask
-            if HAS_CONTEXTUAL_SEQ_LEN:
+            if CONTEXTUAL_SEQ_LEN > 0:
                 if INVALID_MASK_TYPE == "lower_triangular":
-                    row_filter = offs_m < contextual_seq_len
+                    row_filter = offs_m < CONTEXTUAL_SEQ_LEN
                     if HAS_MULTIPLE_TARGETS:
                         # pyre-ignore[61]
                         col_filter = offs_n < seq_len - n_targets
@@ -3006,7 +3052,6 @@ def triton_ragged_attention_relative_bias_fwd(
     N = timestamps.size(1) - 1
     has_multiple_targets = num_targets is not None
     has_max_pos_id = max_pos_ind is not None
-    has_contextual_seq_len = contextual_seq_len is not None and contextual_seq_len > 0
     has_sort_by_length_indices = sort_by_length_indices is not None
     L, H, DimQ = q.shape
     _, _, DimV = v.shape
@@ -3057,7 +3102,6 @@ def triton_ragged_attention_relative_bias_fwd(
         time_bucket_incr=time_bucket_incr,
         time_bucket_div=time_bucket_div,
         time_delta=time_delta,
-        contextual_seq_len=contextual_seq_len,
         INVALID_MASK_TYPE=invalid_attn_mask_type,
         CAUSAL=causal,
         BUCKET_FN=time_bucket_fn,
@@ -3071,7 +3115,7 @@ def triton_ragged_attention_relative_bias_fwd(
         BLOCK_D_Q=DimQ,
         BLOCK_D_V=DimV,
         MAX_ATTN_LEN=max_attn_len or 0,
-        HAS_CONTEXTUAL_SEQ_LEN=has_contextual_seq_len,
+        CONTEXTUAL_SEQ_LEN=contextual_seq_len or 0,
         HAS_SORT_BY_LENGTH_INDICES=has_sort_by_length_indices,
     )
     return out
@@ -3189,7 +3233,6 @@ def triton_ragged_attention_relative_bias_bwd(
             stride_dom=dout.stride(0),
             stride_doh=dout.stride(1),
             alpha=alpha,
-            contextual_seq_len=contextual_seq_len,
             Z=Z,
             H=H,
             MAX_SEQ_LEN=N,
@@ -3208,8 +3251,7 @@ def triton_ragged_attention_relative_bias_bwd(
             USE_POS_BIAS=use_pos_bias,
             HAS_MAX_POS_IND=max_pos_ind is not None,
             HAS_MULTIPLE_TARGETS=has_multiple_targets,
-            HAS_CONTEXTUAL_SEQ_LEN=contextual_seq_len is not None
-            and contextual_seq_len > 0,
+            CONTEXTUAL_SEQ_LEN=contextual_seq_len,
             ALLOW_TF32=torch.backends.cuda.matmul.allow_tf32,
             BLOCK_D_Q=DimQ,
             BLOCK_D_V=DimV,
@@ -3267,7 +3309,6 @@ def triton_ragged_attention_relative_bias_bwd(
         stride_dvn=dv.stride(0),
         stride_dvh=dv.stride(1),
         alpha=alpha,
-        contextual_seq_len=contextual_seq_len,
         Z=Z,
         AUTOTUNE_Z=AUTOTUNE_Z,
         H=H,
@@ -3290,8 +3331,7 @@ def triton_ragged_attention_relative_bias_bwd(
         FUSED_BIAS_BWD=fused_bias_bwd,
         HAS_MAX_POS_IND=max_pos_ind is not None,
         HAS_MULTIPLE_TARGETS=has_multiple_targets,
-        HAS_CONTEXTUAL_SEQ_LEN=contextual_seq_len is not None
-        and contextual_seq_len > 0,
+        CONTEXTUAL_SEQ_LEN=contextual_seq_len,
         ALLOW_TF32=torch.backends.cuda.matmul.allow_tf32,
         BLOCK_D_Q=DimQ,
         BLOCK_D_V=DimV,
