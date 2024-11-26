@@ -171,16 +171,7 @@ class CandidateIndex(object):
 
         # TODO: this should be decoupled from candidate_index.
         if return_embeddings:
-            # TODO: get rid of repeat_interleave in the final version.
-            expanded_embeddings = (
-                self.embeddings.repeat_interleave(r, dim=0)
-                if r > 1
-                else self.embeddings
-            )
-            top_k_embeddings = batch_gather_embeddings(
-                rowwise_indices=top_k_indices,
-                embeddings=expanded_embeddings,  # pyre-ignore[10]
-            )
+            raise ValueError("return_embeddings not supported yet.")
         else:
             top_k_embeddings = None
         return top_k_ids, top_k_scores, top_k_embeddings

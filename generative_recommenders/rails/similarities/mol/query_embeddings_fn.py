@@ -18,7 +18,7 @@ Defines functions to generate query-side embeddings for MoL.
 Forked from bailuding/rails @ 664fdb9.
 """
 
-from typing import Callable, Dict, List, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
 
 import torch
 import torch.nn.functional as F
@@ -51,12 +51,12 @@ class RecoMoLQueryEmbeddingsFn(MoLEmbeddingsFn):
         dot_product_l2_norm: bool,
         proj_fn: Callable[[int, int], torch.nn.Module],
         eps: float,
-        uid_embedding_hash_sizes: List[int] = [],
+        uid_embedding_hash_sizes: Optional[List[int]] = None,
         uid_dropout_rate: float = 0.0,
         uid_embedding_level_dropout: bool = False,
     ) -> None:
         super().__init__()
-        self._uid_embedding_hash_sizes: List[int] = uid_embedding_hash_sizes
+        self._uid_embedding_hash_sizes: List[int] = uid_embedding_hash_sizes or []
         self._query_emb_based_dot_product_groups: int = query_dot_product_groups - len(
             self._uid_embedding_hash_sizes
         )

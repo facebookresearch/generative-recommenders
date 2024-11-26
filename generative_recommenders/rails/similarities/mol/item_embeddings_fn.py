@@ -18,11 +18,9 @@ Defines functions to generate item-side embeddings for MoL.
 Forked from bailuding/rails @ 664fdb9.
 """
 
-import abc
 from typing import Callable, Dict, Tuple
 
 import torch
-import torch.nn.functional as F
 
 from generative_recommenders.rails.similarities.mol.embeddings_fn import MoLEmbeddingsFn
 

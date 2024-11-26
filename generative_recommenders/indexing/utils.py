@@ -16,7 +16,6 @@
 
 import torch
 
-from generative_recommenders.indexing.candidate_index import CandidateIndex
 from generative_recommenders.rails.indexing.candidate_index import TopKModule
 from generative_recommenders.rails.indexing.mips_top_k import MIPSBruteForceTopK
 from generative_recommenders.rails.indexing.mol_top_k import MoLBruteForceTopK

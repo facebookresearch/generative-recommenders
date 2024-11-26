@@ -22,16 +22,16 @@ import torch
 from generative_recommenders.rails.similarities.dot_product_similarity_fn import (
     DotProductSimilarity,
 )
-from generative_recommenders.rails.similarities.layers import GeGLU, SwiGLU
-from generative_recommenders.rails.similarities.mol.similarity_fn import (
-    MoLSimilarity,
-    SoftmaxDropoutCombiner,
-)
+from generative_recommenders.rails.similarities.layers import SwiGLU
 from generative_recommenders.rails.similarities.mol.query_embeddings_fn import (
     RecoMoLQueryEmbeddingsFn,
 )
 from generative_recommenders.rails.similarities.mol.item_embeddings_fn import (
     RecoMoLItemEmbeddingsFn,
+)
+from generative_recommenders.rails.similarities.mol.similarity_fn import (
+    MoLSimilarity,
+    SoftmaxDropoutCombiner,
 )
 
 

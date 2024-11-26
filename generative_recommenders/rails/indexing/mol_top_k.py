@@ -21,10 +21,9 @@ discussed in Retrieval with Learned Similarities (https://arxiv.org/abs/2407.154
 Forked from bailuding/rails @ 664fdb9.
 """
 
-from typing import Dict, Tuple
+from typing import Tuple
 
 import torch
-from torch.profiler import record_function
 
 from generative_recommenders.rails.indexing.candidate_index import TopKModule
 from generative_recommenders.rails.similarities.mol.similarity_fn import MoLSimilarity

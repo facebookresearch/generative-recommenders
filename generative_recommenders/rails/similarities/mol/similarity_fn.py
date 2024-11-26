@@ -19,15 +19,14 @@ Implements MoL (Mixture-of-Logits) with load balancing regularization loss, as d
 
 Forked from bailuding/rails @ 664fdb9.
 """
-from typing import Callable, Dict, List, Optional, Tuple
 
-import math
+from typing import Callable, Dict, Optional, Tuple
 
 import torch
 import torch.nn.functional as F
 
-from generative_recommenders.rails.similarities.mol.embeddings_fn import MoLEmbeddingsFn
 from generative_recommenders.rails.similarities.module import SimilarityModule
+from generative_recommenders.rails.similarities.mol.embeddings_fn import MoLEmbeddingsFn
 
 
 @torch.compile(dynamic=True)
@@ -100,7 +99,7 @@ class SoftmaxDropoutCombiner(torch.nn.Module):
 
 class MoLGatingFn(torch.nn.Module):
     """
-    Implements the gating function for MoL, used to compute $\pi_p(q, x)$ for a given (p, x) pair.
+    Implements the gating function for MoL, used to compute pi_p(q, x) for a given (p, x) pair.
     """
 
     def __init__(
@@ -164,7 +163,7 @@ class MoLGatingFn(torch.nn.Module):
         """
         B, X, _ = logits.size()
         # [B, 1, F], [1/B, X, F], [B, X, F]
-        query_partial_inputs, item_partial_inputs, ci_partial_inputs = None, None, None
+        query_partial_inputs, item_partial_inputs, qi_partial_inputs = None, None, None
         if self._query_only_partial_module is not None:
             query_partial_inputs = self._query_only_partial_module(
                 query_embeddings

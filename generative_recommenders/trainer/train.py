@@ -110,7 +110,7 @@ def train_fn(
     user_embedding_norm: str = "l2_norm",
     sampling_strategy: str = "in-batch",
     loss_module: str = "SampledSoftmaxLoss",
-    loss_weights: Dict[str, float] = {},
+    loss_weights: Optional]Dict[str, float]] = {},
     num_negatives: int = 1,
     loss_activation_checkpoint: bool = False,
     item_l2_norm: bool = False,
@@ -395,7 +395,7 @@ def train_fn(
             )  # [B, N]
 
             main_loss = loss.detach().clone()
-            loss = get_weighted_loss(loss, aux_losses, weights=loss_weights)
+            loss = get_weighted_loss(loss, aux_losses, weights=loss_weights or {})
 
             if rank == 0:
                 assert writer is not None
