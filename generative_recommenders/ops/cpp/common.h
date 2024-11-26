@@ -50,3 +50,11 @@ inline __attribute__((always_inline)) uint32_t next_power_of_2(uint32_t n) {
   n++;
   return n;
 }
+
+/*
+ * Because different .SO may include the same CUDA CUB kernels, this results in
+ * confusion, where libA may end up calling libB's cub kernel and causing
+ * failures when we static link libcudart_static.a. To avoid this, we annotate
+ * only the public functions and hide the rest.
+ */
+#define DLL_PUBLIC __attribute__((visibility("default")))
