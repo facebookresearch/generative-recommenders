@@ -22,6 +22,14 @@
 #include <torch/extension.h>
 #include <torch/library.h>
 
+/*
+ * Because different .SO may include the same CUDA CUB kernels, this results in
+ * confusion, where libA may end up calling libB's cub kernel and causing
+ * failures when we static link libcudart_static.a. To avoid this, we annotate
+ * only the public functions and hide the rest.
+ */
+#define DLL_PUBLIC __attribute__((visibility("default")))
+
 namespace gr {
 at::Tensor expand_1d_jagged_to_dense_cpu(
     const at::Tensor& values,
@@ -67,6 +75,26 @@ at::Tensor concat_1d_jagged_jagged_meta(
     const at::Tensor& values_left,
     const at::Tensor& lengths_right,
     const at::Tensor& values_right);
+
+DLL_PUBLIC std::tuple<at::Tensor, at::Tensor> sort_kv_pairs_meta(
+    const at::Tensor& keys,
+    const at::Tensor& values,
+    const std::optional<int64_t>& end_bit,
+    const bool descending = false) {
+  TORCH_CHECK(
+      keys.dtype() == at::kInt || keys.dtype() == at::kLong ||
+      keys.dtype() == at::kByte || keys.dtype() == at::kShort);
+  TORCH_CHECK(keys.dim() == 1);
+  TORCH_CHECK(values.dim() == 1);
+  return {at::empty_like(keys), at::empty_like(values)};
+}
+
+std::tuple<at::Tensor, at::Tensor> sort_kv_pairs_cuda(
+    const at::Tensor& keys,
+    const at::Tensor& values,
+    const std::optional<int64_t>& end_bit,
+    const bool descending = false);
+
 } // namespace gr
 
 TORCH_LIBRARY_FRAGMENT(gr, m) {
@@ -76,6 +104,8 @@ TORCH_LIBRARY_FRAGMENT(gr, m) {
   m.def(
       "concat_1d_jagged_jagged(Tensor lengths_left, Tensor values_left, Tensor lengths_right, Tensor values_right) -> Tensor");
   m.def("complete_cumsum(Tensor values) -> Tensor");
+  m.def(
+      "sort_kv_pairs(Tensor keys, Tensor values, int? end_bit=None, bool descending=False) -> (Tensor, Tensor)");
 }
 
 TORCH_LIBRARY_IMPL(gr, CPU, m) {
@@ -90,6 +120,10 @@ TORCH_LIBRARY_IMPL(gr, CUDA, m) {
   m.impl("batched_complete_cumsum", gr::batched_complete_cumsum_cuda);
   m.impl("concat_1d_jagged_jagged", gr::concat_1d_jagged_jagged_cuda);
   m.impl("complete_cumsum", gr::complete_cumsum_cuda);
+  m.impl(
+      "sort_kv_pairs",
+      torch::dispatch(
+          c10::DispatchKey::CUDA, TORCH_FN(gr::sort_kv_pairs_cuda)));
 }
 
 TORCH_LIBRARY_IMPL(gr, Meta, m) {
@@ -97,6 +131,10 @@ TORCH_LIBRARY_IMPL(gr, Meta, m) {
   m.impl("batched_complete_cumsum", gr::batched_complete_cumsum_meta);
   m.impl("concat_1d_jagged_jagged", gr::concat_1d_jagged_jagged_meta);
   m.impl("complete_cumsum", gr::complete_cumsum_meta);
+  m.impl(
+      "sort_kv_pairs",
+      torch::dispatch(
+          c10::DispatchKey::Meta, TORCH_FN(gr::sort_kv_pairs_meta)));
 }
 
 TORCH_LIBRARY_IMPL(gr, Autograd, m) {
