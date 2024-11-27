@@ -110,7 +110,7 @@ def train_fn(
     user_embedding_norm: str = "l2_norm",
     sampling_strategy: str = "in-batch",
     loss_module: str = "SampledSoftmaxLoss",
-    loss_weights: Optional]Dict[str, float]] = {},
+    loss_weights: Optional[Dict[str, float]] = {},
     num_negatives: int = 1,
     loss_activation_checkpoint: bool = False,
     item_l2_norm: bool = False,
