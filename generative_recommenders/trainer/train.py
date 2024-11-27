@@ -21,7 +21,7 @@ import random
 import time
 
 from datetime import date
-from typing import Optional
+from typing import Dict, Optional
 
 import gin
 
@@ -81,6 +81,19 @@ def cleanup() -> None:
 
 
 @gin.configurable
+def get_weighted_loss(
+    main_loss: torch.Tensor,
+    aux_losses: Dict[str, torch.Tensor],
+    weights: Dict[str, float],
+) -> torch.Tensor:
+    weighted_loss = main_loss
+    for key, weight in weights.items():
+        cur_weighted_loss = aux_losses[key] * weight
+        weighted_loss = weighted_loss + cur_weighted_loss
+    return weighted_loss
+
+
+@gin.configurable
 def train_fn(
     rank: int,
     world_size: int,
@@ -97,6 +110,7 @@ def train_fn(
     user_embedding_norm: str = "l2_norm",
     sampling_strategy: str = "in-batch",
     loss_module: str = "SampledSoftmaxLoss",
+    loss_weights: Optional[Dict[str, float]] = {},
     num_negatives: int = 1,
     loss_activation_checkpoint: bool = False,
     item_l2_norm: bool = False,
@@ -380,13 +394,13 @@ def train_fn(
                 **seq_features.past_payloads,
             )  # [B, N]
 
-            # TODO: needed for learned similarities (e.g., MoL). To be integrated in
-            # future refactorings.
-            del aux_losses
+            main_loss = loss.detach().clone()
+            loss = get_weighted_loss(loss, aux_losses, weights=loss_weights or {})
 
             if rank == 0:
                 assert writer is not None
                 writer.add_scalar("losses/ar_loss", loss, batch_id)
+                writer.add_scalar("losses/main_loss", main_loss, batch_id)
 
             loss.backward()
 

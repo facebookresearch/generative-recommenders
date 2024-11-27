@@ -18,11 +18,10 @@ from typing import Tuple
 
 import torch
 
-from generative_recommenders.indexing.candidate_index import TopKModule
+from generative_recommenders.rails.indexing.candidate_index import TopKModule
 
 
 class MIPSTopKModule(TopKModule):
-
     def __init__(
         self,
         item_embeddings: torch.Tensor,
@@ -40,7 +39,6 @@ class MIPSTopKModule(TopKModule):
 
 
 class MIPSBruteForceTopK(MIPSTopKModule):
-
     def __init__(
         self,
         item_embeddings: torch.Tensor,
@@ -60,6 +58,7 @@ class MIPSBruteForceTopK(MIPSTopKModule):
         query_embeddings: torch.Tensor,
         k: int,
         sorted: bool = True,
+        **kwargs,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Args:

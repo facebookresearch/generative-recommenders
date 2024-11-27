@@ -16,8 +16,9 @@
 
 import torch
 
-from generative_recommenders.indexing.candidate_index import CandidateIndex, TopKModule
-from generative_recommenders.indexing.mips_top_k import MIPSBruteForceTopK
+from generative_recommenders.rails.indexing.candidate_index import TopKModule
+from generative_recommenders.rails.indexing.mips_top_k import MIPSBruteForceTopK
+from generative_recommenders.rails.indexing.mol_top_k import MoLBruteForceTopK
 
 
 def get_top_k_module(
@@ -28,6 +29,11 @@ def get_top_k_module(
 ) -> TopKModule:
     if top_k_method == "MIPSBruteForceTopK":
         top_k_module = MIPSBruteForceTopK(
+            item_embeddings=item_embeddings,
+            item_ids=item_ids,
+        )
+    elif top_k_method == "MoLBruteForceTopK":
+        top_k_module = MoLBruteForceTopK(
             item_embeddings=item_embeddings,
             item_ids=item_ids,
         )
