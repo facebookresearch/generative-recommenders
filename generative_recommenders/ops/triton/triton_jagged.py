@@ -1166,6 +1166,8 @@ def _get_concat_2D_jagged_tritoncc_named_specs() -> List[VersionedSpec]:
                 (256, "*fp32"),
                 (512, "*bf16"),
                 (512, "*fp32"),
+                (1024, "*bf16"),
+                (1024, "*fp32"),
             ]
             for offsets_b_type in ["*i64", "*i32"]
             for IS_DENSE_A, IS_DENSE_B in [(False, False), (True, False), (False, True)]
@@ -1306,6 +1308,8 @@ def _get_concat_2D_jagged_tritoncc_named_specs() -> List[VersionedSpec]:
                 (256, "*fp32"),
                 (512, "*bf16"),
                 (512, "*fp32"),
+                (1024, "*bf16"),
+                (1024, "*fp32"),
             ]
             for offsets_b_type in ["*i64", "*i32"]
             for IS_DENSE_A, IS_DENSE_B in [(False, False), (True, False), (False, True)]
@@ -1502,7 +1506,7 @@ def _get_split_2D_jagged_tritoncc_named_specs() -> List[VersionedSpec]:
                 },
                 default_values=default_values,
             )
-            for BLOCK_D in [64, 128, 256, 512]
+            for BLOCK_D in [64, 128, 256, 512, 1024]
             for dtype in ["*bf16", "*fp32"]
             for offsets_a_type in ["*i64", "*i32"]
             for offsets_b_type in ["*i64", "*i32"]
@@ -1556,7 +1560,7 @@ def _get_split_2D_jagged_tritoncc_named_specs() -> List[VersionedSpec]:
                 default_values=default_values,
                 version="standalone_cint_v4",
             )
-            for BLOCK_D in [64, 128, 256, 512]
+            for BLOCK_D in [64, 128, 256, 512, 1024]
             for dtype in ["*bf16", "*fp32"]
             for offsets_a_type in ["*i64", "*i32"]
             for offsets_b_type in ["*i64", "*i32"]
