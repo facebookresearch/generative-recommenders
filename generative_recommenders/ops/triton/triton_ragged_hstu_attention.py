@@ -37,7 +37,8 @@ try:
         VersionedSpec,
     )
 except ImportError:
-    from hammer.oss.generative_recommenders.ops.triton.utils import (
+    # pyre-ignore[21]
+    from generative_recommenders.ops.triton.utils import (  # @manual
         _switch_to_contiguous_if_needed,
         autotune_max_seq_len,
         NamedSpecType,
@@ -946,6 +947,7 @@ def _ragged_hstu_attn_fwd_persistent(  # noqa C901
         tile_idx += num_progs
 
 
+# pyre-ignore[11]
 def _get_named_specs() -> List[VersionedSpec]:
     s: int = 16
     INVALID_MASK_TYPE: str = "lower_triangular"
@@ -953,6 +955,7 @@ def _get_named_specs() -> List[VersionedSpec]:
     USE_TIME_BIAS: bool = True
     USE_POS_BIAS: bool = True
 
+    # pyre-ignore[11]
     def _common_specs(dtype: str = "*bf16") -> NamedSpecType:
         return {
             "Q": (dtype, s),
