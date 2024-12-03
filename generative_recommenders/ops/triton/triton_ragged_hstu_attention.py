@@ -64,24 +64,24 @@ except ImportError:
 def _get_fw_configs() -> List[triton.Config]:  # noqa: C901
     configs = []
     if torch.version.hip:
-        for BLOCK_M in [32, 64]:
+        for BLOCK_M in [32, 64, 128]:
             for BLOCK_N in [32, 64]:
-                for num_stages in [0, 1]:
+                for num_stages in [1, 2]:
                     for num_warps in [4, 8]:
                         for matrix_instr_nonkdim in [16, 32]:
-                            for waves_per_eu in [0, 2]:
-                                configs.append(
-                                    triton.Config(
-                                        {
-                                            "BLOCK_M": BLOCK_M,
-                                            "BLOCK_N": BLOCK_N,
-                                            "matrix_instr_nonkdim": matrix_instr_nonkdim,
-                                            "waves_per_eu": waves_per_eu,
-                                        },
-                                        num_stages=num_stages,
-                                        num_warps=num_warps,
-                                    )
+                            configs.append(
+                                triton.Config(
+                                    {
+                                        "BLOCK_M": BLOCK_M,
+                                        "BLOCK_N": BLOCK_N,
+                                        "matrix_instr_nonkdim": matrix_instr_nonkdim,
+                                        "waves_per_eu": 0,
+                                        "kpack": 2,
+                                    },
+                                    num_stages=num_stages,
+                                    num_warps=num_warps,
                                 )
+                            )
     else:
         configs = [
             triton.Config(
