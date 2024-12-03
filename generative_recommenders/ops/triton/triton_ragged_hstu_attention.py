@@ -1884,23 +1884,23 @@ def _get_bw_configs() -> List[triton.Config]:
                 for num_stages in [1, 2]:
                     for num_warps in [4, 8]:
                         for matrix_instr_nonkdim in [16, 32]:
-                            for waves_per_eu in [0, 2, 4]:
-                                for sp in [True, False]:
-                                    configs.append(
-                                        triton.Config(
-                                            {
-                                                "BLOCK_M": BLOCK_M,
-                                                "BLOCK_N": BLOCK_N,
-                                                "matrix_instr_nonkdim": matrix_instr_nonkdim,
-                                                "waves_per_eu": waves_per_eu,
-                                                "SEQUENCE_PARALLEL": sp,
-                                                "UNROLL": 1,
-                                            },
-                                            num_stages=num_stages,
-                                            num_warps=num_warps,
-                                            pre_hook=_bwd_pre_hook,
-                                        )
+                            for waves_per_eu in [0, 2]:
+                                configs.append(
+                                    triton.Config(
+                                        {
+                                            "BLOCK_M": BLOCK_M,
+                                            "BLOCK_N": BLOCK_N,
+                                            "matrix_instr_nonkdim": matrix_instr_nonkdim,
+                                            "waves_per_eu": waves_per_eu,
+                                            # Disabled for now due to slow atomic add on MI300
+                                            "SEQUENCE_PARALLEL": False,
+                                            "UNROLL": 1,
+                                        },
+                                        num_stages=num_stages,
+                                        num_warps=num_warps,
+                                        pre_hook=_bwd_pre_hook,
                                     )
+                                )
         return configs
 
     configs = [
