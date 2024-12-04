@@ -997,7 +997,7 @@ def _get_named_specs() -> List[VersionedSpec]:
             "BLOCK_M": -1,  # autotuned
             "BLOCK_N": -1,  # autotuned
             "MAX_ATTN_LEN": 0,
-            "CONTEXTUAL_SEQ_LEN": 0,
+            "CONTEXTUAL_SEQ_LEN": "i32",
             "HAS_SORT_BY_LENGTH_INDICES": False,
         }
 
