@@ -277,46 +277,46 @@ def _ragged_hstu_attn_fwd_one_block(  # noqa: C901
     k = tl.load(K_block_ptr, boundary_check=(1,), padding_option="zero")
     qk = tl.dot(q, k, allow_tf32=ALLOW_TF32) * alpha
     invalid_mask = offs_m[:, None] == offs_n[None, :]
+    max_ids = seq_len
+    if CONTEXTUAL_SEQ_LEN > 0:
+        offs_m = offs_m - CONTEXTUAL_SEQ_LEN + 1
+        offs_m = tl.where(
+            offs_m > 0,
+            offs_m,
+            0,
+        )
+        offs_n = offs_n - CONTEXTUAL_SEQ_LEN + 1
+        offs_n = tl.where(
+            offs_n > 0,
+            offs_n,
+            0,
+        )
+        max_ids = max_ids - CONTEXTUAL_SEQ_LEN + 1
     if HAS_MULTIPLE_TARGETS:
-        if INVALID_MASK_TYPE == "lower_triangular":
-            offs_m = tl.where(
-                offs_m < seq_len - n_targets,
-                offs_m,
-                seq_len - n_targets,
-            )
-            offs_n = tl.where(
-                offs_n < seq_len - n_targets,
-                offs_n,
-                seq_len - n_targets,
-            )
-        elif INVALID_MASK_TYPE == "upper_triangular":
-            offs_m = tl.where(offs_m > n_targets - 1, offs_m, n_targets - 1)
-            offs_n = tl.where(offs_n > n_targets - 1, offs_n, n_targets - 1)
+        max_ids = max_ids - n_targets
+        offs_m = tl.where(
+            offs_m < max_ids,
+            offs_m,
+            max_ids,
+        )
+        offs_n = tl.where(
+            offs_n < max_ids,
+            offs_n,
+            max_ids,
+        )
     offs_n_minus_m = offs_n[None, :] - offs_m[:, None]
     if MAX_ATTN_LEN > 0:
         if INVALID_MASK_TYPE == "lower_triangular":
             invalid_mask = invalid_mask or (
                 offs_n_minus_m < 0 and offs_n_minus_m >= -MAX_ATTN_LEN
             )
-        elif INVALID_MASK_TYPE == "upper_triangular":
-            invalid_mask = invalid_mask or (
-                offs_n_minus_m > 0 and offs_n_minus_m <= MAX_ATTN_LEN
-            )
     else:
         if INVALID_MASK_TYPE == "lower_triangular":
             invalid_mask = invalid_mask or offs_n_minus_m < 0
-        elif INVALID_MASK_TYPE == "upper_triangular":
-            invalid_mask = invalid_mask or offs_n_minus_m > 0
     if CONTEXTUAL_SEQ_LEN > 0:
-        if INVALID_MASK_TYPE == "lower_triangular":
-            # offs_m[:, None]: [BLOCK_M, BLOCK_N] global row indices shortcut at seq_len - n_targets
-            # offs_n[None, :]: [BLOCK_M, BLOCK_N] global col indices shortcut at seq_len - n_targets
-            row_filter = offs_m < CONTEXTUAL_SEQ_LEN
-            if HAS_MULTIPLE_TARGETS:
-                col_filter = offs_n < seq_len - n_targets
-            else:
-                col_filter = offs_n < seq_len
-            invalid_mask = invalid_mask or (row_filter[:, None] and col_filter[None, :])
+        invalid_mask = invalid_mask or (
+            offs_m[:, None] == 0 and offs_n[None, :] < max_ids
+        )
     if ATTN_BIAS_TYPE == "fused":
         attn_bias = tl.zeros([BLOCK_M, BLOCK_N], dtype=tl.float32)
         if USE_TIME_BIAS:
@@ -502,12 +502,10 @@ def _ragged_hstu_attn_fwd_compute(  # noqa C901
         if INVALID_MASK_TYPE == "lower_triangular":
             if HAS_MULTIPLE_TARGETS:
                 if MAX_ATTN_LEN > 0:
-                    start_m_index = (
-                        seq_len - n_targets
-                        if start_m > seq_len - n_targets
-                        else start_m
-                    )
-                    low = start_m_index - MAX_ATTN_LEN
+                    if start_m > seq_len - n_targets:
+                        low = seq_len - n_targets - MAX_ATTN_LEN
+                    else:
+                        low = start_m - MAX_ATTN_LEN
                     low = low if low > 0 else 0
                 else:
                     low = 0
@@ -518,6 +516,7 @@ def _ragged_hstu_attn_fwd_compute(  # noqa C901
                     high = start_m + BLOCK_M
                 if CONTEXTUAL_SEQ_LEN > 0:
                     if start_m < CONTEXTUAL_SEQ_LEN:
+                        low = 0
                         high = seq_len - n_targets
             else:
                 if MAX_ATTN_LEN > 0:
@@ -528,6 +527,7 @@ def _ragged_hstu_attn_fwd_compute(  # noqa C901
                 high = start_m + BLOCK_M
                 if CONTEXTUAL_SEQ_LEN > 0:
                     if start_m < CONTEXTUAL_SEQ_LEN:
+                        low = 0
                         high = seq_len
         elif INVALID_MASK_TYPE == "upper_triangular":
             low = start_m
@@ -1420,6 +1420,7 @@ def _ragged_hstu_attn_bwd_one_block(  # noqa C901
     pos_offs_n,
     seq_len,
     n_targets,
+    max_ids,
     TW,
     PW,
     DTW,
@@ -1455,15 +1456,19 @@ def _ragged_hstu_attn_bwd_one_block(  # noqa C901
     mask_m = pos_offs_m < seq_len
     invalid_mask_trans = pos_offs_m[None, :] == offs_n[:, None]
     # recompute qk and silu
+    if CONTEXTUAL_SEQ_LEN > 0:
+        pos_offs_m = pos_offs_m - CONTEXTUAL_SEQ_LEN + 1
+        pos_offs_m = tl.where(
+            pos_offs_m > 0,
+            pos_offs_m,
+            0,
+        )
     if HAS_MULTIPLE_TARGETS:
-        if INVALID_MASK_TYPE == "lower_triangular":
-            pos_offs_m = tl.where(
-                pos_offs_m < seq_len - n_targets,
-                pos_offs_m,
-                seq_len - n_targets,
-            )
-        elif INVALID_MASK_TYPE == "upper_triangular":
-            pos_offs_m = tl.where(pos_offs_m > n_targets - 1, pos_offs_m, n_targets - 1)
+        pos_offs_m = tl.where(
+            pos_offs_m < max_ids,
+            pos_offs_m,
+            max_ids,
+        )
     q_trans = tl.load(
         q_ptrs_trans + start_m * stride_qm,
         mask=mask_m[None, :],
@@ -1532,28 +1537,14 @@ def _ragged_hstu_attn_bwd_one_block(  # noqa C901
                 pos_offs_m[None, :] > pos_offs_n[:, None]
                 and pos_offs_n[:, None] - pos_offs_m[None, :] >= -MAX_ATTN_LEN
             )
-        elif INVALID_MASK_TYPE == "upper_triangular":
-            invalid_mask_trans = invalid_mask_trans or (
-                pos_offs_m[None, :] < pos_offs_n[:, None]
-                and pos_offs_n[:, None] - pos_offs_m[None, :] <= MAX_ATTN_LEN
-            )
     else:
         if INVALID_MASK_TYPE == "lower_triangular":
             invalid_mask_trans = (
                 invalid_mask_trans or pos_offs_m[None, :] > pos_offs_n[:, None]
             )
-        elif INVALID_MASK_TYPE == "upper_triangular":
-            invalid_mask_trans = (
-                invalid_mask_trans or pos_offs_m[None, :] < pos_offs_n[:, None]
-            )
-    if CONTEXTUAL_SEQ_LEN > 0 and INVALID_MASK_TYPE == "lower_triangular":
-        row_filter = pos_offs_m < CONTEXTUAL_SEQ_LEN
-        if HAS_MULTIPLE_TARGETS:
-            col_filter = pos_offs_n < seq_len - n_targets
-        else:
-            col_filter = pos_offs_n < seq_len
+    if CONTEXTUAL_SEQ_LEN > 0:
         invalid_mask_trans = invalid_mask_trans or (
-            row_filter[None, :] and col_filter[:, None]
+            pos_offs_m[None, :] == 0 and pos_offs_n[:, None] < max_ids
         )
     silu_trans = tl.where(invalid_mask_trans, silu_trans, 0)
     silu_trans = silu_trans.to(k.dtype)
@@ -1697,7 +1688,7 @@ def _ragged_hstu_attn_bwd_one_col_block(  # noqa C901
             contextual_block_end = tl.cdiv(CONTEXTUAL_SEQ_LEN, BLOCK_M) * BLOCK_M
             if low < contextual_block_end:
                 low = contextual_block_end
-    elif INVALID_MASK_TYPE == "upper_triangular":
+    else:
         low = 0
         high = start_n + BLOCK_N
 
@@ -1738,17 +1729,24 @@ def _ragged_hstu_attn_bwd_one_col_block(  # noqa C901
     # k and v stay in SRAM throughout
     k = tl.load(k_ptrs, mask=mask_n[:, None], other=0.0)
     v = tl.load(v_ptrs, mask=mask_n[:, None], other=0.0)
-    if HAS_MULTIPLE_TARGETS:
-        if INVALID_MASK_TYPE == "lower_triangular":
-            pos_offs_n = tl.where(
-                offs_n < seq_len - n_targets,
-                offs_n,
-                seq_len - n_targets,
-            )
-        elif INVALID_MASK_TYPE == "upper_triangular":
-            pos_offs_n = tl.where(offs_n > n_targets - 1, offs_n, n_targets - 1)
+    max_ids = seq_len
+    if CONTEXTUAL_SEQ_LEN > 0:
+        pos_offs_n = offs_n - CONTEXTUAL_SEQ_LEN + 1
+        pos_offs_n = tl.where(
+            pos_offs_n > 0,
+            pos_offs_n,
+            0,
+        )
+        max_ids = max_ids - CONTEXTUAL_SEQ_LEN + 1
     else:
         pos_offs_n = offs_n
+    if HAS_MULTIPLE_TARGETS:
+        max_ids = max_ids - n_targets
+        pos_offs_n = tl.where(
+            offs_n < max_ids,
+            offs_n,
+            max_ids,
+        )
     # loop over rows
     if CONTEXTUAL_SEQ_LEN > 0 and INVALID_MASK_TYPE == "lower_triangular":
         for start_m in range(0, CONTEXTUAL_SEQ_LEN, BLOCK_M):
@@ -1769,10 +1767,10 @@ def _ragged_hstu_attn_bwd_one_col_block(  # noqa C901
                 dv=dv,
                 k=k,
                 v=v,
-                # pyre-fixme[61]: `pos_offs_n` is undefined, or not always defined.
                 pos_offs_n=pos_offs_n,
                 seq_len=seq_len,
                 n_targets=n_targets,
+                max_ids=max_ids,
                 TW=TW,
                 PW=PW,
                 DTW=DTW,
@@ -1804,7 +1802,7 @@ def _ragged_hstu_attn_bwd_one_col_block(  # noqa C901
                 BLOCK_N=BLOCK_N,
                 ATOMIC_ADD=ATOMIC_ADD,
             )
-    # pyre-ignore[61]
+    # pyre-ignore
     for start_m in tl.range(low, high, BLOCK_M, loop_unroll_factor=UNROLL):
         start_m = tl.multiple_of(start_m, BLOCK_M)
         dk, dv = _ragged_hstu_attn_bwd_one_block(
@@ -1823,10 +1821,10 @@ def _ragged_hstu_attn_bwd_one_col_block(  # noqa C901
             dv=dv,
             k=k,
             v=v,
-            # pyre-fixme[61]: `pos_offs_n` is undefined, or not always defined.
             pos_offs_n=pos_offs_n,
             seq_len=seq_len,
             n_targets=n_targets,
+            max_ids=max_ids,
             TW=TW,
             PW=PW,
             DTW=DTW,
@@ -1852,7 +1850,7 @@ def _ragged_hstu_attn_bwd_one_col_block(  # noqa C901
             FUSED_BIAS_BWD=FUSED_BIAS_BWD,
             HAS_MAX_POS_IND=HAS_MAX_POS_IND,
             HAS_MULTIPLE_TARGETS=HAS_MULTIPLE_TARGETS,
-            CONTEXTUAL_SEQ_LEN=CONTEXTUAL_SEQ_LEN,
+            CONTEXTUAL_SEQ_LEN=0,
             ALLOW_TF32=ALLOW_TF32,
             BLOCK_M=BLOCK_M,
             BLOCK_N=BLOCK_N,
