@@ -1035,8 +1035,8 @@ def _get_named_specs() -> List[VersionedSpec]:
         + [
             VersionedSpec(
                 spec={
-                    "TW": ("*bf16", s),
-                    "PW": ("*bf16", s),
+                    "TW": (dtype, s),
+                    "PW": (dtype, s),
                     "delta_x_offsets": ("*i64", s, False),
                     "num_targets": ("*i64", s, False),
                     "HAS_MAX_POS_IND": has_max_pos_ind,
@@ -1047,18 +1047,19 @@ def _get_named_specs() -> List[VersionedSpec]:
                     "BLOCK_D_Q": block_dq,
                     "BLOCK_D_V": block_dv,
                     "ALLOW_TF32": True,
-                    **_common_specs(dtype="*bf16"),
+                    **_common_specs(dtype=dtype),
                 },
                 default_values=default_values,
             )
+            for dtype in ["*bf16", "*fp16"]
             for block_dq, block_dv in [(128, 128), (32, 64)]
             for has_max_pos_ind in [False, True]
         ]
         + [
             VersionedSpec(
                 spec={
-                    "TW": "*bf16",
-                    "PW": "*bf16",
+                    "TW": dtype,
+                    "PW": dtype,
                     "delta_x_offsets": ("*i64", s, is_delta_q),
                     "num_targets": ("*i64", s, True),
                     "HAS_MAX_POS_IND": has_max_pos_ind,
@@ -1069,10 +1070,11 @@ def _get_named_specs() -> List[VersionedSpec]:
                     "BLOCK_D_Q": block,
                     "BLOCK_D_V": block,
                     "ALLOW_TF32": True,
-                    **_common_specs(dtype="*bf16"),
+                    **_common_specs(dtype=dtype),
                 },
                 default_values=default_values,
             )
+            for dtype in ["*bf16", "*fp16"]
             for has_max_pos_ind in [True, False]
             for block in [64, 128]
             for is_delta_q in [True, False]
@@ -1080,8 +1082,8 @@ def _get_named_specs() -> List[VersionedSpec]:
         + [
             VersionedSpec(
                 spec={
-                    "TW": "*bf16",
-                    "PW": "*bf16",
+                    "TW": dtype,
+                    "PW": dtype,
                     "delta_x_offsets": ("*i64", s, is_delta_q),
                     "num_targets": ("*i64", s, True),
                     "HAS_MAX_POS_IND": False,
@@ -1092,10 +1094,84 @@ def _get_named_specs() -> List[VersionedSpec]:
                     "BLOCK_D_Q": block,
                     "BLOCK_D_V": block,
                     "ALLOW_TF32": True,
-                    **_common_specs(dtype="*bf16"),
+                    **_common_specs(dtype=dtype),
                 },
                 default_values=default_values,
             )
+            for dtype in ["*bf16", "*fp16"]
+            for block in [64, 128]
+            for is_delta_q in [True, False]
+        ]
+        + [
+            VersionedSpec(
+                spec={
+                    "TW": (dtype, s),
+                    "PW": (dtype, s),
+                    "delta_x_offsets": ("*i64", s, False),
+                    "num_targets": ("*i64", s, False),
+                    "HAS_MAX_POS_IND": has_max_pos_ind,
+                    "HAS_MULTIPLE_TARGETS": False,
+                    "ATTN_BIAS_TYPE": "fused",
+                    "BUCKET_FN": "sqrt",
+                    "IS_DELTA_Q": False,
+                    "BLOCK_D_Q": block_dq,
+                    "BLOCK_D_V": block_dv,
+                    "ALLOW_TF32": True,
+                    **_common_specs(dtype=dtype),
+                },
+                default_values=default_values,
+                version="standalone_cint_v5",
+            )
+            for dtype in ["*bf16", "*fp16"]
+            for block_dq, block_dv in [(128, 128), (32, 64)]
+            for has_max_pos_ind in [False, True]
+        ]
+        + [
+            VersionedSpec(
+                spec={
+                    "TW": dtype,
+                    "PW": dtype,
+                    "delta_x_offsets": ("*i64", s, is_delta_q),
+                    "num_targets": ("*i64", s, True),
+                    "HAS_MAX_POS_IND": has_max_pos_ind,
+                    "HAS_MULTIPLE_TARGETS": True,
+                    "ATTN_BIAS_TYPE": "fused",
+                    "BUCKET_FN": "sqrt",
+                    "IS_DELTA_Q": is_delta_q,
+                    "BLOCK_D_Q": block,
+                    "BLOCK_D_V": block,
+                    "ALLOW_TF32": True,
+                    **_common_specs(dtype=dtype),
+                },
+                default_values=default_values,
+                version="standalone_cint_v5",
+            )
+            for dtype in ["*bf16", "*fp16"]
+            for has_max_pos_ind in [True, False]
+            for block in [64, 128]
+            for is_delta_q in [True, False]
+        ]
+        + [
+            VersionedSpec(
+                spec={
+                    "TW": dtype,
+                    "PW": dtype,
+                    "delta_x_offsets": ("*i64", s, is_delta_q),
+                    "num_targets": ("*i64", s, True),
+                    "HAS_MAX_POS_IND": False,
+                    "HAS_MULTIPLE_TARGETS": True,
+                    "ATTN_BIAS_TYPE": "none",
+                    "BUCKET_FN": "none",
+                    "IS_DELTA_Q": is_delta_q,
+                    "BLOCK_D_Q": block,
+                    "BLOCK_D_V": block,
+                    "ALLOW_TF32": True,
+                    **_common_specs(dtype=dtype),
+                },
+                default_values=default_values,
+                version="standalone_cint_v5",
+            )
+            for dtype in ["*bf16", "*fp16"]
             for block in [64, 128]
             for is_delta_q in [True, False]
         ]
