@@ -49,7 +49,6 @@ from hammer.oss.generative_recommenders.ops.triton.triton_addmm import (
 
 def _get_ln_mul_dropout_named_specs() -> List[VersionedSpec]:
     s: int = 16
-    dtype: str = "*bf16"
     TRAINING: bool = False
     return (
         [
@@ -74,6 +73,7 @@ def _get_ln_mul_dropout_named_specs() -> List[VersionedSpec]:
                     "CONCAT_UX": CONCAT_UX,
                 }
             )
+            for dtype in ["*bf16", "*fp16"]
             for BLOCK_D in [256, 512]
             for CONCAT_UX in [True, False]
         ]
@@ -87,6 +87,33 @@ def _get_ln_mul_dropout_named_specs() -> List[VersionedSpec]:
                     "B": (dtype, s),
                     "Mean": (dtype, s),
                     "Rstd": (dtype, s),
+                    "D": ("i32", s),
+                    "eps": "fp32",
+                    "seed": "i64",
+                    "dropout_ratio": "fp32",
+                    "stride_x": ("i32", s),
+                    "stride_u": ("i32", s),
+                    "stride_y": ("i32", s),
+                    "BLOCK_D": BLOCK_D,
+                    "TRAINING": TRAINING,
+                    "CONCAT_UX": CONCAT_UX,
+                },
+                version="standalone_cint_v5",
+            )
+            for dtype in ["*bf16", "*fp16"]
+            for BLOCK_D in [256, 512]
+            for CONCAT_UX in [True, False]
+        ]
+        + [
+            VersionedSpec(
+                spec={
+                    "X": ("*bf16", s),
+                    "U": ("*bf16", s),
+                    "Y": ("*bf16", s),
+                    "W": ("*bf16", s),
+                    "B": ("*bf16", s),
+                    "Mean": ("*bf16", s),
+                    "Rstd": ("*bf16", s),
                     "D": ("i32", s),
                     "eps": "fp32",
                     "seed": "i64",
@@ -106,13 +133,13 @@ def _get_ln_mul_dropout_named_specs() -> List[VersionedSpec]:
         + [
             VersionedSpec(
                 spec={
-                    "X": (dtype, s),
-                    "U": (dtype, s),
-                    "Y": (dtype, s),
-                    "W": (dtype, s),
-                    "B": (dtype, s),
-                    "Mean": (dtype, s),
-                    "Rstd": (dtype, s),
+                    "X": ("*bf16", s),
+                    "U": ("*bf16", s),
+                    "Y": ("*bf16", s),
+                    "W": ("*bf16", s),
+                    "B": ("*bf16", s),
+                    "Mean": ("*bf16", s),
+                    "Rstd": ("*bf16", s),
                     "D": ("i32", s),
                     "eps": "fp32",
                     "seed": "i64",
@@ -132,13 +159,13 @@ def _get_ln_mul_dropout_named_specs() -> List[VersionedSpec]:
         + [
             VersionedSpec(
                 spec={
-                    "X": (dtype, s),
-                    "U": (dtype, s),
-                    "Y": (dtype, s),
-                    "W": (dtype, s),
-                    "B": (dtype, s),
-                    "Mean": (dtype, s, False),
-                    "Rstd": (dtype, s, False),
+                    "X": ("*bf16", s),
+                    "U": ("*bf16", s),
+                    "Y": ("*bf16", s),
+                    "W": ("*bf16", s),
+                    "B": ("*bf16", s),
+                    "Mean": ("*bf16", s, False),
+                    "Rstd": ("*bf16", s, False),
                     "D": ("i32", s),
                     "eps": "fp32",
                     "seed": "i64",
@@ -160,12 +187,11 @@ def _get_ln_mul_dropout_named_specs() -> List[VersionedSpec]:
 
 def _get_group_norm_mul_dropout_named_specs() -> List[VersionedSpec]:
     s: int = 16
-    dtype: str = "*bf16"
     TRAINING: bool = False
     return (
         [
             VersionedSpec(
-                spec={  # pyre-ignore [6]
+                spec={
                     "X": (dtype, s),
                     "U": (dtype, s),
                     "Y": (dtype, s),
@@ -187,34 +213,7 @@ def _get_group_norm_mul_dropout_named_specs() -> List[VersionedSpec]:
                     "CONCAT_UX": CONCAT_UX,
                 }
             )
-            for BLOCK_D in [128, 256, 512]
-            for CONCAT_UX in [True, False]
-        ]
-        + [
-            VersionedSpec(
-                spec={  # pyre-ignore [6]
-                    "X": (dtype, s),
-                    "U": (dtype, s),
-                    "Y": (dtype, s),
-                    "W": (dtype, s),
-                    "B": (dtype, s),
-                    "Mean": (dtype, s),
-                    "Rstd": (dtype, s),
-                    "D": ("i32", s),
-                    "Heads": 4,
-                    "eps": "fp32",
-                    "seed": "i64",
-                    "dropout_ratio": "fp32",
-                    "stride_x": ("i32", s),
-                    "stride_u": ("i32", s),
-                    "stride_y": ("i32", s),
-                    "BLOCK_D": BLOCK_D,
-                    "BLOCK_H": 4,
-                    "TRAINING": TRAINING,
-                    "CONCAT_UX": CONCAT_UX,
-                },
-                version="amd_standalone_cint_v2",
-            )
+            for dtype in ["*bf16", "*fp16"]
             for BLOCK_D in [128, 256, 512]
             for CONCAT_UX in [True, False]
         ]
@@ -241,6 +240,63 @@ def _get_group_norm_mul_dropout_named_specs() -> List[VersionedSpec]:
                     "TRAINING": TRAINING,
                     "CONCAT_UX": CONCAT_UX,
                 },
+                version="standalone_cint_v5",
+            )
+            for dtype in ["*bf16", "*fp16"]
+            for BLOCK_D in [128, 256, 512]
+            for CONCAT_UX in [True, False]
+        ]
+        + [
+            VersionedSpec(
+                spec={
+                    "X": ("*bf16", s),
+                    "U": ("*bf16", s),
+                    "Y": ("*bf16", s),
+                    "W": ("*bf16", s),
+                    "B": ("*bf16", s),
+                    "Mean": ("*bf16", s),
+                    "Rstd": ("*bf16", s),
+                    "D": ("i32", s),
+                    "Heads": 4,
+                    "eps": "fp32",
+                    "seed": "i64",
+                    "dropout_ratio": "fp32",
+                    "stride_x": ("i32", s),
+                    "stride_u": ("i32", s),
+                    "stride_y": ("i32", s),
+                    "BLOCK_D": BLOCK_D,
+                    "BLOCK_H": 4,
+                    "TRAINING": TRAINING,
+                    "CONCAT_UX": CONCAT_UX,
+                },
+                version="amd_standalone_cint_v2",
+            )
+            for BLOCK_D in [128, 256, 512]
+            for CONCAT_UX in [True, False]
+        ]
+        + [
+            VersionedSpec(
+                spec={
+                    "X": ("*bf16", s),
+                    "U": ("*bf16", s),
+                    "Y": ("*bf16", s),
+                    "W": ("*bf16", s),
+                    "B": ("*bf16", s),
+                    "Mean": ("*bf16", s),
+                    "Rstd": ("*bf16", s),
+                    "D": ("i32", s),
+                    "Heads": 4,
+                    "eps": "fp32",
+                    "seed": "i64",
+                    "dropout_ratio": "fp32",
+                    "stride_x": ("i32", s),
+                    "stride_u": ("i32", s),
+                    "stride_y": ("i32", s),
+                    "BLOCK_D": BLOCK_D,
+                    "BLOCK_H": 4,
+                    "TRAINING": TRAINING,
+                    "CONCAT_UX": CONCAT_UX,
+                },
                 version="standalone_cint_v1_gn",
             )
             for BLOCK_D in [128, 256, 512]
@@ -248,14 +304,14 @@ def _get_group_norm_mul_dropout_named_specs() -> List[VersionedSpec]:
         ]
         + [
             VersionedSpec(
-                spec={  # pyre-ignore [6]
-                    "X": (dtype, s),
-                    "U": (dtype, s),
-                    "Y": (dtype, s),
-                    "W": (dtype, s),
-                    "B": (dtype, s),
-                    "Mean": (dtype, s, False),
-                    "Rstd": (dtype, s, False),
+                spec={
+                    "X": ("*bf16", s),
+                    "U": ("*bf16", s),
+                    "Y": ("*bf16", s),
+                    "W": ("*bf16", s),
+                    "B": ("*bf16", s),
+                    "Mean": ("*bf16", s, False),
+                    "Rstd": ("*bf16", s, False),
                     "D": ("i32", s),
                     "Heads": 4,
                     "eps": "fp32",
@@ -279,7 +335,6 @@ def _get_group_norm_mul_dropout_named_specs() -> List[VersionedSpec]:
 
 def _get_addmm_named_specs() -> List[VersionedSpec]:
     s: int = 16
-    dtype: str = "*bf16"
     default_values = {
         "BROADCAST_Y": 0,
     }
@@ -287,10 +342,10 @@ def _get_addmm_named_specs() -> List[VersionedSpec]:
         [
             VersionedSpec(
                 spec={
-                    "x_ptr": (dtype, s),
-                    "w_ptr": (dtype, s),
-                    "y_ptr": (dtype, s),
-                    "z_ptr": (dtype, s),
+                    "x_ptr": ("*bf16", s),
+                    "w_ptr": ("*bf16", s),
+                    "y_ptr": ("*bf16", s),
+                    "z_ptr": ("*bf16", s),
                     "M": "i32",
                     "N": ("i32", s),
                     "K": ("i32", s),
@@ -316,10 +371,10 @@ def _get_addmm_named_specs() -> List[VersionedSpec]:
         + [
             VersionedSpec(
                 spec={
-                    "x_ptr": (dtype, s),
-                    "w_ptr": (dtype, s),
-                    "y_ptr": (dtype, s),
-                    "z_ptr": (dtype, s),
+                    "x_ptr": ("*bf16", s),
+                    "w_ptr": ("*bf16", s),
+                    "y_ptr": ("*bf16", s),
+                    "z_ptr": ("*bf16", s),
                     "M": "i32",
                     "N": ("i32", s),
                     "K": ("i32", s),
@@ -370,6 +425,7 @@ def _get_addmm_named_specs() -> List[VersionedSpec]:
                 },
                 default_values=default_values,
             )
+            for dtype in ["*bf16", "*fp16"]
             for broadcast_y in [True, False]
         ]
         + [
@@ -379,6 +435,37 @@ def _get_addmm_named_specs() -> List[VersionedSpec]:
                     "w_ptr": (dtype, s),
                     "y_ptr": (dtype, s),
                     "z_ptr": (dtype, s),
+                    "M": "i32",
+                    "N": ("i32", s),
+                    "K": ("i32", s),
+                    "stride_xm": ("i32", s),
+                    "stride_xk": ("i32", 1),
+                    "stride_wk": ("i32", s),
+                    "stride_wn": ("i32", 1),
+                    "stride_ym": ("i32", s),
+                    "stride_yn": ("i32", 1),
+                    "stride_zm": ("i32", s),
+                    "stride_zn": ("i32", 1),
+                    "BLOCK_M": -1,  # autotuned
+                    "BLOCK_N": -1,  # autotuned
+                    "BLOCK_K": -1,  # autotuned
+                    "GROUP_M": -1,  # autotuned
+                    "ALLOW_TF32": True,
+                    "BROADCAST_Y": broadcast_y,
+                },
+                version="standalone_cint_v5",
+                default_values=default_values,
+            )
+            for dtype in ["*bf16", "*fp16"]
+            for broadcast_y in [True, False]
+        ]
+        + [
+            VersionedSpec(
+                spec={
+                    "x_ptr": ("*bf16", s),
+                    "w_ptr": ("*bf16", s),
+                    "y_ptr": ("*bf16", s),
+                    "z_ptr": ("*bf16", s),
                     "M": "i32",
                     "N": ("i32", s),
                     "K": ("i32", s),

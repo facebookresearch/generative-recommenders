@@ -331,7 +331,6 @@ def _get_bmm_configs() -> List[triton.Config]:
 
 def _get_bmm_tritoncc_named_specs() -> List[VersionedSpec]:
     s: int = 16
-    dtype: str = "*bf16"
     ALLOW_TF32: bool = True
     return (
         [
@@ -362,6 +361,7 @@ def _get_bmm_tritoncc_named_specs() -> List[VersionedSpec]:
             for ik in [("i32", s), "i32"]
             for i in [("i32", s), "i32"]
             for has_bias in [True, False]
+            for dtype in ["*bf16", "*fp16"]
             # The spec `("i32", s)` improve vectorization and makes the kernel faster.
             # The second spec does not have such constraints but works on general sizes.
         ]
@@ -373,6 +373,37 @@ def _get_bmm_tritoncc_named_specs() -> List[VersionedSpec]:
                     "Dense": (dtype, s),
                     "Bias": (dtype, s),
                     "Out": (dtype, s),
+                    "AUTOTUNE_MAX_SEQ_LEN": "i32",
+                    "N": i,
+                    "K": ik,
+                    "stride_jm": ik,
+                    "stride_db": i,
+                    "stride_dk": i,
+                    "stride_dn": stride_dn,
+                    "stride_bias_b": i,
+                    "stride_om": i,
+                    "ALLOW_TF32": ALLOW_TF32,
+                    "HAS_BIAS": has_bias,
+                    "BLOCK_M": -1,  # autotuned
+                    "BLOCK_N": -1,  # autotuned
+                    "BLOCK_K": -1,  # autotuned
+                },
+                version="standalone_cint_v5",
+            )
+            for stride_dn in [("i32", 1), ("i32", s)]
+            for ik in [("i32", s), "i32"]
+            for i in [("i32", s), "i32"]
+            for has_bias in [True, False]
+            for dtype in ["*bf16", "*fp16"]
+        ]
+        + [
+            VersionedSpec(
+                spec={
+                    "seq_offsets": ("*i64", s),
+                    "Jagged": ("*bf16", s),
+                    "Dense": ("*bf16", s),
+                    "Bias": ("*bf16", s),
+                    "Out": ("*bf16", s),
                     "AUTOTUNE_MAX_SEQ_LEN": "i32",
                     "N": i,
                     "K": ik,
@@ -401,10 +432,10 @@ def _get_bmm_tritoncc_named_specs() -> List[VersionedSpec]:
             VersionedSpec(
                 spec={
                     "seq_offsets": ("*i64", s),
-                    "Jagged": (dtype, s),
-                    "Dense": (dtype, s),
-                    "Bias": (dtype, s),
-                    "Out": (dtype, s),
+                    "Jagged": ("*bf16", s),
+                    "Dense": ("*bf16", s),
+                    "Bias": ("*bf16", s),
+                    "Out": ("*bf16", s),
                     "AUTOTUNE_MAX_SEQ_LEN": i,
                     "N": i,
                     "K": i,
@@ -431,10 +462,10 @@ def _get_bmm_tritoncc_named_specs() -> List[VersionedSpec]:
             VersionedSpec(
                 spec={
                     "seq_offsets": ("*i64", s),
-                    "Jagged": (dtype, s),
-                    "Dense": (dtype, s),
-                    "Bias": (dtype, s),
-                    "Out": (dtype, s),
+                    "Jagged": ("*bf16", s),
+                    "Dense": ("*bf16", s),
+                    "Bias": ("*bf16", s),
+                    "Out": ("*bf16", s),
                     "AUTOTUNE_MAX_SEQ_LEN": "i32",
                     "N": i,
                     "K": ik,
@@ -461,10 +492,10 @@ def _get_bmm_tritoncc_named_specs() -> List[VersionedSpec]:
             VersionedSpec(
                 spec={
                     "seq_offsets": ("*i64", s),
-                    "Jagged": (dtype, s),
-                    "Dense": (dtype, s),
-                    "Bias": (dtype, s),
-                    "Out": (dtype, s),
+                    "Jagged": ("*bf16", s),
+                    "Dense": ("*bf16", s),
+                    "Bias": ("*bf16", s),
+                    "Out": ("*bf16", s),
                     "AUTOTUNE_MAX_SEQ_LEN": "i32",
                     "N": i,
                     "K": ik,
@@ -1159,14 +1190,62 @@ def _get_concat_2D_jagged_tritoncc_named_specs() -> List[VersionedSpec]:
             )
             for BLOCK_D, dtype in [
                 (64, "*bf16"),
+                (64, "*fp16"),
                 (64, "*fp32"),
                 (128, "*fp32"),
+                (128, "*fp16"),
                 (128, "*bf16"),
                 (256, "*bf16"),
+                (256, "*fp16"),
                 (256, "*fp32"),
                 (512, "*bf16"),
+                (512, "*fp16"),
                 (512, "*fp32"),
                 (1024, "*bf16"),
+                (1024, "*fp16"),
+                (1024, "*fp32"),
+            ]
+            for offsets_b_type in ["*i64", "*i32"]
+            for IS_DENSE_A, IS_DENSE_B in [(False, False), (True, False), (False, True)]
+            for IS_REPLACE in [True, False]
+        ]
+        + [
+            VersionedSpec(
+                spec={
+                    "OffsetsA": "*i64",
+                    "ValuesA": (dtype, s),
+                    "OffsetsB": offsets_b_type,
+                    "ValuesB": (dtype, s),
+                    "DenseSize": "i32",
+                    "Out": (dtype, s),
+                    "D": "i32",
+                    "stride_ad": "i32",
+                    "stride_bd": "i32",
+                    "stride_dense_batch": "i32",
+                    "stride_od": "i32",
+                    "IS_DENSE_A": IS_DENSE_A,
+                    "IS_DENSE_B": IS_DENSE_B,
+                    "BLOCK_D": BLOCK_D,
+                    "IS_REPLACE": IS_REPLACE,
+                },
+                default_values=default_values,
+                version="standalone_cint_v5",
+            )
+            for BLOCK_D, dtype in [
+                (64, "*bf16"),
+                (64, "*fp16"),
+                (64, "*fp32"),
+                (128, "*fp32"),
+                (128, "*fp16"),
+                (128, "*bf16"),
+                (256, "*bf16"),
+                (256, "*fp16"),
+                (256, "*fp32"),
+                (512, "*bf16"),
+                (512, "*fp16"),
+                (512, "*fp32"),
+                (1024, "*bf16"),
+                (1024, "*fp16"),
                 (1024, "*fp32"),
             ]
             for offsets_b_type in ["*i64", "*i32"]
@@ -1507,7 +1586,34 @@ def _get_split_2D_jagged_tritoncc_named_specs() -> List[VersionedSpec]:
                 default_values=default_values,
             )
             for BLOCK_D in [64, 128, 256, 512, 1024]
-            for dtype in ["*bf16", "*fp32"]
+            for dtype in ["*bf16", "*fp32", "*fp16"]
+            for offsets_a_type in ["*i64", "*i32"]
+            for offsets_b_type in ["*i64", "*i32"]
+            for IS_DENSE_A, IS_DENSE_B in [(False, False), (True, False), (False, True)]
+        ]
+        + [
+            VersionedSpec(
+                spec={
+                    "JaggedIn": (dtype, s),
+                    "DenseSize": "i32",
+                    "OffsetsA": offsets_a_type,
+                    "OffsetsB": offsets_b_type,
+                    "OutA": (dtype, s),
+                    "OutB": (dtype, s),
+                    "D": ("i32", s),
+                    "stride_id": ("i32", s),
+                    "stride_ad": ("i32", s),
+                    "stride_bd": ("i32", s),
+                    "IS_DENSE_A": IS_DENSE_A,
+                    "IS_DENSE_B": IS_DENSE_B,
+                    "BLOCK_D": BLOCK_D,
+                    "IS_REPLACE": False,
+                },
+                default_values=default_values,
+                version="standalone_cint_v5",
+            )
+            for BLOCK_D in [64, 128, 256, 512, 1024]
+            for dtype in ["*bf16", "*fp32", "*fp16"]
             for offsets_a_type in ["*i64", "*i32"]
             for offsets_b_type in ["*i64", "*i32"]
             for IS_DENSE_A, IS_DENSE_B in [(False, False), (True, False), (False, True)]
