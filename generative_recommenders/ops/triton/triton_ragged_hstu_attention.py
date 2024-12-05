@@ -366,7 +366,7 @@ def _ragged_hstu_attn_fwd_one_block(  # noqa: C901
         )
         qk = qk + attn_bias
     # pyre-fixme[16]: Module `math` has no attribute `fast_dividef`.
-    silu = fast_dividef(qk, 1.0 + tl.exp(-qk)) * (1.0 / MAX_SEQ_LEN)
+    silu = fast_dividef(qk, 1.0 + tl.exp2(-1.44269504 * qk)) * (1.0 / MAX_SEQ_LEN)
     silu = tl.where(invalid_mask, silu, 0)
     v = tl.load(V_block_ptr, boundary_check=(0,), padding_option="zero")
     silu = silu.to(v.dtype)
@@ -1529,7 +1529,7 @@ def _ragged_hstu_attn_bwd_one_block(  # noqa C901
         )
         qk_trans = qk_trans + attn_bias_trans
     # pyre-fixme[16]: Module `math` has no attribute `fast_dividef`.
-    sig_trans = fast_dividef(1.0, 1.0 + tl.exp(-qk_trans))
+    sig_trans = fast_dividef(1.0, 1.0 + tl.exp2(-1.44269504 * qk_trans))
     silu_trans = qk_trans * sig_trans * (1.0 / MAX_SEQ_LEN)
     if MAX_ATTN_LEN > 0:
         if INVALID_MASK_TYPE == "lower_triangular":
@@ -2974,7 +2974,7 @@ def _attn_bias_bwd(  # noqa C901
                 qk = tl.dot(q, tl.trans(k), allow_tf32=ALLOW_TF32) * alpha
                 qk = qk + attn_bias
                 # pyre-fixme[16]: Module `math` has no attribute `fast_dividef`.
-                sig = fast_dividef(1.0, 1.0 + tl.exp(-qk))
+                sig = fast_dividef(1.0, 1.0 + tl.exp2(-1.44269504 * qk))
                 do = tl.load(
                     do_ptrs + off_h * stride_doh,
                     mask=mask_m[:, None],
