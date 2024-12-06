@@ -19,7 +19,7 @@ import dataclasses
 import logging
 
 from dataclasses import dataclass
-from typing import Any, Dict, List, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import torch
 
@@ -85,8 +85,8 @@ def triton_autotune(
     reset_to_zero=None,
     # pyre-ignore
     restore_value=None,
-    warmup: int = 25,
-    rep: int = 100,
+    warmup: Optional[int] = None,
+    rep: Optional[int] = None,
 ):
     # pyre-ignore
     def decorator(fn):
