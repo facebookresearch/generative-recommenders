@@ -212,7 +212,9 @@ class _JaggedBiasToDenseFunction(torch.autograd.Function):
 
     @staticmethod
     # pyre-ignore[14]
-    def backward(ctx, d_dense_bias: torch.Tensor) -> Tuple[
+    def backward(
+        ctx, d_dense_bias: torch.Tensor
+    ) -> Tuple[
         None,
         None,
         None,
@@ -279,7 +281,9 @@ class _DenseBiasToJaggedFunction(torch.autograd.Function):
 
     @staticmethod
     # pyre-ignore[14]
-    def backward(ctx, d_jagged: torch.Tensor) -> Tuple[
+    def backward(
+        ctx, d_jagged: torch.Tensor
+    ) -> Tuple[
         None,
         None,
         torch.Tensor,
@@ -2538,7 +2542,6 @@ class _JaggedRemoveFirstOrLast1D(torch.autograd.Function):
         offsets: torch.Tensor,
         max_seq_len: int,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
-
         B = lengths.size(0)
         N = values.size(0)
 
@@ -2570,7 +2573,6 @@ class _JaggedRemoveFirstOrLast1D(torch.autograd.Function):
 
     @staticmethod
     def backward(ctx, *d_values_in) -> Tuple[torch.Tensor, None, None, None]:
-
         d_values_no_first, d_values_no_last = d_values_in
         offsets, lengths = ctx.saved_tensors
         max_seq_len = ctx.max_seq_len

@@ -47,7 +47,6 @@ TIMESTAMPS_KEY = "timestamps"
 
 
 class RelativeAttentionBiasModule(torch.nn.Module):
-
     @abc.abstractmethod
     def forward(
         self,
@@ -63,7 +62,6 @@ class RelativeAttentionBiasModule(torch.nn.Module):
 
 
 class RelativePositionalBias(RelativeAttentionBiasModule):
-
     def __init__(self, max_seq_len: int) -> None:
         super().__init__()
 
@@ -445,7 +443,6 @@ class SequentialTransductionUnitJagged(torch.nn.Module):
 
 
 class HSTUJagged(torch.nn.Module):
-
     def __init__(
         self,
         modules: List[SequentialTransductionUnitJagged],

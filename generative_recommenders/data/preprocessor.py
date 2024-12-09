@@ -430,10 +430,14 @@ class AmazonDataProcessor(DataProcessor):
         return num_unique_items
 
 
-def get_common_preprocessors() -> Dict[
-    str,
-    Union[AmazonDataProcessor, MovielensDataProcessor, MovielensSyntheticDataProcessor],
-]:
+def get_common_preprocessors() -> (
+    Dict[
+        str,
+        Union[
+            AmazonDataProcessor, MovielensDataProcessor, MovielensSyntheticDataProcessor
+        ],
+    ]
+):
     ml_1m_dp = MovielensDataProcessor(  # pyre-ignore [45]
         "http://files.grouplens.org/datasets/movielens/ml-1m.zip",
         "tmp/movielens1m.zip",

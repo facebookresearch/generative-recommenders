@@ -22,7 +22,6 @@ from generative_recommenders.modeling.initialization import truncated_normal
 
 
 class EmbeddingModule(torch.nn.Module):
-
     @abc.abstractmethod
     def debug_str(self) -> str:
         pass
@@ -38,7 +37,6 @@ class EmbeddingModule(torch.nn.Module):
 
 
 class LocalEmbeddingModule(EmbeddingModule):
-
     def __init__(
         self,
         num_items: int,
@@ -74,7 +72,6 @@ class LocalEmbeddingModule(EmbeddingModule):
 
 
 class CategoricalEmbeddingModule(EmbeddingModule):
-
     def __init__(
         self,
         num_items: int,

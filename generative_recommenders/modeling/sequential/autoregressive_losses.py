@@ -27,7 +27,6 @@ from torch.utils.checkpoint import checkpoint
 
 
 class NegativesSampler(torch.nn.Module):
-
     def __init__(self, l2_norm: bool, l2_norm_eps: float) -> None:
         super().__init__()
 
@@ -72,7 +71,6 @@ class NegativesSampler(torch.nn.Module):
 
 
 class LocalNegativesSampler(NegativesSampler):
-
     def __init__(
         self,
         num_items: int,
@@ -124,7 +122,6 @@ class LocalNegativesSampler(NegativesSampler):
 
 
 class InBatchNegativesSampler(NegativesSampler):
-
     def __init__(
         self,
         l2_norm: bool,
@@ -205,7 +202,6 @@ class InBatchNegativesSampler(NegativesSampler):
 
 
 class AutoregressiveLoss(torch.nn.Module):
-
     @abc.abstractmethod
     def jagged_forward(
         self,

@@ -27,7 +27,6 @@ from torch.utils.checkpoint import checkpoint
 
 
 class SampledSoftmaxLoss(AutoregressiveLoss):
-
     def __init__(
         self,
         num_to_sample: int,

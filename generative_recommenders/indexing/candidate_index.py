@@ -24,7 +24,6 @@ from generative_recommenders.rails.indexing.candidate_index import TopKModule
 
 
 class CandidateIndex(object):
-
     def __init__(
         self,
         ids: torch.Tensor,

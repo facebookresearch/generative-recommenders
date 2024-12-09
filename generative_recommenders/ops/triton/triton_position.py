@@ -812,7 +812,9 @@ class _AddTimestampPositionEmbeddingsFunction(torch.autograd.Function):
 
     @staticmethod
     # pyre-ignore[14]
-    def backward(ctx, d_out: torch.Tensor) -> Tuple[
+    def backward(
+        ctx, d_out: torch.Tensor
+    ) -> Tuple[
         torch.Tensor,
         None,
         torch.Tensor,
