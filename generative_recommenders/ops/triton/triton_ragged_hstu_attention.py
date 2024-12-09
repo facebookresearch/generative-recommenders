@@ -555,9 +555,7 @@ def _ragged_hstu_attn_fwd_compute(  # noqa C901
                 n_targets=n_targets if HAS_MULTIPLE_TARGETS else None,
                 ts_1_ptrs=(
                     # pyre-ignore[61]
-                    ts_1_ptrs
-                    if ATTN_BIAS_TYPE == "fused" and USE_TIME_BIAS
-                    else None
+                    ts_1_ptrs if ATTN_BIAS_TYPE == "fused" and USE_TIME_BIAS else None
                 ),
                 # pyre-ignore[61]
                 ts_0=ts_0 if ATTN_BIAS_TYPE == "fused" and USE_TIME_BIAS else None,
@@ -2658,7 +2656,9 @@ class RaggedAttentionFunction(torch.autograd.Function):
 
     @staticmethod
     # pyre-ignore[14]
-    def backward(ctx, dout: torch.Tensor) -> Tuple[
+    def backward(
+        ctx, dout: torch.Tensor
+    ) -> Tuple[
         None,
         None,
         torch.Tensor,
@@ -3033,13 +3033,17 @@ def _attn_bias_bwd(  # noqa C901
             if USE_TIME_BIAS:
                 ts_w = tl.load(
                     TW + ts,
-                    mask=mask_m[:, None] & mask_n[None, :] & mt_invalid_mask,  # pyre-ignore[61]
+                    mask=mask_m[:, None]
+                    & mask_n[None, :]
+                    & mt_invalid_mask,  # pyre-ignore[61]
                 )
                 attn_bias = attn_bias + ts_w
             if USE_POS_BIAS:
                 pos_w = tl.load(
                     PW + mt_offs_pos_w,
-                    mask=mask_m[:, None] & mask_n[None, :] & mt_invalid_mask,  # pyre-ignore[61]
+                    mask=mask_m[:, None]
+                    & mask_n[None, :]
+                    & mt_invalid_mask,  # pyre-ignore[61]
                 )
                 attn_bias = attn_bias + pos_w
 
@@ -3066,7 +3070,9 @@ def _attn_bias_bwd(  # noqa C901
                 tl.atomic_add(
                     dtw_ptrs + ts,
                     dbias,
-                    mask=mask_m[:, None] & mask_n[None, :] & mt_invalid_mask,  # pyre-ignore[61]
+                    mask=mask_m[:, None]
+                    & mask_n[None, :]
+                    & mt_invalid_mask,  # pyre-ignore[61]
                     sem="relaxed",
                 )
             if USE_POS_BIAS:
@@ -3078,7 +3084,9 @@ def _attn_bias_bwd(  # noqa C901
                     tl.atomic_add(
                         dpw_ptrs + mt_offs_pos_w,
                         dbias,
-                        mask=mask_m[:, None] & mask_n[None, :] & mt_invalid_mask,  # pyre-ignore[61]
+                        mask=mask_m[:, None]
+                        & mask_n[None, :]
+                        & mt_invalid_mask,  # pyre-ignore[61]
                         sem="relaxed",
                     )
                 else:
@@ -3520,7 +3528,9 @@ class RaggedAttentionRelativeBiasFunction(torch.autograd.Function):
 
     @staticmethod
     # pyre-ignore[14]
-    def backward(ctx, dout: torch.Tensor) -> Tuple[
+    def backward(
+        ctx, dout: torch.Tensor
+    ) -> Tuple[
         None,
         None,
         torch.Tensor,

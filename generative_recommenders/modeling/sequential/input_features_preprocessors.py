@@ -24,7 +24,6 @@ from generative_recommenders.modeling.initialization import truncated_normal
 
 
 class InputFeaturesPreprocessorModule(torch.nn.Module):
-
     @abc.abstractmethod
     def debug_str(self) -> str:
         pass
@@ -43,7 +42,6 @@ class InputFeaturesPreprocessorModule(torch.nn.Module):
 class LearnablePositionalEmbeddingInputFeaturesPreprocessor(
     InputFeaturesPreprocessorModule
 ):
-
     def __init__(
         self,
         max_sequence_len: int,
@@ -94,7 +92,6 @@ class LearnablePositionalEmbeddingInputFeaturesPreprocessor(
 class LearnablePositionalEmbeddingRatedInputFeaturesPreprocessor(
     InputFeaturesPreprocessorModule
 ):
-
     def __init__(
         self,
         max_sequence_len: int,
@@ -156,7 +153,6 @@ class LearnablePositionalEmbeddingRatedInputFeaturesPreprocessor(
 
 
 class CombinedItemAndRatingInputFeaturesPreprocessor(InputFeaturesPreprocessorModule):
-
     def __init__(
         self,
         max_sequence_len: int,

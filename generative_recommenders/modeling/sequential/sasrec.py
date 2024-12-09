@@ -305,6 +305,8 @@ class SASRec(SequentialEncoderWithLearnedSimilarityModule):
         batch_id: Optional[int] = None,
     ) -> torch.Tensor:
         return self.interaction(
-            self.encode(past_ids, past_ratings, past_timestamps, next_timestamps),  # pyre-ignore [6]
+            self.encode(
+                past_ids, past_ratings, past_timestamps, next_timestamps
+            ),  # pyre-ignore [6]
             target_ids,
         )  # [B, X]

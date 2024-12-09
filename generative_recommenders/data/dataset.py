@@ -192,7 +192,6 @@ class DatasetV2(torch.utils.data.Dataset):
 
 
 class MultiFileDatasetV2(DatasetV2, torch.utils.data.Dataset):
-
     def __init__(
         self,
         file_prefix: str,

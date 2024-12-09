@@ -17,6 +17,7 @@
 """
 Usage: mkdir -p tmp/ && python3 preprocess_public_data.py
 """
+
 from generative_recommenders.data.preprocessor import get_common_preprocessors
 
 

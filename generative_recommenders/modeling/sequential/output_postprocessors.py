@@ -21,7 +21,6 @@ import torch.nn.functional as F
 
 
 class OutputPostprocessorModule(torch.nn.Module):
-
     @abc.abstractmethod
     def debug_str(self) -> str:
         pass
@@ -35,7 +34,6 @@ class OutputPostprocessorModule(torch.nn.Module):
 
 
 class L2NormEmbeddingPostprocessor(OutputPostprocessorModule):
-
     def __init__(
         self,
         embedding_dim: int,
@@ -60,7 +58,6 @@ class L2NormEmbeddingPostprocessor(OutputPostprocessorModule):
 
 
 class LayerNormEmbeddingPostprocessor(OutputPostprocessorModule):
-
     def __init__(
         self,
         embedding_dim: int,

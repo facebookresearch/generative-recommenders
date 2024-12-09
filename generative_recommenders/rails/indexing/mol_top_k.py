@@ -70,9 +70,7 @@ class MoLTopKModule(TopKModule):
                         else self._item_embeddings
                     ),
                     decoupled_inference=True,
-                )[
-                    0
-                ]  # (X, D) -> (X, P_X, D_P)
+                )[0]  # (X, D) -> (X, P_X, D_P)
             ).to(component_level_item_embeddings_dtype)
 
         self._item_ids: torch.Tensor = (
