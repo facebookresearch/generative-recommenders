@@ -1,5 +1,5 @@
-#include <hammer/oss/generative_recommenders/ops/cpp/common.h>
-#include <hammer/oss/generative_recommenders/ops/cpp/sort_kv_pairs_cuda_kernels_template.h>
+#include <generative_recommenders/ops/cpp/common.h>
+#include <generative_recommenders/ops/cpp/sort_kv_pairs_cuda_kernels_template.h>
 
 #include <cub/device/device_radix_sort.cuh>
 

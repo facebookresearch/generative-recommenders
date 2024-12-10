@@ -1,5 +1,8 @@
 #pragma once
 
+#include <ATen/ATen.h>
+#include <optional>
+
 namespace gr {
 
 template <typename key_t, typename val_t>

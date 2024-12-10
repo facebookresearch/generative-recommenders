@@ -34,17 +34,14 @@ try:
         VersionedSpec,
     )
 except ImportError:
-    from hammer.oss.generative_recommenders.ops.triton.utils import (
+    from generative_recommenders.ops.triton.utils import (
         _switch_to_contiguous_if_needed,
         register_tritoncc_specs,
         triton_autotune,
         VersionedSpec,
     )
 
-from hammer.oss.generative_recommenders.ops.triton.triton_addmm import (
-    _addmm_fwd,
-    get_mm_configs,
-)
+from generative_recommenders.ops.triton.triton_addmm import _addmm_fwd, get_mm_configs
 
 
 def _get_ln_mul_dropout_named_specs() -> List[VersionedSpec]:
