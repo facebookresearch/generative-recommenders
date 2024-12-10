@@ -35,7 +35,7 @@ try:
         VersionedSpec,
     )
 except ImportError:
-    from hammer.oss.generative_recommenders.ops.triton.utils import (
+    from generative_recommenders.ops.triton.utils import (
         _switch_to_contiguous_if_needed,
         autotune_max_seq_len,
         register_tritoncc_specs,
