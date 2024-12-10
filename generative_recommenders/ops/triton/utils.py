@@ -85,8 +85,6 @@ def triton_autotune(
     reset_to_zero=None,
     # pyre-ignore
     restore_value=None,
-    warmup: int = 25,
-    rep: int = 100,
 ):
     # pyre-ignore
     def decorator(fn):
@@ -100,8 +98,6 @@ def triton_autotune(
             pre_hook=None,
             post_hook=None,
             prune_configs_by=prune_configs_by,
-            warmup=warmup,
-            rep=rep,
         )
 
     return decorator
