@@ -26,20 +26,12 @@ import triton
 # @manual=//triton:triton
 import triton.language as tl
 
-try:
-    from hammer.ops.triton.utils import (
-        _switch_to_contiguous_if_needed,
-        register_tritoncc_specs,
-        triton_autotune,
-        VersionedSpec,
-    )
-except ImportError:
-    from generative_recommenders.ops.triton.utils import (
-        _switch_to_contiguous_if_needed,
-        register_tritoncc_specs,
-        triton_autotune,
-        VersionedSpec,
-    )
+from generative_recommenders.common import (
+    register_tritoncc_specs,
+    switch_to_contiguous_if_needed,
+    triton_autotune,
+    VersionedSpec,
+)
 
 
 def _get_weighted_layer_norm_fwd_named_specs() -> List[VersionedSpec]:
@@ -483,7 +475,7 @@ def triton_weighted_layer_norm_fwd(
     rstd: Optional[torch.Tensor] = None,
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, int, int]:
     assert x.dim() == 2, f"x.dim() == {x.dim()}, expected 2"
-    x = _switch_to_contiguous_if_needed(x)
+    x = switch_to_contiguous_if_needed(x)
     N, D = x.shape
     learnable = weight is not None
     if learnable:
@@ -814,7 +806,7 @@ class RMSNormFunction(torch.autograd.Function):
         eps: float,
     ) -> torch.Tensor:
         assert x.dim() == 2
-        x = _switch_to_contiguous_if_needed(x)
+        x = switch_to_contiguous_if_needed(x)
         N, D = x.shape
         assert weight.dim() == 1
         assert weight.numel() == D
@@ -918,7 +910,7 @@ class SwishLayerNormFunction(torch.autograd.Function):
         eps: float,
     ) -> torch.Tensor:
         assert x.dim() == 2, f"x.dim() == {x.dim()}, expected 2"
-        x = _switch_to_contiguous_if_needed(x)
+        x = switch_to_contiguous_if_needed(x)
         N, D = x.shape
 
         assert bias is not None and weight is not None

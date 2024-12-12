@@ -21,6 +21,13 @@ from typing import Tuple
 import torch
 
 
+try:
+    torch.ops.load_library("//deeplearning/fbgemm/fbgemm_gpu:sparse_ops")
+    torch.ops.load_library("//deeplearning/fbgemm/fbgemm_gpu:sparse_ops_cpu")
+except OSError:
+    pass
+
+
 def pytorch_jagged_dense_bmm(
     max_seq_len: int,
     seq_offsets: torch.Tensor,
