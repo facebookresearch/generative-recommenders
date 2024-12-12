@@ -26,20 +26,12 @@ import triton
 # @manual=//triton:triton
 import triton.language as tl
 
-try:
-    from hammer.ops.triton.utils import (
-        _switch_to_contiguous_if_needed,
-        register_tritoncc_specs,
-        triton_autotune,
-        VersionedSpec,
-    )
-except ImportError:
-    from generative_recommenders.ops.triton.utils import (
-        _switch_to_contiguous_if_needed,
-        register_tritoncc_specs,
-        triton_autotune,
-        VersionedSpec,
-    )
+from generative_recommenders.common import (
+    register_tritoncc_specs,
+    switch_to_contiguous_if_needed,
+    triton_autotune,
+    VersionedSpec,
+)
 
 from generative_recommenders.ops.triton.triton_addmm import _addmm_fwd, get_mm_configs
 
@@ -790,7 +782,7 @@ def triton_layer_norm_mul_dropout_fwd(
     torch.Tensor, torch.Tensor, torch.Tensor, int, int, int
 ]:  # y, mean, rstd, BLOCK_D, num_warps, seed
     assert x.dim() == 2
-    x = _switch_to_contiguous_if_needed(x)
+    x = switch_to_contiguous_if_needed(x)
     N, D = x.shape
     assert weight.dim() == 1
     assert bias.dim() == 1
@@ -1268,8 +1260,8 @@ def triton_group_norm_mul_dropout_fwd(
     assert x.dim() == 2
     assert x.shape == u.shape
     assert x.shape[1] == num_heads * linear_dim
-    x = _switch_to_contiguous_if_needed(x)
-    u = _switch_to_contiguous_if_needed(u)
+    x = switch_to_contiguous_if_needed(x)
+    u = switch_to_contiguous_if_needed(u)
     N, _ = x.shape
     assert weight.dim() == 1
     assert bias.dim() == 1

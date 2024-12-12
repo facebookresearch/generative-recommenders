@@ -25,26 +25,20 @@ import triton
 
 # @manual=//triton:triton
 import triton.language as tl
-from hammer.ops.triton.utils import prev_power_of_2
 
 try:
-    from hammer.ops.triton.utils import (
-        _switch_to_contiguous_if_needed,
-        autotune_max_seq_len,
-        register_tritoncc_specs,
-        triton_autotune,
-        VersionedSpec,
-    )
-
     torch.ops.load_library("//hammer/ops/cuda:cuda_ops")
-except ImportError:
-    from generative_recommenders.ops.triton.utils import (
-        _switch_to_contiguous_if_needed,
-        autotune_max_seq_len,
-        register_tritoncc_specs,
-        triton_autotune,
-        VersionedSpec,
-    )
+except OSError:
+    pass
+
+from generative_recommenders.common import (
+    autotune_max_seq_len,
+    prev_power_of_2,
+    register_tritoncc_specs,
+    switch_to_contiguous_if_needed,
+    triton_autotune,
+    VersionedSpec,
+)
 
 
 def _add_position_embeddings_configs() -> List[triton.Config]:
@@ -244,8 +238,8 @@ class _AddPositionEmbeddingsFunction(torch.autograd.Function):
         dense: torch.Tensor,
         scale: float = 1.0,
     ):
-        jagged = _switch_to_contiguous_if_needed(jagged)
-        dense = _switch_to_contiguous_if_needed(dense)
+        jagged = switch_to_contiguous_if_needed(jagged)
+        dense = switch_to_contiguous_if_needed(dense)
         L, D = jagged.shape
         assert len(dense.shape) == 2
         out = torch.empty_like(jagged)
@@ -727,9 +721,9 @@ class _AddTimestampPositionEmbeddingsFunction(torch.autograd.Function):
         interleave_targets: bool,
         time_bucket_fn: str,
     ):
-        seq_embeddings = _switch_to_contiguous_if_needed(seq_embeddings)
-        pos_embeddings = _switch_to_contiguous_if_needed(pos_embeddings)
-        ts_embeddings = _switch_to_contiguous_if_needed(ts_embeddings)
+        seq_embeddings = switch_to_contiguous_if_needed(seq_embeddings)
+        pos_embeddings = switch_to_contiguous_if_needed(pos_embeddings)
+        ts_embeddings = switch_to_contiguous_if_needed(ts_embeddings)
 
         max_pos_ind = pos_embeddings.shape[0]
         B = seq_lengths.shape[0]
@@ -749,7 +743,7 @@ class _AddTimestampPositionEmbeddingsFunction(torch.autograd.Function):
         ), "shape[1] of ts_embeddings much match seq_embeddings"
         out = torch.empty_like(seq_embeddings)
 
-        timestamps = _switch_to_contiguous_if_needed(timestamps)
+        timestamps = switch_to_contiguous_if_needed(timestamps)
         ts_inds = torch.empty_like(seq_embeddings[:, 0], dtype=torch.int32)
         pos_inds = torch.empty_like(seq_embeddings[:, 0], dtype=torch.int32)
 

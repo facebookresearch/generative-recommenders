@@ -26,22 +26,13 @@ import triton
 # @manual=//triton:triton
 import triton.language as tl
 
-try:
-    from hammer.ops.triton.utils import (
-        _switch_to_contiguous_if_needed,
-        autotune_max_seq_len,
-        register_tritoncc_specs,
-        triton_autotune,
-        VersionedSpec,
-    )
-except ImportError:
-    from generative_recommenders.ops.triton.utils import (
-        _switch_to_contiguous_if_needed,
-        autotune_max_seq_len,
-        register_tritoncc_specs,
-        triton_autotune,
-        VersionedSpec,
-    )
+from generative_recommenders.common import (
+    autotune_max_seq_len,
+    register_tritoncc_specs,
+    switch_to_contiguous_if_needed,
+    triton_autotune,
+    VersionedSpec,
+)
 
 
 def _get_configs() -> List[triton.Config]:
@@ -731,7 +722,7 @@ class _JaggedDenseBmmFunction(torch.autograd.Function):
         jagged: torch.Tensor,
         dense: torch.Tensor,
     ):
-        jagged = _switch_to_contiguous_if_needed(jagged)
+        jagged = switch_to_contiguous_if_needed(jagged)
         L, D = jagged.shape
         B, _, K = dense.shape
         bmm_out = torch.empty((L, K), dtype=jagged.dtype, device=jagged.device)
@@ -1004,8 +995,8 @@ class _JaggedDenseBroadcastAddFunction(torch.autograd.Function):
         jagged: torch.Tensor,
         dense: torch.Tensor,
     ):
-        jagged = _switch_to_contiguous_if_needed(jagged)
-        dense = _switch_to_contiguous_if_needed(dense)
+        jagged = switch_to_contiguous_if_needed(jagged)
+        dense = switch_to_contiguous_if_needed(dense)
         L, D = jagged.shape
         B, _ = dense.shape
         out = torch.empty_like(jagged)
@@ -1065,8 +1056,8 @@ class _JaggedDenseBmmBroadcastAddFunction(torch.autograd.Function):
         dense: torch.Tensor,
         bias: torch.Tensor,
     ):
-        jagged = _switch_to_contiguous_if_needed(jagged)
-        bias = _switch_to_contiguous_if_needed(bias)
+        jagged = switch_to_contiguous_if_needed(jagged)
+        bias = switch_to_contiguous_if_needed(bias)
         L, K = jagged.shape
         B, _, N = dense.shape
         out = torch.empty((L, N), dtype=jagged.dtype, device=jagged.device)
@@ -1833,8 +1824,8 @@ class _Concat2DJaggedFunction(torch.autograd.Function):
         is_replace: bool = False,
         n_prefix_from_right: int = 0,
     ):
-        values_a = _switch_to_contiguous_if_needed(values_a)
-        values_b = _switch_to_contiguous_if_needed(values_b)
+        values_a = switch_to_contiguous_if_needed(values_a)
+        values_b = switch_to_contiguous_if_needed(values_b)
         is_dense_a = offsets_a is None
         is_dense_b = offsets_b is None
         dense_size: int = 0
@@ -1988,7 +1979,7 @@ class _Split2DJaggedFunction(torch.autograd.Function):
         dense_size: int = 0,
         n_prefix_to_right: int = 0,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
-        values = _switch_to_contiguous_if_needed(values)
+        values = switch_to_contiguous_if_needed(values)
         is_dense_a: bool = offsets_a is None
         is_dense_b: bool = offsets_b is None
         if is_dense_a:
@@ -2317,7 +2308,7 @@ class _Shrink2DJaggedFromHeadFunction(torch.autograd.Function):
         max_seq_len: int,
         shrunk_max_seq_len: int,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
-        values = _switch_to_contiguous_if_needed(values)
+        values = switch_to_contiguous_if_needed(values)
         B = offsets.size(0) - 1
         _, D = values.shape
         BLOCK_D = triton.next_power_of_2(D)
@@ -2381,7 +2372,7 @@ class _Shrink2DJaggedFromTailFunction(torch.autograd.Function):
         max_seq_len: int,
         shrunk_max_seq_len: int,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
-        values = _switch_to_contiguous_if_needed(values)
+        values = switch_to_contiguous_if_needed(values)
         B = offsets.size(0) - 1
         _, D = values.shape
         BLOCK_D = triton.next_power_of_2(D)
