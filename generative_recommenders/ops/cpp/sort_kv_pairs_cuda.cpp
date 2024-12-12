@@ -1,7 +1,7 @@
 #include "common.h"
 #include "sort_kv_pairs_cuda_kernels_template.h"
 
-namespace gr {
+namespace hstu {
 
 DLL_PUBLIC std::tuple<at::Tensor, at::Tensor> sort_kv_pairs_cuda(
     const at::Tensor& keys,
@@ -37,4 +37,4 @@ DLL_PUBLIC std::tuple<at::Tensor, at::Tensor> sort_kv_pairs_cuda(
   return {std::move(sorted_keys), std::move(sorted_values)};
 }
 
-} // namespace gr
+} // namespace hstu

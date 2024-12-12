@@ -25,7 +25,7 @@
 
 static constexpr int32_t kMaxThreads = 1024;
 
-namespace gr {
+namespace hstu {
 
 template <typename index_t, typename val_t>
 __global__
@@ -100,4 +100,4 @@ at::Tensor expand_1d_jagged_to_dense_cuda(
   return output;
 }
 
-} // namespace gr
+} // namespace hstu

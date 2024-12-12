@@ -19,7 +19,7 @@
 
 static constexpr uint32_t kMaxThreads = 1024;
 
-namespace gr {
+namespace hstu {
 
 template <
     typename val_t,
@@ -133,4 +133,4 @@ at::Tensor batched_complete_cumsum_cuda(const at::Tensor& values) {
   return cumsum;
 }
 
-} // namespace gr
+} // namespace hstu

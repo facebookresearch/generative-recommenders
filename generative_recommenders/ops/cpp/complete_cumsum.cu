@@ -2,7 +2,7 @@
 
 #include <cub/device/device_scan.cuh>
 
-namespace gr {
+namespace hstu {
 
 DLL_PUBLIC at::Tensor complete_cumsum_cuda(const at::Tensor& values) {
   at::cuda::OptionalCUDAGuard device_guard;
@@ -46,4 +46,4 @@ DLL_PUBLIC at::Tensor complete_cumsum_cuda(const at::Tensor& values) {
   return cumsum;
 }
 
-} // namespace gr
+} // namespace hstu

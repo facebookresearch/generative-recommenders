@@ -3,7 +3,7 @@
 #include <ATen/ATen.h>
 #include <optional>
 
-namespace gr {
+namespace hstu {
 
 template <typename key_t, typename val_t>
 std::tuple<at::Tensor, at::Tensor> sort_kv_pairs_cuda_dispatched(
@@ -12,4 +12,4 @@ std::tuple<at::Tensor, at::Tensor> sort_kv_pairs_cuda_dispatched(
     const std::optional<int64_t>& end_bit,
     const bool descending);
 
-}
+} // namespace hstu

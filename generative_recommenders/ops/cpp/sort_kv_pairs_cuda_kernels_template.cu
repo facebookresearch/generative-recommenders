@@ -3,7 +3,7 @@
 
 #include <cub/device/device_radix_sort.cuh>
 
-namespace gr {
+namespace hstu {
 
 template <>
 DLL_PUBLIC std::tuple<at::Tensor, at::Tensor>
@@ -79,4 +79,4 @@ sort_kv_pairs_cuda_dispatched<SUB_KEY_T, SUB_VALUE_T>(
   return {std::move(sorted_keys), std::move(sorted_values)};
 }
 
-} // namespace gr
+} // namespace hstu

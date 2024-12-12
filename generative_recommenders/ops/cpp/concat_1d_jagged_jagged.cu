@@ -25,7 +25,7 @@
 #include "fbgemm_gpu/sparse_ops.h" // @manual
 #include "fbgemm_gpu/utils/fixed_divisor.cuh" // @manual
 
-namespace gr {
+namespace hstu {
 
 static constexpr int32_t kMaxThreads = 1024;
 
@@ -124,4 +124,4 @@ at::Tensor concat_1d_jagged_jagged_cuda(
       });
   return combined_values;
 }
-} // namespace gr
+} // namespace hstu
