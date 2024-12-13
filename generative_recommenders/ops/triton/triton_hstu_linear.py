@@ -1812,3 +1812,84 @@ class HSTUComputeOutputFunction(torch.autograd.Function):
             None,
             None,
         )
+
+
+@torch.fx.wrap
+def triton_norm_mul_dropout(
+    x: torch.Tensor,
+    u: torch.Tensor,
+    weight: torch.Tensor,
+    bias: torch.Tensor,
+    eps: float,
+    dropout_ratio: float,
+    training: bool,
+    concat_ux: bool = False,
+    group_norm: bool = False,
+    num_heads: int = 1,
+    linear_dim: int = -1,
+    seed: Optional[int] = None,
+) -> torch.Tensor:
+    if group_norm:
+        return GroupNormMulDropoutFunction.apply(
+            x,
+            u,
+            weight,
+            bias,
+            eps,
+            dropout_ratio,
+            training,
+            concat_ux,
+            num_heads,
+            linear_dim,
+            seed,
+        )
+    else:
+        return LayerNormMulDropoutFunction.apply(
+            x, u, weight, bias, eps, dropout_ratio, training, concat_ux, seed
+        )
+
+
+@torch.fx.wrap
+def triton_addmm(
+    input: torch.Tensor,
+    mat1: torch.Tensor,
+    mat2: torch.Tensor,
+) -> torch.Tensor:
+    return _AddMmFunction.apply(mat1, mat2, input)
+
+
+@torch.fx.wrap
+def triton_hstu_compute_output(
+    attn: torch.Tensor,
+    u: torch.Tensor,
+    x: torch.Tensor,
+    norm_weight: torch.Tensor,
+    norm_bias: torch.Tensor,
+    output_weight: torch.Tensor,
+    eps: float,
+    dropout_ratio: float,
+    training: bool,
+    concat_ux: bool = False,
+    group_norm: bool = False,
+    num_heads: int = 1,
+    linear_dim: int = -1,
+    seed: Optional[int] = None,
+    recompute_y_in_backward: bool = False,
+) -> torch.Tensor:
+    return HSTUComputeOutputFunction.apply(
+        attn,
+        u,
+        x,
+        norm_weight,
+        norm_bias,
+        output_weight,
+        eps,
+        dropout_ratio,
+        training,
+        concat_ux,
+        group_norm,
+        num_heads,
+        linear_dim,
+        seed,
+        recompute_y_in_backward,
+    )

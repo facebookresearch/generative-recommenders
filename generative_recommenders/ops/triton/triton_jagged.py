@@ -35,274 +35,6 @@ from generative_recommenders.common import (
 )
 
 
-def _get_configs() -> List[triton.Config]:
-    configs = []
-    for BLOCK_M in [32, 64, 128]:
-        for BLOCK_N in [32, 64, 128]:
-            for num_stages in [2]:
-                for num_warps in [2, 4]:
-                    configs.append(
-                        triton.Config(
-                            {"BLOCK_M": BLOCK_M, "BLOCK_N": BLOCK_N},
-                            num_stages=num_stages,
-                            num_warps=num_warps,
-                        )
-                    )
-    return configs
-
-
-@triton_autotune(
-    configs=_get_configs(),
-    key=["Z", "H", "N"],
-)
-@triton.heuristics(
-    {
-        "EVEN_M": lambda args: args["N"] % args["BLOCK_M"] == 0,
-        "EVEN_N": lambda args: args["N"] % args["BLOCK_N"] == 0,
-    }
-)
-@triton.jit
-def _jagged_bias_to_dense(
-    Z,
-    H,
-    N,
-    jg_offsets_ptr,
-    jg2_offsets_ptr,
-    jagged_ptr,
-    dense_bias_ptr,
-    BLOCK_M: tl.constexpr,
-    BLOCK_N: tl.constexpr,
-    EVEN_M: tl.constexpr,
-    EVEN_N: tl.constexpr,
-):
-    start_m = tl.program_id(0) * BLOCK_M
-    off_hz = tl.program_id(1)
-    off_z = off_hz // H
-    off_h = off_hz % H
-    seq_start = tl.load(jg_offsets_ptr + off_z)
-    seq_end = tl.load(jg_offsets_ptr + off_z + 1)
-    seq_len = seq_end - seq_start
-    if start_m >= seq_len:
-        return
-
-    bias_start = tl.load(jg2_offsets_ptr + off_z) * H + off_h * seq_len * seq_len
-    offs_m = start_m + tl.arange(0, BLOCK_M)
-    offs_n = tl.arange(0, BLOCK_N)
-    mask_m = (offs_m < seq_len)[:, None]
-    off_jg_bias = bias_start + offs_m[:, None] * seq_len + offs_n[None, :]
-    jg_bias_ptrs = jagged_ptr + off_jg_bias
-    off_d_bias = off_hz * N * N + offs_m[:, None] * N + offs_n[None, :]
-    d_bias_ptrs = dense_bias_ptr + off_d_bias
-
-    for start_n in range(0, seq_len, BLOCK_N):
-        maxk_n = (offs_n < seq_len - start_n)[None, :]
-        jg_bias = tl.load(
-            jg_bias_ptrs + start_n,
-            mask=mask_m & maxk_n,
-            other=0.0,
-        )
-        tl.store(
-            d_bias_ptrs + start_n,
-            jg_bias,
-            mask=mask_m & maxk_n,
-        )
-
-
-@triton_autotune(
-    configs=_get_configs(),
-    key=["Z", "H", "N"],
-)
-@triton.heuristics(
-    {
-        "EVEN_M": lambda args: args["N"] % args["BLOCK_M"] == 0,
-        "EVEN_N": lambda args: args["N"] % args["BLOCK_N"] == 0,
-    }
-)
-@triton.jit
-def _dense_bias_to_jagged(
-    Z,
-    H,
-    N,
-    jg_offsets_ptr,
-    jg2_offsets_ptr,
-    dense_bias_ptr,
-    jagged_ptr,
-    BLOCK_M: tl.constexpr,
-    BLOCK_N: tl.constexpr,
-    EVEN_M: tl.constexpr,
-    EVEN_N: tl.constexpr,
-):
-    start_m = tl.program_id(0) * BLOCK_M
-    off_hz = tl.program_id(1)
-    off_z = off_hz // H
-    off_h = off_hz % H
-    seq_start = tl.load(jg_offsets_ptr + off_z)
-    seq_end = tl.load(jg_offsets_ptr + off_z + 1)
-    seq_len = seq_end - seq_start
-    if start_m >= seq_len:
-        return
-
-    bias_start = tl.load(jg2_offsets_ptr + off_z) * H + off_h * seq_len * seq_len
-    offs_m = start_m + tl.arange(0, BLOCK_M)
-    offs_n = tl.arange(0, BLOCK_N)
-    mask_m = (offs_m < seq_len)[:, None]
-    off_jg_bias = bias_start + offs_m[:, None] * seq_len + offs_n[None, :]
-    jg_bias_ptrs = jagged_ptr + off_jg_bias
-    off_d_bias = off_hz * N * N + offs_m[:, None] * N + offs_n[None, :]
-    d_bias_ptrs = dense_bias_ptr + off_d_bias
-
-    for start_n in range(0, seq_len, BLOCK_N):
-        maxk_n = (offs_n < seq_len - start_n)[None, :]
-        d_bias = tl.load(
-            d_bias_ptrs + start_n,
-            mask=mask_m & maxk_n,
-            other=0.0,
-        )
-        tl.store(
-            jg_bias_ptrs + start_n,
-            d_bias,
-            mask=mask_m & maxk_n,
-        )
-
-
-class _JaggedBiasToDenseFunction(torch.autograd.Function):
-    @staticmethod
-    # pyre-ignore[14]
-    def forward(
-        ctx,
-        Z: int,
-        H: int,
-        N: int,
-        jg_offsets: torch.Tensor,
-        jg2_offsets: torch.Tensor,
-        jagged: torch.Tensor,
-    ):
-        jg_offsets = jg_offsets.contiguous()
-        jg2_offsets = jg2_offsets.contiguous()
-        jagged = jagged.contiguous()
-        dense_bias = torch.zeros((Z, H, N, N), device=jagged.device, dtype=jagged.dtype)
-        grid = lambda meta: (  # noqa E731
-            triton.cdiv(N, meta["BLOCK_M"]),
-            Z * H,
-        )
-        _jagged_bias_to_dense[grid](
-            Z,
-            H,
-            N,
-            jg_offsets,
-            jg2_offsets,
-            jagged,
-            dense_bias,
-        )
-        ctx.Z = Z
-        ctx.H = H
-        ctx.N = N
-        ctx.save_for_backward(jg_offsets, jg2_offsets, jagged)
-
-        return dense_bias
-
-    @staticmethod
-    # pyre-ignore[14]
-    def backward(
-        ctx, d_dense_bias: torch.Tensor
-    ) -> Tuple[
-        None,
-        None,
-        None,
-        None,
-        None,
-        torch.Tensor,
-    ]:
-        jg_offsets, jg2_offsets, jagged = ctx.saved_tensors
-        d_jagged = torch.empty_like(jagged)
-        grid = lambda meta: (  # noqa E731
-            triton.cdiv(ctx.N, meta["BLOCK_M"]),
-            ctx.Z * ctx.H,
-        )
-        _dense_bias_to_jagged[grid](
-            ctx.Z,
-            ctx.H,
-            ctx.N,
-            jg_offsets,
-            jg2_offsets,
-            d_dense_bias,
-            d_jagged,
-        )
-
-        return None, None, None, None, None, d_jagged
-
-
-class _DenseBiasToJaggedFunction(torch.autograd.Function):
-    @staticmethod
-    # pyre-ignore[14]
-    def forward(
-        ctx,
-        jg_offsets: torch.Tensor,
-        jg2_offsets: torch.Tensor,
-        dense_bias: torch.Tensor,
-    ):
-        Z, H, N, _ = dense_bias.shape
-        jg_offsets = jg_offsets.contiguous()
-        jg2_offsets = jg2_offsets.contiguous()
-        dense_bias = dense_bias.contiguous()
-        jagged_size = int(jg2_offsets[-1].item()) * H
-        jagged = torch.empty(
-            (jagged_size,), dtype=dense_bias.dtype, device=dense_bias.device
-        )
-        grid = lambda meta: (  # noqa E731
-            triton.cdiv(N, meta["BLOCK_M"]),
-            Z * H,
-        )
-        _dense_bias_to_jagged[grid](
-            Z,
-            H,
-            N,
-            jg_offsets,
-            jg2_offsets,
-            dense_bias,
-            jagged,
-        )
-
-        ctx.Z = Z
-        ctx.H = H
-        ctx.N = N
-        ctx.save_for_backward(jg_offsets, jg2_offsets, dense_bias)
-
-        return jagged
-
-    @staticmethod
-    # pyre-ignore[14]
-    def backward(
-        ctx, d_jagged: torch.Tensor
-    ) -> Tuple[
-        None,
-        None,
-        torch.Tensor,
-    ]:
-        jg_offsets, jg2_offsets, dense_bias = ctx.saved_tensors
-        d_dense_bias = torch.empty_like(dense_bias)
-        d_dense_bias = torch.zeros(
-            (ctx.Z, ctx.H, ctx.N, ctx.N),
-            device=d_jagged.device,
-            dtype=d_dense_bias.dtype,
-        )
-        grid = lambda meta: (  # noqa E731
-            triton.cdiv(ctx.N, meta["BLOCK_M"]),
-            ctx.Z * ctx.H,
-        )
-        _jagged_bias_to_dense[grid](
-            ctx.Z,
-            ctx.H,
-            ctx.N,
-            jg_offsets,
-            jg2_offsets,
-            d_jagged,
-            d_dense_bias,
-        )
-
-        return None, None, d_dense_bias
-
-
 def _get_bmm_configs() -> List[triton.Config]:
     configs = []
     for BLOCK_M in [64, 128]:
@@ -2106,483 +1838,113 @@ class _Split2DJaggedFunction(torch.autograd.Function):
         return dvalues, None, None, None, None, None
 
 
-def _get_copy_2D_jagged_tritoncc_named_specs() -> List[VersionedSpec]:
-    s: int = 16
-    # TODO: currently the types are placeholders, need to be changed later
-    return [
-        VersionedSpec(
-            spec={
-                "JaggedIn": ("*fp32", s),
-                "Offsets": ("*i64", s),
-                "JaggedOut": ("*fp32", s),
-                "OffsetsOut": ("*i64", s),
-                "D": "i32",
-                "stride_id": "i32",
-                "stride_od": "i32",
-                "len_in": "i32",
-                "len_out": "i32",
-                "BLOCK_D": BLOCK_D,
-            }
-        )
-        for BLOCK_D in [4, 256, 512]
-    ]
-
-
-@triton.jit
-def copy_2D_jagged(
-    JaggedIn,
-    Offsets,
-    JaggedOut,
-    OffsetsOut,
-    D,
-    stride_id,
-    stride_od,
-    len_in,
-    len_out,
-    BLOCK_D: tl.constexpr,
-):
-    off_z = tl.program_id(0)
-    off_n = tl.program_id(1)
-    seq_start = tl.load(Offsets + off_z)
-    seq_end = tl.load(Offsets + off_z + 1)
-    seq_len = seq_end - seq_start
-    seq_start_out = tl.load(OffsetsOut + off_z)
-    if off_n >= seq_len:
-        return
-
-    in_block_start = seq_start + off_n
-    out_block_start = seq_start_out + off_n
-    x = tl.load(
-        tl.make_block_ptr(
-            base=JaggedIn,
-            shape=(len_in, D),
-            strides=(stride_id, 1),
-            offsets=(in_block_start.to(tl.int32), 0),
-            block_shape=(1, BLOCK_D),
-            order=(1, 0),
-        ),
-        boundary_check=(1, 0),
-    )
-    tl.store(
-        tl.make_block_ptr(
-            base=JaggedOut,
-            shape=(len_out, D),
-            strides=(stride_od, 1),
-            offsets=(out_block_start.to(tl.int32), 0),
-            block_shape=(1, BLOCK_D),
-            order=(1, 0),
-        ),
-        x,
-        boundary_check=(1, 0),
+@torch.fx.wrap
+def triton_jagged_dense_bmm_broadcast_add(
+    max_seq_len: int,
+    seq_offsets: torch.Tensor,
+    jagged: torch.Tensor,
+    dense: torch.Tensor,
+    bias: torch.Tensor,
+) -> torch.Tensor:
+    return _JaggedDenseBmmBroadcastAddFunction.apply(
+        max_seq_len, seq_offsets, jagged, dense, bias
     )
 
 
-copy_2D_jagged = register_tritoncc_specs(
-    func=copy_2D_jagged, versioned_specs=_get_copy_2D_jagged_tritoncc_named_specs()
-)
-
-
-@triton.jit
-def shrink_2D_jagged_from_tail(
-    JaggedIn,
-    Offsets,
-    JaggedOut,
-    OffsetsOut,
-    D,
-    stride_id,
-    stride_od,
-    len_in,
-    len_out,
-    BLOCK_D: tl.constexpr,
-):
-    off_z = tl.program_id(0)
-    off_n = tl.program_id(1)
-    seq_start = tl.load(Offsets + off_z)
-    seq_end = tl.load(Offsets + off_z + 1)
-    seq_len = seq_end - seq_start
-    seq_start_out = tl.load(OffsetsOut + off_z)
-    seq_end_out = tl.load(OffsetsOut + off_z + 1)
-    seq_len_out = seq_end_out - seq_start_out
-    if off_n >= seq_len_out:
-        return
-
-    to_skip = seq_len - seq_len_out
-    in_block_start = seq_start + to_skip + off_n
-    out_block_start = seq_start_out + off_n
-    x = tl.load(
-        tl.make_block_ptr(
-            base=JaggedIn,
-            shape=(len_in, D),
-            strides=(stride_id, 1),
-            offsets=(in_block_start.to(tl.int32), 0),
-            block_shape=(1, BLOCK_D),
-            order=(1, 0),
-        ),
-        boundary_check=(1, 0),
-    )
-    tl.store(
-        tl.make_block_ptr(
-            base=JaggedOut,
-            shape=(len_out, D),
-            strides=(stride_od, 1),
-            offsets=(out_block_start.to(tl.int32), 0),
-            block_shape=(1, BLOCK_D),
-            order=(1, 0),
-        ),
-        x,
-        boundary_check=(1, 0),
+@torch.fx.wrap
+def triton_concat_2D_jagged(
+    max_seq_len: int,
+    values_a: torch.Tensor,
+    values_b: torch.Tensor,
+    offsets_a: Optional[torch.Tensor] = None,
+    offsets_b: Optional[torch.Tensor] = None,
+    is_replace: bool = False,
+    n_prefix_from_right: int = 0,
+) -> torch.Tensor:
+    return _Concat2DJaggedFunction.apply(
+        max_seq_len,
+        values_a,
+        values_b,
+        offsets_a,
+        offsets_b,
+        is_replace,
+        n_prefix_from_right,
     )
 
 
-shrink_2D_jagged_from_tail = register_tritoncc_specs(
-    func=shrink_2D_jagged_from_tail,
-    versioned_specs=_get_copy_2D_jagged_tritoncc_named_specs(),
-)
-
-
-@triton.jit
-def unshrink_2D_jagged_from_tail(
-    JaggedIn,
-    Offsets,
-    JaggedOut,
-    OffsetsOut,
-    D,
-    stride_id,
-    stride_od,
-    len_in,
-    len_out,
-    BLOCK_D: tl.constexpr,
-):
-    off_z = tl.program_id(0)
-    off_n = tl.program_id(1)
-    seq_start = tl.load(Offsets + off_z)
-    seq_end = tl.load(Offsets + off_z + 1)
-    seq_len = seq_end - seq_start
-    seq_start_out = tl.load(OffsetsOut + off_z)
-    seq_end_out = tl.load(OffsetsOut + off_z + 1)
-    seq_len_out = seq_end_out - seq_start_out
-    if off_n >= seq_len:
-        return
-
-    to_skip = seq_len_out - seq_len
-    in_block_start = seq_start + off_n
-    out_block_start = seq_start_out + to_skip + off_n
-    x = tl.load(
-        tl.make_block_ptr(
-            base=JaggedIn,
-            shape=(len_in, D),
-            strides=(stride_id, 1),
-            offsets=(in_block_start.to(tl.int32), 0),
-            block_shape=(1, BLOCK_D),
-            order=(1, 0),
-        ),
-        boundary_check=(1, 0),
-    )
-    tl.store(
-        tl.make_block_ptr(
-            base=JaggedOut,
-            shape=(len_out, D),
-            strides=(stride_od, 1),
-            offsets=(out_block_start.to(tl.int32), 0),
-            block_shape=(1, BLOCK_D),
-            order=(1, 0),
-        ),
-        x,
-        boundary_check=(1, 0),
+@torch.fx.wrap
+def triton_concat_2D_jagged_jagged(
+    max_seq_len_left: int,
+    offsets_left: torch.Tensor,
+    values_left: torch.Tensor,
+    max_seq_len_right: int,
+    offsets_right: torch.Tensor,
+    values_right: torch.Tensor,
+    is_replace: bool,
+    n_prefix_from_right: int,
+) -> torch.Tensor:
+    return triton_concat_2D_jagged(
+        max_seq_len=max_seq_len_left + max_seq_len_right,
+        values_a=values_left,
+        values_b=values_right,
+        offsets_a=offsets_left,
+        offsets_b=offsets_right,
+        is_replace=is_replace,
+        n_prefix_from_right=n_prefix_from_right,
     )
 
 
-unshrink_2D_jagged_from_tail = register_tritoncc_specs(
-    func=unshrink_2D_jagged_from_tail,
-    versioned_specs=_get_copy_2D_jagged_tritoncc_named_specs(),
-)
-
-
-class _Shrink2DJaggedFromHeadFunction(torch.autograd.Function):
-    @staticmethod
-    # pyre-ignore[14]
-    def forward(
-        ctx,
-        values: torch.Tensor,
-        offsets: torch.Tensor,
-        max_seq_len: int,
-        shrunk_max_seq_len: int,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
-        values = switch_to_contiguous_if_needed(values)
-        B = offsets.size(0) - 1
-        _, D = values.shape
-        BLOCK_D = triton.next_power_of_2(D)
-        lengths = offsets[1:] - offsets[:-1]
-        seq_len = int(lengths.sum().item())
-        shrunk_lengths = torch.clamp(lengths, max=shrunk_max_seq_len)
-        shrunk_seq_len = int(shrunk_lengths.sum().item())
-        values_o = torch.empty(
-            (shrunk_seq_len, D), device=values.device, dtype=values.dtype
-        )
-        offsets_o = torch.ops.fbgemm.asynchronous_complete_cumsum(shrunk_lengths)
-        copy_2D_jagged[(B, min(shrunk_max_seq_len, max_seq_len))](
-            JaggedIn=values,
-            Offsets=offsets,
-            JaggedOut=values_o,
-            OffsetsOut=offsets_o,
-            D=D,
-            stride_id=values.stride(0),
-            stride_od=values_o.stride(0),
-            len_in=seq_len,
-            len_out=shrunk_seq_len,
-            BLOCK_D=BLOCK_D,
-        )
-        ctx.save_for_backward(offsets, offsets_o)
-        ctx.shrunk_max_seq_len = shrunk_max_seq_len
-        ctx.seq_len = seq_len
-        return values_o, offsets_o
-
-    @staticmethod
-    def backward(ctx, *d_outputs) -> Tuple[torch.Tensor, None, None, None, None]:
-        d_shrunk_values = d_outputs[0]
-        offsets, shrunk_offsets = ctx.saved_tensors
-        B = offsets.size(0) - 1
-        shrunk_seq_len, D = d_shrunk_values.shape
-        BLOCK_D = triton.next_power_of_2(D)
-        d_values = torch.zeros(
-            (ctx.seq_len, D), device=d_shrunk_values.device, dtype=d_shrunk_values.dtype
-        )
-        copy_2D_jagged[(B, ctx.shrunk_max_seq_len)](
-            JaggedIn=d_shrunk_values,
-            Offsets=shrunk_offsets,
-            JaggedOut=d_values,
-            OffsetsOut=offsets,
-            D=D,
-            stride_id=d_shrunk_values.stride(0),
-            stride_od=d_values.stride(0),
-            len_in=shrunk_seq_len,
-            len_out=ctx.seq_len,
-            BLOCK_D=BLOCK_D,
-        )
-        return d_values, None, None, None, None
-
-
-class _Shrink2DJaggedFromTailFunction(torch.autograd.Function):
-    @staticmethod
-    # pyre-ignore[14]
-    def forward(
-        ctx,
-        values: torch.Tensor,
-        offsets: torch.Tensor,
-        max_seq_len: int,
-        shrunk_max_seq_len: int,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
-        values = switch_to_contiguous_if_needed(values)
-        B = offsets.size(0) - 1
-        _, D = values.shape
-        BLOCK_D = triton.next_power_of_2(D)
-        lengths = offsets[1:] - offsets[:-1]
-        seq_len = int(lengths.sum().item())
-        shrunk_lengths = torch.clamp(lengths, max=shrunk_max_seq_len)
-        shrunk_seq_len = int(shrunk_lengths.sum().item())
-        values_o = torch.empty(
-            (shrunk_seq_len, D), device=values.device, dtype=values.dtype
-        )
-        offsets_o = torch.ops.fbgemm.asynchronous_complete_cumsum(shrunk_lengths)
-        shrink_2D_jagged_from_tail[(B, min(shrunk_max_seq_len, max_seq_len))](
-            JaggedIn=values,
-            Offsets=offsets,
-            JaggedOut=values_o,
-            OffsetsOut=offsets_o,
-            D=D,
-            stride_id=values.stride(0),
-            stride_od=values_o.stride(0),
-            len_in=seq_len,
-            len_out=shrunk_seq_len,
-            BLOCK_D=BLOCK_D,
-        )
-        ctx.save_for_backward(offsets, offsets_o)
-        ctx.shrunk_max_seq_len = shrunk_max_seq_len
-        ctx.seq_len = seq_len
-        return values_o, offsets_o
-
-    @staticmethod
-    def backward(ctx, *d_outputs) -> Tuple[torch.Tensor, None, None, None, None]:
-        d_shrunk_values = d_outputs[0]
-        offsets, shrunk_offsets = ctx.saved_tensors
-        B = offsets.size(0) - 1
-        shrunk_seq_len, D = d_shrunk_values.shape
-        BLOCK_D = triton.next_power_of_2(D)
-        d_values = torch.zeros(
-            (ctx.seq_len, D), device=d_shrunk_values.device, dtype=d_shrunk_values.dtype
-        )
-        unshrink_2D_jagged_from_tail[(B, ctx.shrunk_max_seq_len)](
-            JaggedIn=d_shrunk_values,
-            Offsets=shrunk_offsets,
-            JaggedOut=d_values,
-            OffsetsOut=offsets,
-            D=D,
-            stride_id=d_shrunk_values.stride(0),
-            stride_od=d_values.stride(0),
-            len_in=shrunk_seq_len,
-            len_out=ctx.seq_len,
-            BLOCK_D=BLOCK_D,
-        )
-        return d_values, None, None, None, None
-
-
-def _get_remove_first_or_last_1D_named_specs() -> List[VersionedSpec]:
-    s: int = 16
-
-    return [
-        VersionedSpec(
-            spec={
-                "Offsets": ("*i64", s),
-                "JaggedIn": (dtype, s),
-                "JaggedOut_no_first": (dtype, s),
-                "JaggedOut_no_last": (dtype, s),
-                "BLOCK_N": BLOCK_N,
-            }
-        )
-        for dtype in ["*fp32", "*fp16", "*bf16", "*i32"]
-        for BLOCK_N in [128, 256]
-    ]
-
-
-@triton.jit
-def jagged_remove_first_or_last_1D_kernel(
-    JaggedIn,
-    Offsets,
-    JaggedOut_no_first,
-    JaggedOut_no_last,
-    BLOCK_N: tl.constexpr,
-):
-    off_z = tl.program_id(0)  # offset along the batch dimension
-    group_n = tl.program_id(1)
-
-    in_seq_start = tl.load(Offsets + off_z)
-    in_seq_end = tl.load(Offsets + off_z + 1)
-    in_seq_len = in_seq_end - in_seq_start
-
-    out_seq_start = tl.load(Offsets + off_z) - off_z  # ith offset_out = offset_in - i
-
-    off_n = group_n * BLOCK_N + tl.arange(0, BLOCK_N)
-
-    x = tl.load(JaggedIn + in_seq_start + off_n, mask=off_n < in_seq_len)
-    tl.store(
-        JaggedOut_no_first + out_seq_start + off_n - 1,
-        x,
-        mask=(off_n > 0) & (off_n < in_seq_len),
-    )
-    tl.store(
-        JaggedOut_no_last + out_seq_start + off_n,
-        x,
-        mask=off_n < in_seq_len - 1,
+@torch.fx.wrap
+def triton_concat_2D_dense_jagged(
+    jagged_max_seq_len: int,
+    jagged_offsets: torch.Tensor,
+    jagged_values: torch.Tensor,
+    dense_values: torch.Tensor,
+) -> torch.Tensor:
+    B, dense_size, D = dense_values.size()
+    max_seq_len = jagged_max_seq_len + dense_size
+    return triton_concat_2D_jagged(
+        max_seq_len=max_seq_len,
+        values_a=dense_values,
+        values_b=jagged_values,
+        offsets_a=None,
+        offsets_b=jagged_offsets,
     )
 
 
-jagged_remove_first_or_last_1D_kernel = register_tritoncc_specs(
-    func=jagged_remove_first_or_last_1D_kernel,
-    versioned_specs=_get_remove_first_or_last_1D_named_specs(),
-)
+def triton_jagged_dense_bmm(
+    max_seq_len: int,
+    seq_offsets: torch.Tensor,
+    jagged: torch.Tensor,
+    dense: torch.Tensor,
+) -> torch.Tensor:
+    return _JaggedDenseBmmFunction.apply(max_seq_len, seq_offsets, jagged, dense)
 
 
-@triton.jit
-def jagged_recover_first_or_last_1D_kernel(
-    JaggedIn_no_first,
-    JaggedIn_no_last,
-    JaggedOut,
-    OffsetsOut,
-    BLOCK_N: tl.constexpr,
-):
-    off_z = tl.program_id(0)  # offset along the batch dimension
-    group_n = tl.program_id(1)
-
-    in_no_last_seq_start = tl.load(OffsetsOut + off_z) - off_z
-    in_no_last_seq_end = tl.load(OffsetsOut + off_z + 1) - off_z - 1
-    in_seq_len = in_no_last_seq_end - in_no_last_seq_start
-
-    out_seq_start = tl.load(OffsetsOut + off_z)
-
-    off_n = group_n * BLOCK_N + tl.arange(0, BLOCK_N)
-
-    x_first = tl.load(JaggedIn_no_last + in_no_last_seq_start + off_n, mask=off_n == 0)
-    tl.store(JaggedOut + out_seq_start + off_n, x_first, mask=off_n == 0)
-
-    x = tl.load(
-        JaggedIn_no_last + in_no_last_seq_start + off_n,
-        mask=(off_n < in_seq_len) & (off_n > 0),
-    ) + tl.load(
-        JaggedIn_no_first + in_no_last_seq_start + off_n - 1,
-        mask=(off_n < in_seq_len) & (off_n > 0),
-    )
-    tl.store(
-        JaggedOut + out_seq_start + off_n, x, mask=(off_n < in_seq_len) & (off_n > 0)
-    )
-
-    x_last = tl.load(
-        JaggedIn_no_first + in_no_last_seq_start + off_n, mask=off_n == in_seq_len - 1
-    )
-    tl.store(
-        JaggedOut + out_seq_start + off_n + 1, x_last, mask=off_n == in_seq_len - 1
+def triton_split_2D_jagged(
+    values: torch.Tensor,
+    max_seq_len: int,
+    offsets_a: Optional[torch.Tensor] = None,
+    offsets_b: Optional[torch.Tensor] = None,
+    dense_size: int = 0,
+    n_prefix_to_right: int = 0,
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    return _Split2DJaggedFunction.apply(
+        values,
+        max_seq_len,
+        offsets_a,
+        offsets_b,
+        dense_size,
+        n_prefix_to_right,
     )
 
 
-class _JaggedRemoveFirstOrLast1D(torch.autograd.Function):
-    @staticmethod
-    # pyre-ignore[14]
-    def forward(
-        ctx,
-        values: torch.Tensor,
-        lengths: torch.Tensor,
-        offsets: torch.Tensor,
-        max_seq_len: int,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
-        B = lengths.size(0)
-        N = values.size(0)
-
-        shrunk_seq_len = N - B
-        values_no_first = torch.empty(
-            (shrunk_seq_len,), device=values.device, dtype=values.dtype
-        )
-        values_no_last = torch.empty(
-            (shrunk_seq_len,), device=values.device, dtype=values.dtype
-        )
-
-        BLOCK_N = 128
-
-        grid = (B, triton.cdiv(max_seq_len, BLOCK_N))  # noqa E731
-
-        jagged_remove_first_or_last_1D_kernel[grid](
-            JaggedIn=values,
-            Offsets=offsets,
-            JaggedOut_no_first=values_no_first,
-            JaggedOut_no_last=values_no_last,
-            BLOCK_N=BLOCK_N,  # pyre-ignore[6]
-        )
-
-        ctx.save_for_backward(offsets, lengths)
-        ctx.N = N
-        ctx.max_seq_len = max_seq_len
-
-        return values_no_first, values_no_last
-
-    @staticmethod
-    def backward(ctx, *d_values_in) -> Tuple[torch.Tensor, None, None, None]:
-        d_values_no_first, d_values_no_last = d_values_in
-        offsets, lengths = ctx.saved_tensors
-        max_seq_len = ctx.max_seq_len
-        B = offsets.size(0) - 1
-        d_values = torch.empty(
-            (ctx.N,),
-            device=d_values_no_first.device,
-            dtype=d_values_no_first.dtype,
-        )
-
-        BLOCK_N = 128
-        grid = (B, triton.cdiv(max_seq_len, BLOCK_N))  # noqa E731
-
-        jagged_recover_first_or_last_1D_kernel[grid](
-            JaggedIn_no_first=d_values_no_first,
-            JaggedIn_no_last=d_values_no_last,
-            JaggedOut=d_values,
-            OffsetsOut=offsets,
-            BLOCK_N=BLOCK_N,  # pyre-ignore
-        )
-
-        return d_values, None, None, None
+def triton_jagged_dense_broadcast_add(
+    max_seq_len: int,
+    seq_offsets: torch.Tensor,
+    jagged: torch.Tensor,
+    dense: torch.Tensor,
+) -> torch.Tensor:
+    return _JaggedDenseBroadcastAddFunction.apply(
+        max_seq_len, seq_offsets, jagged, dense
+    )

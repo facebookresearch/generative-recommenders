@@ -877,3 +877,46 @@ class _AddTimestampPositionEmbeddingsFunction(torch.autograd.Function):
             None,
             None,
         )
+
+
+@torch.fx.wrap
+def triton_add_position_embeddings(
+    jagged: torch.Tensor,
+    jagged_offsets: torch.Tensor,
+    high_inds: torch.Tensor,
+    max_seq_len: int,
+    dense: torch.Tensor,
+    scale: float = 1.0,
+) -> torch.Tensor:
+    return _AddPositionEmbeddingsFunction.apply(
+        jagged, jagged_offsets, high_inds, max_seq_len, dense, scale
+    )
+
+
+@torch.fx.wrap
+def triton_add_timestamp_positional_embeddings(
+    seq_embeddings: torch.Tensor,
+    seq_offsets: torch.Tensor,
+    pos_embeddings: torch.Tensor,
+    ts_embeddings: torch.Tensor,
+    timestamps: torch.Tensor,
+    max_seq_len: int,
+    max_contextual_seq_len: int,
+    seq_lengths: torch.Tensor,
+    num_targets: Optional[torch.Tensor],
+    interleave_targets: bool,
+    time_bucket_fn: str,
+) -> torch.Tensor:
+    return _AddTimestampPositionEmbeddingsFunction.apply(
+        seq_embeddings,
+        seq_offsets,
+        pos_embeddings,
+        ts_embeddings,
+        timestamps,
+        max_seq_len,
+        max_contextual_seq_len,
+        seq_lengths,
+        num_targets,
+        interleave_targets,
+        time_bucket_fn,
+    )
