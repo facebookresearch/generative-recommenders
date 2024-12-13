@@ -24,7 +24,7 @@
 
 #include "fbgemm_gpu/sparse_ops.h" // @manual
 
-namespace gr {
+namespace hstu {
 
 template <typename index_t, typename val_t>
 void _concat_1d_jagged_jagged_cpu_kernel(
@@ -108,4 +108,4 @@ at::Tensor concat_1d_jagged_jagged_meta(
       /*device=*/::std::make_optional(c10::Device(c10::kMeta)),
       /*pin_memory=*/::std::nullopt);
 }
-} // namespace gr
+} // namespace hstu

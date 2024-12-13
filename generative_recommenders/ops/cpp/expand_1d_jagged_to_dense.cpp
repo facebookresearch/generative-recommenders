@@ -22,7 +22,7 @@
 #include <torch/extension.h>
 #include <torch/library.h>
 
-namespace gr {
+namespace hstu {
 
 template <typename index_t, typename val_t>
 void expand_1d_jagged_to_dense_cpu_kernel_(
@@ -94,4 +94,4 @@ at::Tensor expand_1d_jagged_to_dense_meta(
   return output;
 }
 
-} // namespace gr
+} // namespace hstu

@@ -20,7 +20,7 @@
 
 #include "fbgemm_gpu/sparse_ops.h" // @manual
 
-namespace gr {
+namespace hstu {
 
 at::Tensor complete_cumsum_cpu(const at::Tensor& values) {
   TORCH_CHECK(values.dim() == 1);
@@ -41,4 +41,4 @@ at::Tensor complete_cumsum_meta(const at::Tensor& values) {
   return output;
 }
 
-} // namespace gr
+} // namespace hstu

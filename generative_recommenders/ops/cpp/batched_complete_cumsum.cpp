@@ -20,7 +20,7 @@
 
 #include "fbgemm_gpu/sparse_ops.h" // @manual
 
-namespace gr {
+namespace hstu {
 
 at::Tensor batched_complete_cumsum_cpu(const at::Tensor& values) {
   auto B = values.size(0);
@@ -47,4 +47,4 @@ at::Tensor batched_complete_cumsum_meta(const at::Tensor& values) {
   return output;
 }
 
-} // namespace gr
+} // namespace hstu

@@ -30,7 +30,7 @@
  */
 #define DLL_PUBLIC __attribute__((visibility("default")))
 
-namespace gr {
+namespace hstu {
 at::Tensor expand_1d_jagged_to_dense_cpu(
     const at::Tensor& values,
     const at::Tensor& offsets,
@@ -95,9 +95,9 @@ std::tuple<at::Tensor, at::Tensor> sort_kv_pairs_cuda(
     const std::optional<int64_t>& end_bit,
     const bool descending = false);
 
-} // namespace gr
+} // namespace hstu
 
-TORCH_LIBRARY_FRAGMENT(gr, m) {
+TORCH_LIBRARY_FRAGMENT(hstu, m) {
   m.def(
       "expand_1d_jagged_to_dense(Tensor values, Tensor offsets, SymInt max_len) -> Tensor");
   m.def("batched_complete_cumsum(Tensor values) -> Tensor");
@@ -108,36 +108,36 @@ TORCH_LIBRARY_FRAGMENT(gr, m) {
       "sort_kv_pairs(Tensor keys, Tensor values, int? end_bit=None, bool descending=False) -> (Tensor, Tensor)");
 }
 
-TORCH_LIBRARY_IMPL(gr, CPU, m) {
-  m.impl("expand_1d_jagged_to_dense", gr::expand_1d_jagged_to_dense_cpu);
-  m.impl("batched_complete_cumsum", gr::batched_complete_cumsum_cpu);
-  m.impl("concat_1d_jagged_jagged", gr::concat_1d_jagged_jagged_cpu);
-  m.impl("complete_cumsum", gr::complete_cumsum_cpu);
+TORCH_LIBRARY_IMPL(hstu, CPU, m) {
+  m.impl("expand_1d_jagged_to_dense", hstu::expand_1d_jagged_to_dense_cpu);
+  m.impl("batched_complete_cumsum", hstu::batched_complete_cumsum_cpu);
+  m.impl("concat_1d_jagged_jagged", hstu::concat_1d_jagged_jagged_cpu);
+  m.impl("complete_cumsum", hstu::complete_cumsum_cpu);
 }
 
-TORCH_LIBRARY_IMPL(gr, CUDA, m) {
-  m.impl("expand_1d_jagged_to_dense", gr::expand_1d_jagged_to_dense_cuda);
-  m.impl("batched_complete_cumsum", gr::batched_complete_cumsum_cuda);
-  m.impl("concat_1d_jagged_jagged", gr::concat_1d_jagged_jagged_cuda);
-  m.impl("complete_cumsum", gr::complete_cumsum_cuda);
+TORCH_LIBRARY_IMPL(hstu, CUDA, m) {
+  m.impl("expand_1d_jagged_to_dense", hstu::expand_1d_jagged_to_dense_cuda);
+  m.impl("batched_complete_cumsum", hstu::batched_complete_cumsum_cuda);
+  m.impl("concat_1d_jagged_jagged", hstu::concat_1d_jagged_jagged_cuda);
+  m.impl("complete_cumsum", hstu::complete_cumsum_cuda);
   m.impl(
       "sort_kv_pairs",
       torch::dispatch(
-          c10::DispatchKey::CUDA, TORCH_FN(gr::sort_kv_pairs_cuda)));
+          c10::DispatchKey::CUDA, TORCH_FN(hstu::sort_kv_pairs_cuda)));
 }
 
-TORCH_LIBRARY_IMPL(gr, Meta, m) {
-  m.impl("expand_1d_jagged_to_dense", gr::expand_1d_jagged_to_dense_meta);
-  m.impl("batched_complete_cumsum", gr::batched_complete_cumsum_meta);
-  m.impl("concat_1d_jagged_jagged", gr::concat_1d_jagged_jagged_meta);
-  m.impl("complete_cumsum", gr::complete_cumsum_meta);
+TORCH_LIBRARY_IMPL(hstu, Meta, m) {
+  m.impl("expand_1d_jagged_to_dense", hstu::expand_1d_jagged_to_dense_meta);
+  m.impl("batched_complete_cumsum", hstu::batched_complete_cumsum_meta);
+  m.impl("concat_1d_jagged_jagged", hstu::concat_1d_jagged_jagged_meta);
+  m.impl("complete_cumsum", hstu::complete_cumsum_meta);
   m.impl(
       "sort_kv_pairs",
       torch::dispatch(
-          c10::DispatchKey::Meta, TORCH_FN(gr::sort_kv_pairs_meta)));
+          c10::DispatchKey::Meta, TORCH_FN(hstu::sort_kv_pairs_meta)));
 }
 
-TORCH_LIBRARY_IMPL(gr, Autograd, m) {
+TORCH_LIBRARY_IMPL(hstu, Autograd, m) {
   m.impl(
       "expand_1d_jagged_to_dense",
       torch::autograd::autogradNotImplementedFallback());
