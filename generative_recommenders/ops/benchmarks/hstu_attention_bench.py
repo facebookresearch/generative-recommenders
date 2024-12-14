@@ -178,7 +178,7 @@ def main(  # noqa: C901
         rep = 1000
         torch.manual_seed(1001)  # for reproducibility
         alpha = 1.0 / attn_dim
-        invalid_attn_mask_type = "lower_triangular"
+        causal = True
         lengths = generate_sparse_seq_len(
             size=batch_size,
             max_seq_len=seq_len,
@@ -250,16 +250,14 @@ def main(  # noqa: C901
                 k=k,
                 v=v,
                 seq_offsets=seq_offsets,
-                invalid_attn_mask_type=invalid_attn_mask_type,
+                causal=causal,
                 dropout_pr=0.0,
                 training=True,
-                attn_bias=None,
-                seq2_offsets=None,
                 num_targets=num_targets,
-                kernel=_get_kernel(provider),
                 max_attn_len=max_attn_len if max_attn_len > 0 else None,
                 contextual_seq_len=contextual_seq_len,
                 sort_by_length=True,
+                kernel=_get_kernel(provider),
             )
         if mode == "bwd":
             o = fn()

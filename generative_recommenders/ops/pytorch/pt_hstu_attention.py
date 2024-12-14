@@ -30,7 +30,7 @@ except OSError:
 
 
 @torch.fx.wrap
-def get_invalid_attn_mask(
+def _get_invalid_attn_mask(
     device: torch.device,
     causal: bool,
     N: int,
@@ -84,178 +84,7 @@ def get_invalid_attn_mask(
     return invalid_attn_mask
 
 
-@torch.fx.wrap
-def time_bucketization_fn(
-    x: torch.Tensor, bucket_function: str, bucket_incr: float, final_div: float
-) -> torch.Tensor:
-    x = x.clamp(min=1e-6) / bucket_incr
-    if bucket_function == "log":
-        x = torch.log(x)
-    elif bucket_function == "sqrt":
-        x = torch.sqrt(x)
-    else:
-        raise Exception(f"Invalid time bucket function {bucket_function}.")
-    return (x / final_div).clamp(min=0).int()
-
-
-@torch.fx.wrap
-def get_time_weights(
-    ts: torch.Tensor,
-    ts_weights: torch.Tensor,
-    bucket_function: str,
-    bucket_incr: float,
-    final_div: float,
-    delta: float,
-    num_buckets: int,
-) -> torch.Tensor:
-    ts = time_bucketization_fn(ts + delta, bucket_function, bucket_incr, final_div)
-    ts = torch.clamp(
-        ts,
-        min=0,
-        max=num_buckets,
-    )
-    return torch.index_select(ts_weights.view(-1), index=ts.view(-1), dim=0)
-
-
-@torch.fx.wrap
-def time_bias_fn(
-    ts: torch.Tensor,
-    ts_weights: torch.Tensor,
-    causal: bool,
-    bucket_function: str,
-    bucket_incr: float,
-    final_div: float,
-    delta: float,
-    num_buckets: int,
-    N: int,
-) -> torch.Tensor:
-    if causal:
-        ts = ts[:, 1:].unsqueeze(2) - ts[:, :-1].unsqueeze(1)
-    else:
-        ts = ts[:, :-1].unsqueeze(2) - ts[:, 1:].unsqueeze(1)
-    return get_time_weights(
-        ts.view(-1),
-        ts_weights,
-        bucket_function,
-        bucket_incr,
-        final_div,
-        delta,
-        num_buckets,
-    ).view(-1, N, N)
-
-
-@torch.fx.wrap
-def get_pos_weights(
-    N: int,
-    pos_ids: torch.Tensor,
-    pos_weights: torch.Tensor,
-    max_pos_ind: Optional[int] = None,
-) -> torch.Tensor:
-    if max_pos_ind is not None:
-        pos_ids = pos_ids + max_pos_ind - 1
-        pos_ids = torch.clamp(pos_ids, min=0, max=2 * max_pos_ind - 2)
-    else:
-        pos_ids = pos_ids + N - 1
-    return torch.index_select(pos_weights, 0, pos_ids.view(-1))
-
-
-@torch.fx.wrap
-def pos_bias_fn(
-    pos_weights: torch.Tensor,
-    N: int,
-    seq_offsets: torch.Tensor,
-    invalid_attn_mask_type: str,
-    num_targets: Optional[torch.Tensor] = None,
-    max_pos_ind: Optional[int] = None,
-    contextual_seq_len: int = 0,
-) -> torch.Tensor:
-    ids = torch.arange(0, N, device=pos_weights.device)
-    seq_lengths = seq_offsets[1:] - seq_offsets[:-1]
-    max_ids = seq_lengths.view(-1, 1, 1) - 1
-    if contextual_seq_len > 0:
-        ids = ids - contextual_seq_len + 1
-        ids = torch.clamp(ids, min=0)
-        max_ids = max_ids - contextual_seq_len + 1
-    if num_targets is not None:
-        max_ids = max_ids - num_targets.view(-1, 1, 1)
-        ids = torch.clamp(
-            ids,
-            max=max_ids + 1,
-        )
-        row_ids = ids.view(-1, N, 1).expand(-1, N, N)
-        col_ids = ids.view(-1, 1, N).expand(-1, N, N)
-    else:
-        row_ids = ids.view(N, 1).expand(N, N)
-        col_ids = row_ids.t()
-        row_ids = row_ids.view(1, N, N)
-        col_ids = col_ids.view(1, N, N)
-    pos_ids = col_ids - row_ids
-    return get_pos_weights(N, pos_ids, pos_weights, max_pos_ind).view(-1, N, N)
-
-
-@torch.fx.wrap
-def pytorch_relative_bias(
-    N: int,
-    seq_offsets: torch.Tensor,
-    ts: torch.Tensor,
-    ts_weights: torch.Tensor,
-    pos_weights: torch.Tensor,
-    num_buckets: int,
-    causal: bool,
-    bucket_function: str,
-    bucket_incr: float,
-    final_div: float,
-    delta: float = 0.0,
-    invalid_attn_mask_type: str = "lower_triangular",
-    num_targets: Optional[torch.Tensor] = None,
-    max_pos_ind: Optional[int] = None,
-    relative_bias_type: str = "ALL",
-    contextual_seq_len: int = 0,
-) -> torch.Tensor:
-    if relative_bias_type == "ALL":
-        bias = time_bias_fn(
-            ts=ts,
-            ts_weights=ts_weights,
-            causal=causal,
-            bucket_function=bucket_function,
-            bucket_incr=bucket_incr,
-            final_div=final_div,
-            delta=delta,
-            num_buckets=num_buckets,
-            N=N,
-        ) + pos_bias_fn(
-            pos_weights=pos_weights,
-            N=N,
-            seq_offsets=seq_offsets,
-            invalid_attn_mask_type=invalid_attn_mask_type,
-            num_targets=num_targets,
-            max_pos_ind=max_pos_ind,
-        )
-    elif relative_bias_type == "TIME":
-        bias = time_bias_fn(
-            ts=ts,
-            ts_weights=ts_weights,
-            causal=causal,
-            bucket_function=bucket_function,
-            bucket_incr=bucket_incr,
-            final_div=final_div,
-            delta=delta,
-            num_buckets=num_buckets,
-            N=N,
-        )
-    else:
-        bias = pos_bias_fn(
-            pos_weights=pos_weights,
-            N=N,
-            seq_offsets=seq_offsets,
-            invalid_attn_mask_type=invalid_attn_mask_type,
-            num_targets=num_targets,
-            max_pos_ind=max_pos_ind,
-        )
-    return bias.unsqueeze(1)
-
-
-def pad_qkv(
+def _pad_qkv(
     q: torch.Tensor,
     k: torch.Tensor,
     v: torch.Tensor,
@@ -305,28 +134,23 @@ def pytorch_hstu_mha(
     k: torch.Tensor,
     v: torch.Tensor,
     seq_offsets: torch.Tensor,
-    invalid_attn_mask_type: str,
-    dropout_pr: float,
-    training: bool,
+    causal: bool = True,
+    dropout_pr: float = 0.0,
+    training: bool = True,
     num_targets: Optional[torch.Tensor] = None,
-    seq2_offsets: Optional[torch.Tensor] = None,
-    attn_bias: Optional[torch.Tensor] = None,
-    attn_scale: Optional[torch.Tensor] = None,
     max_attn_len: Optional[int] = None,
     contextual_seq_len: int = 0,
 ) -> torch.Tensor:
     L, H, _ = q.shape
     V = v.shape[2]
-    q, k, v = pad_qkv(
+    q, k, v = _pad_qkv(
         q, k, v, seq_offsets, max_seq_len
     )  # [B, H, N, D) and [B, H, N, V]
     qk_attn = torch.einsum("bhxa,bhya->bhxy", q, k) * alpha
-    if attn_bias is not None:
-        qk_attn = qk_attn + attn_bias
     qk_attn = F.silu(qk_attn) / max_seq_len
-    invalid_attn_mask = get_invalid_attn_mask(
+    invalid_attn_mask = _get_invalid_attn_mask(
         device=q.device,
-        causal=(invalid_attn_mask_type == "lower_triangular"),
+        causal=causal,
         N=max_seq_len,
         seq_lengths=seq_offsets[1:] - seq_offsets[:-1],
         num_targets=num_targets,
@@ -334,11 +158,6 @@ def pytorch_hstu_mha(
         contextual_seq_len=contextual_seq_len,
     )
     qk_attn = qk_attn * invalid_attn_mask.unsqueeze(1)
-    if attn_scale is not None:
-        if attn_scale.dim() == 1:
-            Z = seq_offsets.numel() - 1
-            attn_scale = attn_scale.expand(Z, max_seq_len)
-        qk_attn = qk_attn * attn_scale.unsqueeze(1).unsqueeze(-1)
     if dropout_pr > 0.0:
         qk_attn = F.dropout(qk_attn, p=dropout_pr, training=training)
     attn_dense = torch.einsum("bhxd,bhdv->bhxv", qk_attn, v)  # [B, H, N, V]
@@ -350,7 +169,7 @@ def pytorch_hstu_mha(
 
 
 @torch.fx.wrap
-def get_delta_invalid_attn_mask(
+def _get_delta_invalid_attn_mask(
     max_seq_len: int,
     delta_x_offsets: torch.Tensor,
     seq_lengths: torch.Tensor,
@@ -386,7 +205,6 @@ def pytorch_cached_hstu_mha(
     k: torch.Tensor,
     v: torch.Tensor,
     delta_x_offsets: torch.Tensor,
-    seq_lengths: torch.Tensor,
     seq_offsets: torch.Tensor,
     num_targets: Optional[torch.Tensor] = None,
     attn_bias: Optional[torch.Tensor] = None,
@@ -420,10 +238,10 @@ def pytorch_cached_hstu_mha(
     if attn_bias is not None:
         qk_attn = qk_attn + attn_bias
     qk_attn = F.silu(qk_attn) / N
-    invalid_attn_mask = get_delta_invalid_attn_mask(
+    invalid_attn_mask = _get_delta_invalid_attn_mask(
         max_seq_len=N,
         delta_x_offsets=delta_x_offsets,
-        seq_lengths=seq_lengths,
+        seq_lengths=seq_offsets[1:] - seq_offsets[:-1],
         seq_offsets=seq_offsets,
         num_targets=num_targets,
         max_attn_len=max_attn_len,

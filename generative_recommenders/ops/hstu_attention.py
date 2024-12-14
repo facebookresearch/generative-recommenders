@@ -25,7 +25,7 @@ from generative_recommenders.ops.pytorch.pt_hstu_attention import (
     pytorch_cached_hstu_mha,
     pytorch_hstu_mha,
 )
-from generative_recommenders.ops.triton.triton_hstu_attention_interface import (
+from generative_recommenders.ops.triton.triton_hstu_attention import (
     triton_cached_hstu_mha,
     triton_hstu_mha,
 )
@@ -39,16 +39,14 @@ def hstu_mha(
     k: torch.Tensor,
     v: torch.Tensor,
     seq_offsets: torch.Tensor,
-    invalid_attn_mask_type: str,
-    dropout_pr: float,
-    training: bool,
+    causal: bool = True,
+    dropout_pr: float = 0.0,
+    training: bool = True,
     num_targets: Optional[torch.Tensor] = None,
-    seq2_offsets: Optional[torch.Tensor] = None,
-    attn_bias: Optional[torch.Tensor] = None,
-    kernel: HammerKernel = HammerKernel.PYTORCH,
     max_attn_len: Optional[int] = None,
     contextual_seq_len: int = 0,
     sort_by_length: bool = False,
+    kernel: HammerKernel = HammerKernel.PYTORCH,
 ) -> torch.Tensor:
     _, H, _ = q.shape
     if not is_fx_tracing():
@@ -58,21 +56,9 @@ def hstu_mha(
         torch._assert(v.dim() == 3, "v must be 3-D")
         torch._assert(v.shape[0] == q.shape[0], "wrong v shape[0]")
         torch._assert(v.shape[1] == H, "wrong v shape[1]")
-        if attn_bias is not None:
-            assert seq2_offsets is not None
-            torch._assert(attn_bias.dim() == 1, "attn_bias must be 1-D")
-            torch._assert(
-                seq2_offsets is not None,
-                "must have seq2_offsets when using attn_bias",
-            )
-            torch._assert(seq2_offsets.dim() == 1, "seq2_offsets must be 1-D")
         if max_attn_len is not None:
             torch._assert(max_attn_len > 0, "max_attn_len must be larger than 0")
-        if invalid_attn_mask_type != "lower_triangular":
-            torch._assert(
-                contextual_seq_len == 0,
-                "user context mask not supported on non-lower triangular mask",
-            )
+        torch._assert(causal, "only support causal attention")
 
     if kernel in [HammerKernel.TRITON, HammerKernel.TRITON_CC]:
         if not is_fx_tracing() and kernel == HammerKernel.TRITON:
@@ -80,10 +66,6 @@ def hstu_mha(
             torch._assert(k.is_cuda, "k must be CUDA tensor")
             torch._assert(v.is_cuda, "v must be CUDA tensor")
             torch._assert(seq_offsets.is_cuda, "seq_offsets must be CUDA tensor")
-            if attn_bias is not None:
-                torch._assert(attn_bias.is_cuda, "attn_bias must be CUDA tensor")
-                assert seq2_offsets is not None
-                torch._assert(seq2_offsets.is_cuda, "seq2_offsets must be CUDA tensor")
             torch._assert(dropout_pr < 1e-6, "dropout for triton path not implemented")
         return triton_hstu_mha(
             N=max_seq_len,
@@ -92,14 +74,12 @@ def hstu_mha(
             k=k,
             v=v,
             seq_offsets=seq_offsets,
-            invalid_attn_mask_type=invalid_attn_mask_type,
+            causal=causal,
             num_targets=num_targets,
-            attn_bias=attn_bias,
-            seq2_offsets=seq2_offsets,
-            triton_cc=kernel == HammerKernel.TRITON_CC,
             max_attn_len=max_attn_len,
             contextual_seq_len=contextual_seq_len,
             sort_by_length=sort_by_length,
+            triton_cc=kernel == HammerKernel.TRITON_CC,
         )
     else:
         return pytorch_hstu_mha(
@@ -108,12 +88,11 @@ def hstu_mha(
             q=q,
             k=k,
             v=v,
+            seq_offsets=seq_offsets,
+            causal=causal,
             dropout_pr=dropout_pr,
             training=training,
-            seq_offsets=seq_offsets,
-            invalid_attn_mask_type=invalid_attn_mask_type,
             num_targets=num_targets,
-            attn_bias=attn_bias,
             max_attn_len=max_attn_len,
             contextual_seq_len=contextual_seq_len,
         )
@@ -131,8 +110,7 @@ def cached_hstu_mha(
     kernel: HammerKernel = HammerKernel.PYTORCH,
 ) -> torch.Tensor:
     L, H, D = delta_q.shape
-    seq_lengths = seq_offsets[1:] - seq_offsets[:-1]
-    B = seq_lengths.size(0)
+    B = seq_offsets.size(0) - 1
     if not is_fx_tracing():
         torch._assert(max_seq_len > 0, "max_seq_len must be larger than 0")
         torch._assert(delta_q.dim() == 3, "delta_q must be 3-D")
@@ -175,7 +153,6 @@ def cached_hstu_mha(
             k=k,
             v=v,
             delta_x_offsets=delta_x_offsets,
-            seq_lengths=seq_lengths,
             seq_offsets=seq_offsets,
             num_targets=num_targets,
             attn_bias=None,

@@ -14,8 +14,6 @@
 
 #!/usr/bin/env python3
 
-# pyre-unsafe
-
 from typing import List, Optional, Tuple
 
 import torch
@@ -233,26 +231,10 @@ def _hstu_attn_fwd_one_block(  # noqa: C901
     K_block_ptr,
     V_block_ptr,
     n_targets,
-    ts_1_ptrs,
-    ts_0,
-    TW,
-    PW,
     alpha,
     MAX_SEQ_LEN,
-    num_buckets,
-    max_pos_ind,
-    time_bucket_incr,
-    time_bucket_div,
-    time_delta,
-    bias_ptrs,
     MAX_ATTN_LEN: tl.constexpr,
-    INVALID_MASK_TYPE: tl.constexpr,
     CAUSAL: tl.constexpr,
-    BUCKET_FN: tl.constexpr,
-    ATTN_BIAS_TYPE: tl.constexpr,
-    USE_TIME_BIAS: tl.constexpr,
-    USE_POS_BIAS: tl.constexpr,
-    HAS_MAX_POS_IND: tl.constexpr,
     HAS_MULTIPLE_TARGETS: tl.constexpr,
     CONTEXTUAL_SEQ_LEN: tl.constexpr,
     IS_DELTA_Q: tl.constexpr,
@@ -294,65 +276,17 @@ def _hstu_attn_fwd_one_block(  # noqa: C901
         )
     offs_n_minus_m = offs_n[None, :] - offs_m[:, None]
     if MAX_ATTN_LEN > 0:
-        if INVALID_MASK_TYPE == "lower_triangular":
+        if CAUSAL:
             invalid_mask = invalid_mask or (
                 offs_n_minus_m < 0 and offs_n_minus_m >= -MAX_ATTN_LEN
             )
     else:
-        if INVALID_MASK_TYPE == "lower_triangular":
+        if CAUSAL:
             invalid_mask = invalid_mask or offs_n_minus_m < 0
     if CONTEXTUAL_SEQ_LEN > 0:
         invalid_mask = invalid_mask or (
             offs_m[:, None] == 0 and offs_n[None, :] < max_ids
         )
-    if ATTN_BIAS_TYPE == "fused":
-        attn_bias = tl.zeros([BLOCK_M, BLOCK_N], dtype=tl.float32)
-        if USE_TIME_BIAS:
-            if CAUSAL:
-                ts_1 = tl.load(ts_1_ptrs + start_n, mask=mask_n)
-            else:
-                ts_1 = tl.load(ts_1_ptrs + start_n + 1, mask=mask_n)
-            ts = ts_0[:, None] - ts_1[None, :]
-            ts = ts + time_delta
-            ts = tl.where(ts > 1e-6, ts, 1e-6)
-            ts = ts * (1.0 / time_bucket_incr)
-            if BUCKET_FN == "log":
-                ts = tl.log(ts)
-            elif BUCKET_FN == "sqrt":
-                ts = tl.sqrt(ts)
-            ts = ts * (1.0 / time_bucket_div)
-            ts = ts.to(tl.int32)
-            ts = tl.where(ts > 0, ts, 0)
-            ts = tl.where(ts < num_buckets, ts, num_buckets)
-            ts_w = tl.load(
-                TW + ts,
-                mask=mask_m[:, None] and mask_n[None, :],
-            )
-            attn_bias = attn_bias + ts_w
-        if USE_POS_BIAS:
-            if HAS_MAX_POS_IND:
-                offs_pos_w = offs_n_minus_m + max_pos_ind - 1
-                offs_pos_w = tl.where(offs_pos_w > 0, offs_pos_w, 0)
-                offs_pos_w = tl.where(
-                    offs_pos_w < 2 * max_pos_ind - 2,
-                    offs_pos_w,
-                    2 * max_pos_ind - 2,
-                )
-            else:
-                offs_pos_w = offs_n_minus_m + MAX_SEQ_LEN - 1
-            pos_w = tl.load(
-                PW + offs_pos_w,
-                mask=mask_m[:, None] and mask_n[None, :],
-            )
-            attn_bias = attn_bias + pos_w
-        qk = qk + attn_bias
-    elif ATTN_BIAS_TYPE == "separate":
-        attn_bias = tl.load(
-            bias_ptrs + start_n,
-            mask=mask_m[:, None] & mask_n[None, :],
-            other=0.0,
-        )
-        qk = qk + attn_bias
     # pyre-fixme[16]: Module `math` has no attribute `fast_dividef`.
     silu = fast_dividef(qk, 1.0 + tl.exp(-qk)) * (1.0 / MAX_SEQ_LEN)
     silu = tl.where(invalid_mask, silu, 0)
@@ -367,11 +301,6 @@ def _hstu_attn_fwd_compute(  # noqa C901
     K,
     V,
     seq_offsets,
-    TS,
-    TW,
-    PW,
-    Bias,
-    seq2_offsets,
     delta_x_offsets,
     num_targets,
     Out,
@@ -381,7 +310,6 @@ def _hstu_attn_fwd_compute(  # noqa C901
     stride_kh,
     stride_vn,
     stride_vh,
-    stride_ts,
     stride_om,
     stride_oh,
     alpha,
@@ -391,21 +319,10 @@ def _hstu_attn_fwd_compute(  # noqa C901
     DimQ,
     DimV,
     DeltaSize,
-    num_buckets,
-    max_pos_ind,
-    time_bucket_incr,
-    time_bucket_div,
-    time_delta,
     off_z,
     off_h,
     pid,
-    INVALID_MASK_TYPE: tl.constexpr,
     CAUSAL: tl.constexpr,
-    BUCKET_FN: tl.constexpr,
-    ATTN_BIAS_TYPE: tl.constexpr,
-    USE_TIME_BIAS: tl.constexpr,
-    USE_POS_BIAS: tl.constexpr,
-    HAS_MAX_POS_IND: tl.constexpr,
     HAS_MULTIPLE_TARGETS: tl.constexpr,
     IS_DELTA_Q: tl.constexpr,
     ALLOW_TF32: tl.constexpr,
@@ -472,22 +389,10 @@ def _hstu_attn_fwd_compute(  # noqa C901
             order=(1, 0),
         )
         mask_m = offs_m < seq_len
-        if ATTN_BIAS_TYPE == "fused" and USE_TIME_BIAS:
-            ts_0_ptrs = TS + off_z * stride_ts + offs_m
-            ts_1_ptrs = TS + off_z * stride_ts + offs_n
-            if CAUSAL:
-                ts_0 = tl.load(ts_0_ptrs + 1, mask=mask_m)
-            else:
-                ts_0 = tl.load(ts_0_ptrs, mask=mask_m)
-        elif ATTN_BIAS_TYPE == "separate":
-            seq2_start = tl.load(seq2_offsets + off_z)
-            bias_start = seq2_start * H + off_h * seq_len * seq_len
-            off_bias = offs_m[:, None] * seq_len + offs_n[None, :]
-            bias_ptrs = Bias + bias_start + off_bias
 
         q = tl.load(Q_block_ptr, boundary_check=(0,), padding_option="zero")
         acc = tl.zeros([BLOCK_M, BLOCK_D_V], dtype=tl.float32)
-        if INVALID_MASK_TYPE == "lower_triangular":
+        if CAUSAL:
             if HAS_MULTIPLE_TARGETS:
                 if MAX_ATTN_LEN > 0:
                     if start_m > seq_len - n_targets:
@@ -517,7 +422,7 @@ def _hstu_attn_fwd_compute(  # noqa C901
                     if start_m < CONTEXTUAL_SEQ_LEN:
                         low = 0
                         high = seq_len
-        elif INVALID_MASK_TYPE == "upper_triangular":
+        else:
             low = start_m
             high = seq_len
         # pyre-ignore[61]
@@ -541,32 +446,11 @@ def _hstu_attn_fwd_compute(  # noqa C901
                 K_block_ptr=K_block_ptr,
                 V_block_ptr=V_block_ptr,
                 n_targets=n_targets if HAS_MULTIPLE_TARGETS else None,
-                ts_1_ptrs=(
-                    # pyre-ignore[61]
-                    ts_1_ptrs if ATTN_BIAS_TYPE == "fused" and USE_TIME_BIAS else None
-                ),
-                # pyre-ignore[61]
-                ts_0=ts_0 if ATTN_BIAS_TYPE == "fused" and USE_TIME_BIAS else None,
-                TW=TW,
-                PW=PW,
                 alpha=alpha,
                 MAX_SEQ_LEN=MAX_SEQ_LEN,
-                num_buckets=num_buckets,
-                max_pos_ind=max_pos_ind,
                 MAX_ATTN_LEN=MAX_ATTN_LEN,
-                time_bucket_incr=time_bucket_incr,
-                time_bucket_div=time_bucket_div,
-                time_delta=time_delta,
-                # pyre-ignore[61]
-                bias_ptrs=bias_ptrs if ATTN_BIAS_TYPE == "separate" else None,
                 CONTEXTUAL_SEQ_LEN=CONTEXTUAL_SEQ_LEN,
-                INVALID_MASK_TYPE=INVALID_MASK_TYPE,
                 CAUSAL=CAUSAL,
-                BUCKET_FN=BUCKET_FN,
-                ATTN_BIAS_TYPE=ATTN_BIAS_TYPE,
-                USE_TIME_BIAS=USE_TIME_BIAS,
-                USE_POS_BIAS=USE_POS_BIAS,
-                HAS_MAX_POS_IND=HAS_MAX_POS_IND,
                 HAS_MULTIPLE_TARGETS=HAS_MULTIPLE_TARGETS,
                 IS_DELTA_Q=IS_DELTA_Q,
                 ALLOW_TF32=ALLOW_TF32,
@@ -576,7 +460,7 @@ def _hstu_attn_fwd_compute(  # noqa C901
             K_block_ptr = tl.advance(K_block_ptr, (0, BLOCK_N))
             V_block_ptr = tl.advance(V_block_ptr, (BLOCK_N, 0))
 
-        if HAS_MULTIPLE_TARGETS and INVALID_MASK_TYPE == "lower_triangular":
+        if HAS_MULTIPLE_TARGETS and CAUSAL:
             # pyre-ignore[61]
             if uih_end < start_m:
                 low_delta = start_m
@@ -600,38 +484,11 @@ def _hstu_attn_fwd_compute(  # noqa C901
                         K_block_ptr=K_block_ptr,
                         V_block_ptr=V_block_ptr,
                         n_targets=n_targets if HAS_MULTIPLE_TARGETS else None,
-                        ts_1_ptrs=(
-                            # pyre-ignore[61]
-                            ts_1_ptrs
-                            if ATTN_BIAS_TYPE == "fused" and USE_TIME_BIAS
-                            else None
-                        ),
-                        ts_0=(
-                            # pyre-ignore[61]
-                            ts_0
-                            if ATTN_BIAS_TYPE == "fused" and USE_TIME_BIAS
-                            else None
-                        ),
-                        TW=TW,
-                        PW=PW,
                         alpha=alpha,
                         MAX_SEQ_LEN=MAX_SEQ_LEN,
-                        num_buckets=num_buckets,
-                        max_pos_ind=max_pos_ind,
                         MAX_ATTN_LEN=MAX_ATTN_LEN,
-                        time_bucket_incr=time_bucket_incr,
-                        time_bucket_div=time_bucket_div,
-                        time_delta=time_delta,
-                        # pyre-ignore[61]
-                        bias_ptrs=bias_ptrs if ATTN_BIAS_TYPE == "separate" else None,
                         CONTEXTUAL_SEQ_LEN=CONTEXTUAL_SEQ_LEN,
-                        INVALID_MASK_TYPE=INVALID_MASK_TYPE,
                         CAUSAL=CAUSAL,
-                        BUCKET_FN=BUCKET_FN,
-                        ATTN_BIAS_TYPE=ATTN_BIAS_TYPE,
-                        USE_TIME_BIAS=USE_TIME_BIAS,
-                        USE_POS_BIAS=USE_POS_BIAS,
-                        HAS_MAX_POS_IND=HAS_MAX_POS_IND,
                         HAS_MULTIPLE_TARGETS=HAS_MULTIPLE_TARGETS,
                         IS_DELTA_Q=IS_DELTA_Q,
                         ALLOW_TF32=ALLOW_TF32,
@@ -666,8 +523,6 @@ def _hstu_attn_fwd_compute(  # noqa C901
         "AUTOTUNE_MAX_SEQ_LEN",
         "DimQ",
         "DimV",
-        "BUCKET_FN",
-        "ATTN_BIAS_TYPE",
         "DeltaSize",
         "IS_DELTA_Q",
     ],
@@ -679,11 +534,6 @@ def _hstu_attn_fwd(  # noqa C901
     V,
     sort_by_length_indices,
     seq_offsets,
-    TS,
-    TW,
-    PW,
-    Bias,
-    seq2_offsets,
     delta_x_offsets,
     num_targets,
     Out,
@@ -693,7 +543,6 @@ def _hstu_attn_fwd(  # noqa C901
     stride_kh,
     stride_vn,
     stride_vh,
-    stride_ts,
     stride_om,
     stride_oh,
     alpha,
@@ -705,18 +554,7 @@ def _hstu_attn_fwd(  # noqa C901
     DimQ,
     DimV,
     DeltaSize,
-    num_buckets,
-    max_pos_ind,
-    time_bucket_incr,
-    time_bucket_div,
-    time_delta,
-    INVALID_MASK_TYPE: tl.constexpr,
     CAUSAL: tl.constexpr,
-    BUCKET_FN: tl.constexpr,
-    ATTN_BIAS_TYPE: tl.constexpr,
-    USE_TIME_BIAS: tl.constexpr,
-    USE_POS_BIAS: tl.constexpr,
-    HAS_MAX_POS_IND: tl.constexpr,
     HAS_MULTIPLE_TARGETS: tl.constexpr,
     IS_DELTA_Q: tl.constexpr,
     ALLOW_TF32: tl.constexpr,
@@ -739,11 +577,6 @@ def _hstu_attn_fwd(  # noqa C901
         K=K,
         V=V,
         seq_offsets=seq_offsets,
-        TS=TS,
-        TW=TW,
-        PW=PW,
-        Bias=Bias,
-        seq2_offsets=seq2_offsets,
         delta_x_offsets=delta_x_offsets,
         num_targets=num_targets,
         Out=Out,
@@ -753,7 +586,6 @@ def _hstu_attn_fwd(  # noqa C901
         stride_kh=stride_kh,
         stride_vn=stride_vn,
         stride_vh=stride_vh,
-        stride_ts=stride_ts,
         stride_om=stride_om,
         stride_oh=stride_oh,
         alpha=alpha,
@@ -763,21 +595,10 @@ def _hstu_attn_fwd(  # noqa C901
         DimQ=DimQ,
         DimV=DimV,
         DeltaSize=DeltaSize,
-        num_buckets=num_buckets,
-        max_pos_ind=max_pos_ind,
-        time_bucket_incr=time_bucket_incr,
-        time_bucket_div=time_bucket_div,
-        time_delta=time_delta,
         off_z=off_z,
         off_h=off_h,
         pid=pid,
-        INVALID_MASK_TYPE=INVALID_MASK_TYPE,
         CAUSAL=CAUSAL,
-        BUCKET_FN=BUCKET_FN,
-        ATTN_BIAS_TYPE=ATTN_BIAS_TYPE,
-        USE_TIME_BIAS=USE_TIME_BIAS,
-        USE_POS_BIAS=USE_POS_BIAS,
-        HAS_MAX_POS_IND=HAS_MAX_POS_IND,
         HAS_MULTIPLE_TARGETS=HAS_MULTIPLE_TARGETS,
         IS_DELTA_Q=IS_DELTA_Q,
         ALLOW_TF32=ALLOW_TF32,
@@ -798,8 +619,6 @@ def _hstu_attn_fwd(  # noqa C901
         "AUTOTUNE_MAX_SEQ_LEN",
         "DimQ",
         "DimV",
-        "BUCKET_FN",
-        "ATTN_BIAS_TYPE",
         "DeltaSize",
         "IS_DELTA_Q",
     ],
@@ -811,11 +630,6 @@ def _hstu_attn_fwd_persistent(  # noqa C901
     V,
     sort_by_length_indices,
     seq_offsets,
-    TS,
-    TW,
-    PW,
-    Bias,
-    seq2_offsets,
     delta_x_offsets,
     num_targets,
     Out,
@@ -825,7 +639,6 @@ def _hstu_attn_fwd_persistent(  # noqa C901
     stride_kh,
     stride_vn,
     stride_vh,
-    stride_ts,
     stride_om,
     stride_oh,
     alpha,
@@ -837,18 +650,7 @@ def _hstu_attn_fwd_persistent(  # noqa C901
     DimQ,
     DimV,
     DeltaSize,
-    num_buckets,
-    max_pos_ind,
-    time_bucket_incr,
-    time_bucket_div,
-    time_delta,
-    INVALID_MASK_TYPE: tl.constexpr,
     CAUSAL: tl.constexpr,
-    BUCKET_FN: tl.constexpr,
-    ATTN_BIAS_TYPE: tl.constexpr,
-    USE_TIME_BIAS: tl.constexpr,
-    USE_POS_BIAS: tl.constexpr,
-    HAS_MAX_POS_IND: tl.constexpr,
     HAS_MULTIPLE_TARGETS: tl.constexpr,
     IS_DELTA_Q: tl.constexpr,
     ALLOW_TF32: tl.constexpr,
@@ -881,11 +683,6 @@ def _hstu_attn_fwd_persistent(  # noqa C901
             K=K,
             V=V,
             seq_offsets=seq_offsets,
-            TS=TS,
-            TW=TW,
-            PW=PW,
-            Bias=Bias,
-            seq2_offsets=seq2_offsets,
             delta_x_offsets=delta_x_offsets,
             num_targets=num_targets,
             Out=Out,
@@ -895,7 +692,6 @@ def _hstu_attn_fwd_persistent(  # noqa C901
             stride_kh=stride_kh,
             stride_vn=stride_vn,
             stride_vh=stride_vh,
-            stride_ts=stride_ts,
             stride_om=stride_om,
             stride_oh=stride_oh,
             alpha=alpha,
@@ -905,21 +701,10 @@ def _hstu_attn_fwd_persistent(  # noqa C901
             DimQ=DimQ,
             DimV=DimV,
             DeltaSize=DeltaSize,
-            num_buckets=num_buckets,
-            max_pos_ind=max_pos_ind,
-            time_bucket_incr=time_bucket_incr,
-            time_bucket_div=time_bucket_div,
-            time_delta=time_delta,
             off_z=off_z,
             off_h=off_h,
             pid=pid,
-            INVALID_MASK_TYPE=INVALID_MASK_TYPE,
             CAUSAL=CAUSAL,
-            BUCKET_FN=BUCKET_FN,
-            ATTN_BIAS_TYPE=ATTN_BIAS_TYPE,
-            USE_TIME_BIAS=USE_TIME_BIAS,
-            USE_POS_BIAS=USE_POS_BIAS,
-            HAS_MAX_POS_IND=HAS_MAX_POS_IND,
             HAS_MULTIPLE_TARGETS=HAS_MULTIPLE_TARGETS,
             IS_DELTA_Q=IS_DELTA_Q,
             ALLOW_TF32=ALLOW_TF32,
@@ -936,10 +721,7 @@ def _hstu_attn_fwd_persistent(  # noqa C901
 # pyre-ignore[11]
 def _get_named_specs() -> List[VersionedSpec]:
     s: int = 16
-    INVALID_MASK_TYPE: str = "lower_triangular"
     CAUSAL: bool = True
-    USE_TIME_BIAS: bool = True
-    USE_POS_BIAS: bool = True
 
     # pyre-ignore[11]
     def _common_specs(dtype: str = "*bf16") -> NamedSpecType:
@@ -948,9 +730,6 @@ def _get_named_specs() -> List[VersionedSpec]:
             "K": (dtype, s),
             "V": (dtype, s),
             "seq_offsets": ("*i64", s),
-            "TS": ("*i64", s),
-            "Bias": (dtype, s, False),
-            "seq2_offsets": ("*i64", s, False),
             "Out": (dtype, s),
             "stride_qm": ("i32", s),
             "stride_qh": ("i32", s),
@@ -958,7 +737,6 @@ def _get_named_specs() -> List[VersionedSpec]:
             "stride_kh": ("i32", s),
             "stride_vn": ("i32", s),
             "stride_vh": ("i32", s),
-            "stride_ts": "i32",
             "stride_om": ("i32", s),
             "stride_oh": ("i32", s),
             "alpha": "fp32",
@@ -970,16 +748,8 @@ def _get_named_specs() -> List[VersionedSpec]:
             "DimQ": "i32",
             "DimV": "i32",
             "DeltaSize": "i32",
-            "num_buckets": "i32",
-            "max_pos_ind": "i32",
-            "time_bucket_incr": "fp32",
-            "time_bucket_div": "fp32",
-            "time_delta": "fp32",
             "sort_by_length_indices": ("*i64", s, False),
-            "INVALID_MASK_TYPE": INVALID_MASK_TYPE,
             "CAUSAL": CAUSAL,
-            "USE_TIME_BIAS": USE_TIME_BIAS,
-            "USE_POS_BIAS": USE_POS_BIAS,
             "BLOCK_M": -1,  # autotuned
             "BLOCK_N": -1,  # autotuned
             "MAX_ATTN_LEN": 0,
@@ -997,38 +767,9 @@ def _get_named_specs() -> List[VersionedSpec]:
         [
             VersionedSpec(
                 spec={
-                    "TW": ("*bf16", s),
-                    "PW": ("*bf16", s),
                     "delta_x_offsets": ("*i64", s, False),
                     "num_targets": ("*i64", s, False),
-                    "HAS_MAX_POS_IND": has_max_pos_ind,
                     "HAS_MULTIPLE_TARGETS": False,
-                    "ATTN_BIAS_TYPE": "fused",
-                    "BUCKET_FN": "sqrt",
-                    "IS_DELTA_Q": False,
-                    "BLOCK_D_Q": 128,
-                    "BLOCK_D_V": 128,
-                    "ALLOW_TF32": True,
-                    **_common_specs(dtype="*bf16"),
-                },
-                default_values=default_values,
-                # `(dict, name)` denotes the version with name will be used in production,
-                # and the kernel with this spec will be added to predictor.
-                version="standalone_magic",
-            )
-            for has_max_pos_ind in [False, True]
-        ]
-        + [
-            VersionedSpec(
-                spec={
-                    "TW": (dtype, s),
-                    "PW": (dtype, s),
-                    "delta_x_offsets": ("*i64", s, False),
-                    "num_targets": ("*i64", s, False),
-                    "HAS_MAX_POS_IND": has_max_pos_ind,
-                    "HAS_MULTIPLE_TARGETS": False,
-                    "ATTN_BIAS_TYPE": "fused",
-                    "BUCKET_FN": "sqrt",
                     "IS_DELTA_Q": False,
                     "BLOCK_D_Q": block_dq,
                     "BLOCK_D_V": block_dv,
@@ -1039,43 +780,13 @@ def _get_named_specs() -> List[VersionedSpec]:
             )
             for dtype in ["*bf16", "*fp16"]
             for block_dq, block_dv in [(128, 128), (32, 64)]
-            for has_max_pos_ind in [False, True]
         ]
         + [
             VersionedSpec(
                 spec={
-                    "TW": dtype,
-                    "PW": dtype,
                     "delta_x_offsets": ("*i64", s, is_delta_q),
                     "num_targets": ("*i64", s, True),
-                    "HAS_MAX_POS_IND": has_max_pos_ind,
                     "HAS_MULTIPLE_TARGETS": True,
-                    "ATTN_BIAS_TYPE": "fused",
-                    "BUCKET_FN": "sqrt",
-                    "IS_DELTA_Q": is_delta_q,
-                    "BLOCK_D_Q": block,
-                    "BLOCK_D_V": block,
-                    "ALLOW_TF32": True,
-                    **_common_specs(dtype=dtype),
-                },
-                default_values=default_values,
-            )
-            for dtype in ["*bf16", "*fp16"]
-            for has_max_pos_ind in [True, False]
-            for block in [64, 128]
-            for is_delta_q in [True, False]
-        ]
-        + [
-            VersionedSpec(
-                spec={
-                    "TW": dtype,
-                    "PW": dtype,
-                    "delta_x_offsets": ("*i64", s, is_delta_q),
-                    "num_targets": ("*i64", s, True),
-                    "HAS_MAX_POS_IND": False,
-                    "HAS_MULTIPLE_TARGETS": True,
-                    "ATTN_BIAS_TYPE": "none",
-                    "BUCKET_FN": "none",
                     "IS_DELTA_Q": is_delta_q,
                     "BLOCK_D_Q": block,
                     "BLOCK_D_V": block,
@@ -1091,38 +802,9 @@ def _get_named_specs() -> List[VersionedSpec]:
         + [
             VersionedSpec(
                 spec={
-                    "TW": (dtype, s),
-                    "PW": (dtype, s),
-                    "delta_x_offsets": ("*i64", s, False),
-                    "num_targets": ("*i64", s, False),
-                    "HAS_MAX_POS_IND": has_max_pos_ind,
-                    "HAS_MULTIPLE_TARGETS": False,
-                    "ATTN_BIAS_TYPE": "fused",
-                    "BUCKET_FN": "sqrt",
-                    "IS_DELTA_Q": False,
-                    "BLOCK_D_Q": block_dq,
-                    "BLOCK_D_V": block_dv,
-                    "ALLOW_TF32": True,
-                    **_common_specs(dtype=dtype),
-                },
-                default_values=default_values,
-                version="standalone_cint_v5",
-            )
-            for dtype in ["*bf16", "*fp16"]
-            for block_dq, block_dv in [(128, 128), (32, 64)]
-            for has_max_pos_ind in [False, True]
-        ]
-        + [
-            VersionedSpec(
-                spec={
-                    "TW": dtype,
-                    "PW": dtype,
                     "delta_x_offsets": ("*i64", s, is_delta_q),
                     "num_targets": ("*i64", s, True),
-                    "HAS_MAX_POS_IND": has_max_pos_ind,
                     "HAS_MULTIPLE_TARGETS": True,
-                    "ATTN_BIAS_TYPE": "fused",
-                    "BUCKET_FN": "sqrt",
                     "IS_DELTA_Q": is_delta_q,
                     "BLOCK_D_Q": block,
                     "BLOCK_D_V": block,
@@ -1130,295 +812,8 @@ def _get_named_specs() -> List[VersionedSpec]:
                     **_common_specs(dtype=dtype),
                 },
                 default_values=default_values,
-                version="standalone_cint_v5",
             )
             for dtype in ["*bf16", "*fp16"]
-            for has_max_pos_ind in [True, False]
-            for block in [64, 128]
-            for is_delta_q in [True, False]
-        ]
-        + [
-            VersionedSpec(
-                spec={
-                    "TW": dtype,
-                    "PW": dtype,
-                    "delta_x_offsets": ("*i64", s, is_delta_q),
-                    "num_targets": ("*i64", s, True),
-                    "HAS_MAX_POS_IND": False,
-                    "HAS_MULTIPLE_TARGETS": True,
-                    "ATTN_BIAS_TYPE": "none",
-                    "BUCKET_FN": "none",
-                    "IS_DELTA_Q": is_delta_q,
-                    "BLOCK_D_Q": block,
-                    "BLOCK_D_V": block,
-                    "ALLOW_TF32": True,
-                    **_common_specs(dtype=dtype),
-                },
-                default_values=default_values,
-                version="standalone_cint_v5",
-            )
-            for dtype in ["*bf16", "*fp16"]
-            for block in [64, 128]
-            for is_delta_q in [True, False]
-        ]
-        + [
-            VersionedSpec(
-                spec={
-                    "TW": "*bf16",
-                    "PW": "*bf16",
-                    "delta_x_offsets": ("*i64", s, is_delta_q),
-                    "num_targets": ("*i64", s, True),
-                    "HAS_MAX_POS_IND": has_max_pos_ind,
-                    "HAS_MULTIPLE_TARGETS": True,
-                    "ATTN_BIAS_TYPE": "fused",
-                    "BUCKET_FN": "sqrt",
-                    "IS_DELTA_Q": is_delta_q,
-                    "BLOCK_D_Q": block,
-                    "BLOCK_D_V": block,
-                    "ALLOW_TF32": True,
-                    **_common_specs(dtype="*bf16"),
-                },
-                default_values=default_values,
-                version="standalone_cint_v1",
-            )
-            for has_max_pos_ind in [True, False]
-            for block in [64, 128]
-            for is_delta_q in [False]
-        ]
-        + [
-            VersionedSpec(
-                spec={
-                    "TW": "*bf16",
-                    "PW": "*bf16",
-                    "delta_x_offsets": ("*i64", s, is_delta_q),
-                    "num_targets": ("*i64", s, True),
-                    "HAS_MAX_POS_IND": False,
-                    "HAS_MULTIPLE_TARGETS": True,
-                    "ATTN_BIAS_TYPE": "none",
-                    "BUCKET_FN": "none",
-                    "IS_DELTA_Q": is_delta_q,
-                    "BLOCK_D_Q": block,
-                    "BLOCK_D_V": block,
-                    "ALLOW_TF32": True,
-                    **_common_specs(dtype="*bf16"),
-                },
-                default_values=default_values,
-                version="standalone_cint_v1",
-            )
-            for block in [64, 128]
-            for is_delta_q in [False]
-        ]
-        + [
-            VersionedSpec(
-                spec={
-                    "TW": "*bf16",
-                    "PW": "*bf16",
-                    "delta_x_offsets": ("*i64", s, is_delta_q),
-                    "num_targets": ("*i32", s, True),
-                    "HAS_MAX_POS_IND": has_max_pos_ind,
-                    "HAS_MULTIPLE_TARGETS": True,
-                    "ATTN_BIAS_TYPE": "fused",
-                    "BUCKET_FN": "sqrt",
-                    "IS_DELTA_Q": is_delta_q,
-                    "BLOCK_D_Q": block,
-                    "BLOCK_D_V": block,
-                    "ALLOW_TF32": True,
-                    **_common_specs(dtype="*bf16"),
-                },
-                default_values=default_values,
-                version="standalone_cint_v2",
-            )
-            for has_max_pos_ind in [True, False]
-            for block in [64, 128]
-            for is_delta_q in [True, False]
-        ]
-        + [
-            VersionedSpec(
-                spec={
-                    "TW": "*bf16",
-                    "PW": "*bf16",
-                    "delta_x_offsets": ("*i64", s, is_delta_q),
-                    "num_targets": ("*i32", s, True),
-                    "HAS_MAX_POS_IND": False,
-                    "HAS_MULTIPLE_TARGETS": True,
-                    "ATTN_BIAS_TYPE": "none",
-                    "BUCKET_FN": "none",
-                    "IS_DELTA_Q": is_delta_q,
-                    "BLOCK_D_Q": block,
-                    "BLOCK_D_V": block,
-                    "ALLOW_TF32": True,
-                    **_common_specs(dtype="*bf16"),
-                },
-                default_values=default_values,
-                version="standalone_cint_v2",
-            )
-            for block in [64, 128]
-            for is_delta_q in [True, False]
-        ]
-        + [
-            # standalone magic model
-            VersionedSpec(
-                spec={
-                    "TW": ("*bf16", s),
-                    "PW": ("*bf16", s),
-                    "delta_x_offsets": ("*i64", s, False),
-                    "num_targets": ("*i64", s, False),
-                    "HAS_MAX_POS_IND": has_max_pos_ind,
-                    "HAS_MULTIPLE_TARGETS": False,
-                    "ATTN_BIAS_TYPE": "fused",
-                    "BUCKET_FN": "sqrt",
-                    "IS_DELTA_Q": False,
-                    "BLOCK_D_Q": block_dq,
-                    "BLOCK_D_V": block_dv,
-                    "ALLOW_TF32": True,
-                    **_common_specs(dtype="*bf16"),
-                },
-                default_values=default_values,
-                version="standalone_cint_v2",
-            )
-            for block_dq, block_dv in [(32, 64)]
-            for has_max_pos_ind in [False, True]
-        ]
-        + [
-            # standalone magic model without RAB
-            VersionedSpec(
-                spec={
-                    "TW": "*bf16",
-                    "PW": "*bf16",
-                    "delta_x_offsets": ("*i64", s, False),
-                    "num_targets": ("*i64", s, False),
-                    "HAS_MAX_POS_IND": has_max_pos_ind,
-                    "HAS_MULTIPLE_TARGETS": False,
-                    "ATTN_BIAS_TYPE": "none",
-                    "BUCKET_FN": "none",
-                    "IS_DELTA_Q": False,
-                    "BLOCK_D_Q": block_dq,
-                    "BLOCK_D_V": block_dv,
-                    "ALLOW_TF32": True,
-                    **_common_specs(dtype="*bf16"),
-                },
-                default_values=default_values,
-                version="standalone_cint_v2",
-            )
-            for block_dq, block_dv in [(32, 64)]
-            for has_max_pos_ind in [False, True]
-        ]
-        + [
-            VersionedSpec(
-                spec={
-                    "TW": ("*bf16", s),
-                    "PW": ("*bf16", s),
-                    "delta_x_offsets": ("*i64", s, False),
-                    "num_targets": ("*i32", s, False),
-                    "HAS_MAX_POS_IND": has_max_pos_ind,
-                    "HAS_MULTIPLE_TARGETS": False,
-                    "ATTN_BIAS_TYPE": "fused",
-                    "BUCKET_FN": "sqrt",
-                    "IS_DELTA_Q": False,
-                    "BLOCK_D_Q": block_dq,
-                    "BLOCK_D_V": block_dv,
-                    "ALLOW_TF32": True,
-                    **_common_specs(dtype="*bf16"),
-                },
-                default_values=default_values,
-                version="amd_standalone_cint_v2",
-            )
-            for block_dq, block_dv in [(128, 128), (32, 64)]
-            for has_max_pos_ind in [False, True]
-        ]
-        + [
-            VersionedSpec(
-                spec={
-                    "TW": "*bf16",
-                    "PW": "*bf16",
-                    "delta_x_offsets": ("*i64", s, is_delta_q),
-                    "num_targets": ("*i32", s, True),
-                    "HAS_MAX_POS_IND": has_max_pos_ind,
-                    "HAS_MULTIPLE_TARGETS": True,
-                    "ATTN_BIAS_TYPE": "fused",
-                    "BUCKET_FN": "sqrt",
-                    "IS_DELTA_Q": is_delta_q,
-                    "BLOCK_D_Q": block,
-                    "BLOCK_D_V": block,
-                    "ALLOW_TF32": True,
-                    **_common_specs(dtype="*bf16"),
-                },
-                default_values=default_values,
-                version="amd_standalone_cint_v2",
-            )
-            for has_max_pos_ind in [True, False]
-            for block in [64, 128]
-            for is_delta_q in [True, False]
-        ]
-        + [
-            VersionedSpec(
-                spec={
-                    "TW": "*bf16",
-                    "PW": "*bf16",
-                    "delta_x_offsets": ("*i64", s, is_delta_q),
-                    "num_targets": ("*i32", s, True),
-                    "HAS_MAX_POS_IND": False,
-                    "HAS_MULTIPLE_TARGETS": True,
-                    "ATTN_BIAS_TYPE": "none",
-                    "BUCKET_FN": "none",
-                    "IS_DELTA_Q": is_delta_q,
-                    "BLOCK_D_Q": block,
-                    "BLOCK_D_V": block,
-                    "ALLOW_TF32": True,
-                    **_common_specs(dtype="*bf16"),
-                },
-                default_values=default_values,
-                version="amd_standalone_cint_v2",
-            )
-            for block in [64, 128]
-            for is_delta_q in [True, False]
-        ]
-        + [
-            # with RAB
-            VersionedSpec(
-                spec={
-                    "TW": "*bf16",
-                    "PW": "*bf16",
-                    "delta_x_offsets": ("*i64", s, is_delta_q),
-                    "num_targets": ("*i32", s, True),
-                    "HAS_MAX_POS_IND": has_max_pos_ind,
-                    "HAS_MULTIPLE_TARGETS": True,
-                    "ATTN_BIAS_TYPE": "fused",
-                    "BUCKET_FN": "sqrt",
-                    "IS_DELTA_Q": is_delta_q,
-                    "BLOCK_D_Q": block,
-                    "BLOCK_D_V": block,
-                    "ALLOW_TF32": True,
-                    **_common_specs(dtype="*bf16"),
-                },
-                default_values=default_values,
-                version="standalone_cint_v4",
-            )
-            for has_max_pos_ind in [True, False]
-            for block in [64, 128]
-            for is_delta_q in [True, False]
-        ]
-        + [
-            # no RAB
-            VersionedSpec(
-                spec={
-                    "TW": "*bf16",
-                    "PW": "*bf16",
-                    "delta_x_offsets": ("*i64", s, is_delta_q),
-                    "num_targets": ("*i32", s, True),
-                    "HAS_MAX_POS_IND": False,
-                    "HAS_MULTIPLE_TARGETS": True,
-                    "ATTN_BIAS_TYPE": "none",
-                    "BUCKET_FN": "none",
-                    "IS_DELTA_Q": is_delta_q,
-                    "BLOCK_D_Q": block,
-                    "BLOCK_D_V": block,
-                    "ALLOW_TF32": True,
-                    **_common_specs(dtype="*bf16"),
-                },
-                default_values=default_values,
-                version="standalone_cint_v4",
-            )
             for block in [64, 128]
             for is_delta_q in [True, False]
         ]
@@ -1436,8 +831,6 @@ _hstu_attn_fwd = triton_autotune(
         "AUTOTUNE_MAX_SEQ_LEN",
         "DimQ",
         "DimV",
-        "BUCKET_FN",
-        "ATTN_BIAS_TYPE",
         "DeltaSize",
         "IS_DELTA_Q",
     ],
@@ -1454,8 +847,6 @@ _hstu_attn_fwd_persistent = triton_autotune(
         "AUTOTUNE_MAX_SEQ_LEN",
         "DimQ",
         "DimV",
-        "BUCKET_FN",
-        "ATTN_BIAS_TYPE",
         "DeltaSize",
         "IS_DELTA_Q",
     ],
@@ -1470,10 +861,6 @@ def _hstu_attn_bwd_one_block(  # noqa C901
     q_ptrs_trans,
     dq_ptrs_trans,
     mask_n,
-    ts_0_ptrs,
-    ts_1,
-    bias_ptrs_trans,
-    dbias_ptrs_trans,
     do_ptrs,
     dk,
     dv,
@@ -1483,30 +870,14 @@ def _hstu_attn_bwd_one_block(  # noqa C901
     seq_len,
     n_targets,
     max_ids,
-    TW,
-    PW,
-    DTW,
-    DPW,
     LOCK,
     stride_qm,
     stride_dom,
     stride_dqm,
     alpha,
     MAX_SEQ_LEN,
-    num_buckets,
-    max_pos_ind,
-    time_bucket_incr,
-    time_bucket_div,
-    time_delta,
     MAX_ATTN_LEN: tl.constexpr,
-    INVALID_MASK_TYPE: tl.constexpr,
     CAUSAL: tl.constexpr,
-    BUCKET_FN: tl.constexpr,
-    ATTN_BIAS_TYPE: tl.constexpr,
-    USE_TIME_BIAS: tl.constexpr,
-    USE_POS_BIAS: tl.constexpr,
-    FUSED_BIAS_BWD: tl.constexpr,
-    HAS_MAX_POS_IND: tl.constexpr,
     HAS_MULTIPLE_TARGETS: tl.constexpr,
     CONTEXTUAL_SEQ_LEN: tl.constexpr,
     ALLOW_TF32: tl.constexpr,
@@ -1537,70 +908,17 @@ def _hstu_attn_bwd_one_block(  # noqa C901
         other=0.0,
     )
     qk_trans = tl.dot(k, q_trans, allow_tf32=ALLOW_TF32) * alpha
-    if ATTN_BIAS_TYPE == "fused":
-        attn_bias_trans = tl.zeros([BLOCK_N, BLOCK_M], dtype=tl.float32)
-        if USE_TIME_BIAS:
-            if CAUSAL:
-                ts_0 = tl.load(ts_0_ptrs + start_m + 1, mask=mask_m)
-            else:
-                ts_0 = tl.load(ts_0_ptrs + start_m, mask=mask_m)
-            ts_trans = ts_0[None, :] - ts_1[:, None]
-            ts_trans = ts_trans + time_delta
-            ts_trans = tl.where(ts_trans > 1e-6, ts_trans, 1e-6)
-            ts_trans = ts_trans * (1.0 / time_bucket_incr)
-            if BUCKET_FN == "log":
-                ts_trans = tl.log(ts_trans)
-            elif BUCKET_FN == "sqrt":
-                ts_trans = tl.sqrt(ts_trans)
-            ts_trans = ts_trans * (1.0 / time_bucket_div)
-            ts_trans = ts_trans.to(tl.int32)
-            ts_trans = tl.where(ts_trans > 0, ts_trans, 0)
-            ts_trans = tl.where(ts_trans < num_buckets, ts_trans, num_buckets)
-            ts_w_trans = tl.load(
-                TW + ts_trans,
-                mask=mask_m[None, :] and mask_n[:, None],
-            )
-            attn_bias_trans = attn_bias_trans + ts_w_trans
-        if USE_POS_BIAS:
-            offs_pos_w_trans = None
-            if HAS_MAX_POS_IND:
-                offs_pos_w_trans = (
-                    pos_offs_n[:, None] - pos_offs_m[None, :] + max_pos_ind - 1
-                )
-                offs_pos_w_trans = tl.where(offs_pos_w_trans > 0, offs_pos_w_trans, 0)
-                offs_pos_w_trans = tl.where(
-                    offs_pos_w_trans < 2 * max_pos_ind - 2,
-                    offs_pos_w_trans,
-                    2 * max_pos_ind - 2,
-                )
-            else:
-                offs_pos_w_trans = (
-                    pos_offs_n[:, None] - pos_offs_m[None, :] + MAX_SEQ_LEN - 1
-                )
-            pos_w_trans = tl.load(
-                PW + offs_pos_w_trans,
-                mask=mask_m[None, :] and mask_n[:, None],
-            )
-            attn_bias_trans = attn_bias_trans + pos_w_trans
-        qk_trans = qk_trans + attn_bias_trans
-    elif ATTN_BIAS_TYPE == "separate":
-        attn_bias_trans = tl.load(
-            bias_ptrs_trans + start_m * seq_len,
-            mask=mask_m[None, :] & mask_n[:, None],
-            other=0.0,
-        )
-        qk_trans = qk_trans + attn_bias_trans
     # pyre-fixme[16]: Module `math` has no attribute `fast_dividef`.
     sig_trans = fast_dividef(1.0, 1.0 + tl.exp(-qk_trans))
     silu_trans = qk_trans * sig_trans * (1.0 / MAX_SEQ_LEN)
     if MAX_ATTN_LEN > 0:
-        if INVALID_MASK_TYPE == "lower_triangular":
+        if CAUSAL:
             invalid_mask_trans = invalid_mask_trans or (
                 pos_offs_m[None, :] > pos_offs_n[:, None]
                 and pos_offs_n[:, None] - pos_offs_m[None, :] >= -MAX_ATTN_LEN
             )
     else:
-        if INVALID_MASK_TYPE == "lower_triangular":
+        if CAUSAL:
             invalid_mask_trans = (
                 invalid_mask_trans or pos_offs_m[None, :] > pos_offs_n[:, None]
             )
@@ -1626,29 +944,6 @@ def _hstu_attn_bwd_one_block(  # noqa C901
     dqk_trans = tl.where(invalid_mask_trans, dqk_trans, 0)
     dqk_trans = dqk_trans.to(k.dtype)
 
-    if ATTN_BIAS_TYPE == "fused" and FUSED_BIAS_BWD:
-        if USE_TIME_BIAS:
-            tl.atomic_add(
-                # pyre-ignore[61]
-                DTW + ts_trans,
-                dqk_trans,
-                mask=mask_m[None, :] & mask_n[:, None] & invalid_mask_trans,
-                sem="relaxed",
-            )
-        if USE_POS_BIAS:
-            tl.atomic_add(
-                # pyre-ignore[61]
-                DPW + offs_pos_w_trans,
-                dqk_trans,
-                mask=mask_m[None, :] & mask_n[:, None] & invalid_mask_trans,
-                sem="relaxed",
-            )
-    elif ATTN_BIAS_TYPE == "separate":
-        tl.store(
-            dbias_ptrs_trans + start_m * seq_len,
-            dqk_trans,
-            mask=mask_m[None, :] & mask_n[:, None],
-        )
     # Note: the factor `alpha` is delayed until the end of the function to reduce the cost
     dk += tl.dot(dqk_trans, tl.trans(q_trans), allow_tf32=ALLOW_TF32)
     if ATOMIC_ADD:
@@ -1685,17 +980,10 @@ def _hstu_attn_bwd_one_col_block(  # noqa C901
     Q,
     K,
     V,
-    TS,
-    TW,
-    PW,
-    Bias,
     DOut,
     DQ,
     DK,
     DV,
-    DBias,
-    DTW,
-    DPW,
     LOCK,
     stride_qm,
     stride_kn,
@@ -1706,20 +994,8 @@ def _hstu_attn_bwd_one_col_block(  # noqa C901
     stride_dvn,
     alpha,
     MAX_SEQ_LEN,
-    num_buckets,
-    max_pos_ind,
-    time_bucket_incr,
-    time_bucket_div,
-    time_delta,
     MAX_ATTN_LEN: tl.constexpr,
-    INVALID_MASK_TYPE: tl.constexpr,
     CAUSAL: tl.constexpr,
-    BUCKET_FN: tl.constexpr,
-    ATTN_BIAS_TYPE: tl.constexpr,
-    USE_TIME_BIAS: tl.constexpr,
-    USE_POS_BIAS: tl.constexpr,
-    FUSED_BIAS_BWD: tl.constexpr,
-    HAS_MAX_POS_IND: tl.constexpr,
     HAS_MULTIPLE_TARGETS: tl.constexpr,
     CONTEXTUAL_SEQ_LEN: tl.constexpr,
     ALLOW_TF32: tl.constexpr,
@@ -1731,7 +1007,7 @@ def _hstu_attn_bwd_one_col_block(  # noqa C901
     ATOMIC_ADD: tl.constexpr,
 ):
     # Work on the subsequence dv[start_n, start_n + BLOCK_N, :]
-    if INVALID_MASK_TYPE == "lower_triangular":
+    if CAUSAL:
         if HAS_MULTIPLE_TARGETS:
             low = start_n
             if MAX_ATTN_LEN > 0:
@@ -1767,23 +1043,6 @@ def _hstu_attn_bwd_one_col_block(  # noqa C901
     v_ptrs = V + (offs_n[:, None] * stride_vn + offs_v_d[None, :])
     mask_n = offs_n < seq_len
 
-    ts_0_ptrs = None
-    ts_1_ptrs = None
-    ts_1 = None
-    off_bias_trans = None
-    bias_ptrs_trans = None
-    dbias_ptrs_trans = None
-    if ATTN_BIAS_TYPE == "fused" and USE_TIME_BIAS:
-        ts_0_ptrs = TS + offs_m
-        ts_1_ptrs = TS + offs_n
-        if CAUSAL:
-            ts_1 = tl.load(ts_1_ptrs, mask=mask_n)
-        else:
-            ts_1 = tl.load(ts_1_ptrs + 1, mask=mask_n)
-    elif ATTN_BIAS_TYPE == "separate":
-        off_bias_trans = offs_m[None, :] * seq_len + offs_n[:, None]
-        bias_ptrs_trans = Bias + off_bias_trans
-        dbias_ptrs_trans = DBias + off_bias_trans
     do_ptrs = DOut + (offs_m[:, None] * stride_dom + offs_v_d[None, :])
     # initialize dv and dk
     dv = tl.zeros([BLOCK_N, BLOCK_D_V], dtype=tl.float32)
@@ -1810,7 +1069,7 @@ def _hstu_attn_bwd_one_col_block(  # noqa C901
             max_ids,
         )
     # loop over rows
-    if CONTEXTUAL_SEQ_LEN > 0 and INVALID_MASK_TYPE == "lower_triangular":
+    if CONTEXTUAL_SEQ_LEN > 0 and CAUSAL:
         for start_m in range(0, CONTEXTUAL_SEQ_LEN, BLOCK_M):
             start_m = tl.multiple_of(start_m, BLOCK_M)
             dk, dv = _hstu_attn_bwd_one_block(
@@ -1820,10 +1079,6 @@ def _hstu_attn_bwd_one_col_block(  # noqa C901
                 q_ptrs_trans=q_ptrs_trans,
                 dq_ptrs_trans=dq_ptrs_trans,
                 mask_n=mask_n,
-                ts_0_ptrs=ts_0_ptrs,
-                ts_1=ts_1,
-                bias_ptrs_trans=bias_ptrs_trans,
-                dbias_ptrs_trans=dbias_ptrs_trans,
                 do_ptrs=do_ptrs,
                 dk=dk,
                 dv=dv,
@@ -1833,30 +1088,14 @@ def _hstu_attn_bwd_one_col_block(  # noqa C901
                 seq_len=seq_len,
                 n_targets=n_targets,
                 max_ids=max_ids,
-                TW=TW,
-                PW=PW,
-                DTW=DTW,
-                DPW=DPW,
                 LOCK=LOCK,
                 stride_qm=stride_qm,
                 stride_dom=stride_dom,
                 stride_dqm=stride_dqm,
                 alpha=alpha,
                 MAX_SEQ_LEN=MAX_SEQ_LEN,
-                num_buckets=num_buckets,
-                max_pos_ind=max_pos_ind,
                 MAX_ATTN_LEN=MAX_ATTN_LEN,
-                time_bucket_incr=time_bucket_incr,
-                time_bucket_div=time_bucket_div,
-                time_delta=time_delta,
-                INVALID_MASK_TYPE=INVALID_MASK_TYPE,
                 CAUSAL=CAUSAL,
-                BUCKET_FN=BUCKET_FN,
-                ATTN_BIAS_TYPE=ATTN_BIAS_TYPE,
-                USE_TIME_BIAS=USE_TIME_BIAS,
-                USE_POS_BIAS=USE_POS_BIAS,
-                FUSED_BIAS_BWD=FUSED_BIAS_BWD,
-                HAS_MAX_POS_IND=HAS_MAX_POS_IND,
                 HAS_MULTIPLE_TARGETS=HAS_MULTIPLE_TARGETS,
                 CONTEXTUAL_SEQ_LEN=CONTEXTUAL_SEQ_LEN,
                 ALLOW_TF32=ALLOW_TF32,
@@ -1874,10 +1113,6 @@ def _hstu_attn_bwd_one_col_block(  # noqa C901
             q_ptrs_trans=q_ptrs_trans,
             dq_ptrs_trans=dq_ptrs_trans,
             mask_n=mask_n,
-            ts_0_ptrs=ts_0_ptrs,
-            ts_1=ts_1,
-            bias_ptrs_trans=bias_ptrs_trans,
-            dbias_ptrs_trans=dbias_ptrs_trans,
             do_ptrs=do_ptrs,
             dk=dk,
             dv=dv,
@@ -1887,30 +1122,14 @@ def _hstu_attn_bwd_one_col_block(  # noqa C901
             seq_len=seq_len,
             n_targets=n_targets,
             max_ids=max_ids,
-            TW=TW,
-            PW=PW,
-            DTW=DTW,
-            DPW=DPW,
             LOCK=LOCK,
             stride_qm=stride_qm,
             stride_dom=stride_dom,
             stride_dqm=stride_dqm,
             alpha=alpha,
             MAX_SEQ_LEN=MAX_SEQ_LEN,
-            num_buckets=num_buckets,
-            max_pos_ind=max_pos_ind,
             MAX_ATTN_LEN=MAX_ATTN_LEN,
-            time_bucket_incr=time_bucket_incr,
-            time_bucket_div=time_bucket_div,
-            time_delta=time_delta,
-            INVALID_MASK_TYPE=INVALID_MASK_TYPE,
             CAUSAL=CAUSAL,
-            BUCKET_FN=BUCKET_FN,
-            ATTN_BIAS_TYPE=ATTN_BIAS_TYPE,
-            USE_TIME_BIAS=USE_TIME_BIAS,
-            USE_POS_BIAS=USE_POS_BIAS,
-            FUSED_BIAS_BWD=FUSED_BIAS_BWD,
-            HAS_MAX_POS_IND=HAS_MAX_POS_IND,
             HAS_MULTIPLE_TARGETS=HAS_MULTIPLE_TARGETS,
             CONTEXTUAL_SEQ_LEN=0,
             ALLOW_TF32=ALLOW_TF32,
@@ -1928,10 +1147,6 @@ def _hstu_attn_bwd_one_col_block(  # noqa C901
 
 def _bwd_pre_hook(nargs):
     nargs["DQ"].zero_()
-    if nargs["DTW"] is not None:
-        nargs["DTW"].zero_()
-    if nargs["DPW"] is not None:
-        nargs["DPW"].zero_()
     if nargs["SEQUENCE_PARALLEL"] is True:
         nargs["LOCK"].zero_()
 
@@ -2144,8 +1359,6 @@ def _get_bw_configs() -> List[triton.Config]:
         "AUTOTUNE_MAX_SEQ_LEN",
         "DimQ",
         "DimV",
-        "BUCKET_FN",
-        "ATTN_BIAS_TYPE",
     ],
 )
 @triton.jit
@@ -2155,19 +1368,11 @@ def _hstu_attn_bwd(  # noqa C901
     V,
     sort_by_length_indices,
     seq_offsets,
-    TS,
-    TW,
-    PW,
-    Bias,
-    seq2_offsets,
     num_targets,
     DOut,
     DQ,
     DK,
     DV,
-    DBias,
-    DTW,
-    DPW,
     LOCK,
     stride_qm,
     stride_qh,
@@ -2175,7 +1380,6 @@ def _hstu_attn_bwd(  # noqa C901
     stride_kh,
     stride_vn,
     stride_vh,
-    stride_ts,
     stride_dom,
     stride_doh,
     stride_dqm,
@@ -2192,21 +1396,9 @@ def _hstu_attn_bwd(  # noqa C901
     AUTOTUNE_MAX_SEQ_LEN,  # Quantized MAX_SEQ_LEN used as an autotuning key
     DimQ,
     DimV,
-    num_buckets,
-    max_pos_ind,
-    time_bucket_incr,
-    time_bucket_div,
-    time_delta,
     CONTEXTUAL_SEQ_LEN: tl.constexpr,
     MAX_ATTN_LEN: tl.constexpr,
-    INVALID_MASK_TYPE: tl.constexpr,
     CAUSAL: tl.constexpr,
-    BUCKET_FN: tl.constexpr,
-    ATTN_BIAS_TYPE: tl.constexpr,
-    USE_TIME_BIAS: tl.constexpr,
-    USE_POS_BIAS: tl.constexpr,
-    FUSED_BIAS_BWD: tl.constexpr,
-    HAS_MAX_POS_IND: tl.constexpr,
     HAS_MULTIPLE_TARGETS: tl.constexpr,
     ALLOW_TF32: tl.constexpr,
     BLOCK_D_Q: tl.constexpr,
@@ -2238,23 +1430,6 @@ def _hstu_attn_bwd(  # noqa C901
     DQ = DQ + seq_start * stride_dqm + off_h * stride_dqh
     DK = DK + seq_start * stride_dkn + off_h * stride_dkh
     DV = DV + seq_start * stride_dvn + off_h * stride_dvh
-    if ATTN_BIAS_TYPE == "fused":
-        if USE_TIME_BIAS:
-            TS = TS + off_z * stride_ts
-        if FUSED_BIAS_BWD:
-            if USE_TIME_BIAS:
-                DTW = DTW + off_hz * (num_buckets + 1)
-            if USE_POS_BIAS:
-                if HAS_MAX_POS_IND:
-                    DPW = DPW + off_hz * (2 * max_pos_ind - 1)
-                else:
-                    DPW = DPW + off_hz * (2 * MAX_SEQ_LEN - 1)
-    elif ATTN_BIAS_TYPE == "separate":
-        seq2_start = tl.load(seq2_offsets + off_z)
-        bias_start = seq2_start * H + off_h * seq_len * seq_len
-        Bias = Bias + bias_start
-        DBias = DBias + bias_start
-
     if SEQUENCE_PARALLEL:
         start_n = tl.program_id(1) * BLOCK_N
         if start_n >= seq_len:
@@ -2266,17 +1441,10 @@ def _hstu_attn_bwd(  # noqa C901
             Q=Q,
             K=K,
             V=V,
-            TS=TS,
-            TW=TW,
-            PW=PW,
-            Bias=Bias,
             DOut=DOut,
             DQ=DQ,
             DK=DK,
             DV=DV,
-            DBias=DBias,
-            DTW=DTW,
-            DPW=DPW,
             LOCK=LOCK,
             stride_qm=stride_qm,
             stride_kn=stride_kn,
@@ -2287,20 +1455,8 @@ def _hstu_attn_bwd(  # noqa C901
             stride_dvn=stride_dvn,
             alpha=alpha,
             MAX_SEQ_LEN=MAX_SEQ_LEN,
-            num_buckets=num_buckets,
-            max_pos_ind=max_pos_ind,
             MAX_ATTN_LEN=MAX_ATTN_LEN,
-            time_bucket_incr=time_bucket_incr,
-            time_bucket_div=time_bucket_div,
-            time_delta=time_delta,
-            INVALID_MASK_TYPE=INVALID_MASK_TYPE,
             CAUSAL=CAUSAL,
-            BUCKET_FN=BUCKET_FN,
-            ATTN_BIAS_TYPE=ATTN_BIAS_TYPE,
-            USE_TIME_BIAS=USE_TIME_BIAS,
-            USE_POS_BIAS=USE_POS_BIAS,
-            FUSED_BIAS_BWD=FUSED_BIAS_BWD,
-            HAS_MAX_POS_IND=HAS_MAX_POS_IND,
             HAS_MULTIPLE_TARGETS=HAS_MULTIPLE_TARGETS,
             CONTEXTUAL_SEQ_LEN=CONTEXTUAL_SEQ_LEN,
             ALLOW_TF32=ALLOW_TF32,
@@ -2320,17 +1476,10 @@ def _hstu_attn_bwd(  # noqa C901
                 Q=Q,
                 K=K,
                 V=V,
-                TS=TS,
-                TW=TW,
-                PW=PW,
-                Bias=Bias,
                 DOut=DOut,
                 DQ=DQ,
                 DK=DK,
                 DV=DV,
-                DBias=DBias,
-                DTW=DTW,
-                DPW=DPW,
                 LOCK=LOCK,
                 stride_qm=stride_qm,
                 stride_kn=stride_kn,
@@ -2341,20 +1490,8 @@ def _hstu_attn_bwd(  # noqa C901
                 stride_dvn=stride_dvn,
                 alpha=alpha,
                 MAX_SEQ_LEN=MAX_SEQ_LEN,
-                num_buckets=num_buckets,
-                max_pos_ind=max_pos_ind,
                 MAX_ATTN_LEN=MAX_ATTN_LEN,
-                time_bucket_incr=time_bucket_incr,
-                time_bucket_div=time_bucket_div,
-                time_delta=time_delta,
-                INVALID_MASK_TYPE=INVALID_MASK_TYPE,
                 CAUSAL=CAUSAL,
-                BUCKET_FN=BUCKET_FN,
-                ATTN_BIAS_TYPE=ATTN_BIAS_TYPE,
-                USE_TIME_BIAS=USE_TIME_BIAS,
-                USE_POS_BIAS=USE_POS_BIAS,
-                FUSED_BIAS_BWD=FUSED_BIAS_BWD,
-                HAS_MAX_POS_IND=HAS_MAX_POS_IND,
                 HAS_MULTIPLE_TARGETS=HAS_MULTIPLE_TARGETS,
                 CONTEXTUAL_SEQ_LEN=CONTEXTUAL_SEQ_LEN,
                 ALLOW_TF32=ALLOW_TF32,
@@ -2367,37 +1504,27 @@ def _hstu_attn_bwd(  # noqa C901
             )
 
 
-def triton_attention_fwd(
+def triton_hstu_attention_fwd(
     N: int,
     alpha: float,
     q: torch.Tensor,
     k: torch.Tensor,
     v: torch.Tensor,
     seq_offsets: torch.Tensor,
-    invalid_attn_mask_type: str,
+    causal: bool,
     num_targets: Optional[torch.Tensor],
-    attn_bias: Optional[torch.Tensor],
-    seq2_offsets: Optional[torch.Tensor],
     max_attn_len: Optional[int],
     contextual_seq_len: Optional[int],
     sort_by_length_indices: Optional[torch.Tensor],
 ) -> torch.Tensor:
-    assert invalid_attn_mask_type in [
-        "lower_triangular",
-        "upper_triangular",
-    ]
-    if invalid_attn_mask_type != "lower_triangular":
-        assert contextual_seq_len is None or contextual_seq_len == 0
     Z = seq_offsets.numel() - 1
     AUTOTUNE_Z = prev_power_of_2(Z)
     L, H, DimQ = q.shape
     _, _, DimV = v.shape
-
     out = torch.empty_like(v)
     max_attn_len = max_attn_len or 0
     contextual_seq_len = contextual_seq_len or 0
     has_multiple_targets = num_targets is not None
-    has_attn_bias = attn_bias is not None
     has_sort_by_length_indices = sort_by_length_indices is not None
     if L == 0:
         return out
@@ -2413,11 +1540,6 @@ def triton_attention_fwd(
         V=v,
         sort_by_length_indices=sort_by_length_indices,
         seq_offsets=seq_offsets,
-        TS=None,
-        TW=None,
-        PW=None,
-        Bias=attn_bias,
-        seq2_offsets=seq2_offsets,
         delta_x_offsets=None,
         num_targets=num_targets,
         Out=out,
@@ -2427,7 +1549,6 @@ def triton_attention_fwd(
         stride_kh=k.stride(1),
         stride_vn=v.stride(0),
         stride_vh=v.stride(1),
-        stride_ts=None,
         stride_om=out.stride(0),
         stride_oh=out.stride(1),
         alpha=alpha,
@@ -2439,18 +1560,7 @@ def triton_attention_fwd(
         DimQ=DimQ,
         DimV=DimV,
         DeltaSize=0,
-        num_buckets=None,
-        max_pos_ind=None,
-        time_bucket_incr=None,
-        time_bucket_div=None,
-        time_delta=None,
-        INVALID_MASK_TYPE=invalid_attn_mask_type,
-        CAUSAL=None,
-        BUCKET_FN="none",
-        ATTN_BIAS_TYPE="separate" if has_attn_bias else "none",
-        USE_TIME_BIAS=False,
-        USE_POS_BIAS=False,
-        HAS_MAX_POS_IND=False,
+        CAUSAL=causal,
         HAS_MULTIPLE_TARGETS=has_multiple_targets,
         IS_DELTA_Q=False,
         ALLOW_TF32=torch.backends.cuda.matmul.allow_tf32,
@@ -2463,7 +1573,7 @@ def triton_attention_fwd(
     return out
 
 
-def triton_attention_bwd(
+def triton_hstu_attention_bwd(
     dout: torch.Tensor,
     q: torch.Tensor,
     k: torch.Tensor,
@@ -2472,35 +1582,23 @@ def triton_attention_bwd(
     dk: torch.Tensor,
     dv: torch.Tensor,
     seq_offsets: torch.Tensor,
-    attn_bias: Optional[torch.Tensor],
-    seq2_offsets: Optional[torch.Tensor],
     num_targets: Optional[torch.Tensor],
     N: int,
     alpha: float,
     max_attn_len: int,
-    invalid_attn_mask_type: float,
+    causal: float,
     contextual_seq_len: Optional[int],
     sort_by_length_indices: Optional[torch.Tensor],
-) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, Optional[torch.Tensor]]:
+) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     dout = switch_to_contiguous_if_needed(dout)
     dq = switch_to_contiguous_if_needed(dq)
     dk = switch_to_contiguous_if_needed(dk)
     dv = switch_to_contiguous_if_needed(dv)
     if dout.shape[0] == 0:
-        if attn_bias is not None:
-            dbias = torch.zeros_like(attn_bias)
-            assert dbias.is_contiguous()
-        else:
-            dbias = None
-        return torch.zeros_like(q), torch.zeros_like(k), torch.zeros_like(v), dbias
+        return torch.zeros_like(q), torch.zeros_like(k), torch.zeros_like(v)
     Z = seq_offsets.numel() - 1
     _, H, DimQ = q.shape
     _, _, DimV = v.shape
-    if attn_bias is not None:
-        dbias = torch.zeros_like(attn_bias)
-        assert dbias.is_contiguous()
-    else:
-        dbias = None
     grid = lambda meta: (  # noqa E731
         Z * H,
         (triton.cdiv(N, meta["BLOCK_N"]) if meta["SEQUENCE_PARALLEL"] else 1),
@@ -2520,19 +1618,11 @@ def triton_attention_bwd(
         V=v,
         sort_by_length_indices=sort_by_length_indices,
         seq_offsets=seq_offsets,
-        TS=None,
-        TW=None,
-        PW=None,
-        Bias=attn_bias,
-        seq2_offsets=seq2_offsets,
         num_targets=num_targets,
         DOut=dout,
         DQ=dq,
         DK=dk,
         DV=dv,
-        DBias=dbias,
-        DTW=None,
-        DPW=None,
         LOCK=lock,
         stride_qm=q.stride(0),
         stride_qh=q.stride(1),
@@ -2540,7 +1630,6 @@ def triton_attention_bwd(
         stride_kh=k.stride(1),
         stride_vn=v.stride(0),
         stride_vh=v.stride(1),
-        stride_ts=None,
         stride_dom=dout.stride(0),
         stride_doh=dout.stride(1),
         stride_dqm=dq.stride(0),
@@ -2558,20 +1647,8 @@ def triton_attention_bwd(
         AUTOTUNE_MAX_SEQ_LEN=autotune_max_seq_len(N),
         DimQ=DimQ,
         DimV=DimV,
-        num_buckets=None,
-        max_pos_ind=None,
         MAX_ATTN_LEN=max_attn_len,
-        time_bucket_incr=None,
-        time_bucket_div=None,
-        time_delta=None,
-        INVALID_MASK_TYPE=invalid_attn_mask_type,
-        CAUSAL=None,
-        BUCKET_FN="none",
-        ATTN_BIAS_TYPE="separate" if attn_bias is not None else "none",
-        USE_TIME_BIAS=False,
-        USE_POS_BIAS=False,
-        FUSED_BIAS_BWD=None,
-        HAS_MAX_POS_IND=False,
+        CAUSAL=causal,
         HAS_MULTIPLE_TARGETS=num_targets is not None,
         ALLOW_TF32=torch.backends.cuda.matmul.allow_tf32,
         BLOCK_D_Q=DimQ,
@@ -2579,10 +1656,10 @@ def triton_attention_bwd(
         HAS_SORT_BY_LENGTH_INDICES=sort_by_length_indices is not None,
     )
 
-    return dq, dk, dv, dbias
+    return dq, dk, dv
 
 
-class AttentionFunction(torch.autograd.Function):
+class _AttentionFunction(torch.autograd.Function):
     @staticmethod
     # pyre-ignore[14]
     def forward(
@@ -2593,10 +1670,8 @@ class AttentionFunction(torch.autograd.Function):
         k: torch.Tensor,
         v: torch.Tensor,
         seq_offsets: torch.Tensor,
-        invalid_attn_mask_type: str,
+        causal: bool,
         num_targets: Optional[torch.Tensor],
-        attn_bias: Optional[torch.Tensor],
-        seq2_offsets: Optional[torch.Tensor],
         max_attn_len: Optional[int],
         contextual_seq_len: Optional[int],
         sort_by_length: bool,
@@ -2610,33 +1685,27 @@ class AttentionFunction(torch.autograd.Function):
         saved_tensors = [q, k, v, seq_offsets]
         if num_targets is not None:
             saved_tensors.append(num_targets)
-        if attn_bias is not None:
-            assert seq2_offsets is not None
-            saved_tensors.extend([attn_bias, seq2_offsets])
         contextual_seq_len = contextual_seq_len or 0
         max_attn_len = max_attn_len or 0
         if sort_by_length_indices is not None:
             saved_tensors.append(sort_by_length_indices)
         ctx.save_for_backward(*saved_tensors)
         ctx.alpha = alpha
-        ctx.invalid_attn_mask_type = invalid_attn_mask_type
+        ctx.causal = causal
         ctx.has_multiple_targets = num_targets is not None
-        ctx.has_attn_bias = attn_bias is not None
         ctx.max_attn_len = max_attn_len
         ctx.N = N
         ctx.contextual_seq_len = contextual_seq_len
         ctx.sort_by_length = sort_by_length
-        return triton_attention_fwd(
+        return triton_hstu_attention_fwd(
             N=N,
             alpha=alpha,
             q=q,
             k=k,
             v=v,
             seq_offsets=seq_offsets,
-            invalid_attn_mask_type=invalid_attn_mask_type,
+            causal=causal,
             num_targets=num_targets,
-            attn_bias=attn_bias,
-            seq2_offsets=seq2_offsets,
             max_attn_len=max_attn_len,
             contextual_seq_len=contextual_seq_len,
             sort_by_length_indices=sort_by_length_indices,
@@ -2655,8 +1724,6 @@ class AttentionFunction(torch.autograd.Function):
         None,
         None,
         None,
-        Optional[torch.Tensor],
-        None,
         None,
         None,
         None,
@@ -2669,12 +1736,6 @@ class AttentionFunction(torch.autograd.Function):
                 idx += 1
             else:
                 num_targets = None
-            if ctx.has_attn_bias:
-                attn_bias, seq2_offsets = ctx.saved_tensors[idx : idx + 2]
-                idx += 2
-            else:
-                attn_bias = None
-                seq2_offsets = None
             if ctx.sort_by_length:
                 sort_by_length_indices = ctx.saved_tensors[idx]
             else:
@@ -2683,7 +1744,7 @@ class AttentionFunction(torch.autograd.Function):
             dq = torch.empty_like(q)
             dk = torch.empty_like(k)
             dv = torch.empty_like(v)
-            dq, dk, dv, dbias = triton_attention_bwd(
+            dq, dk, dv = triton_hstu_attention_bwd(
                 dout=dout,
                 q=q,
                 k=k,
@@ -2692,13 +1753,11 @@ class AttentionFunction(torch.autograd.Function):
                 dk=dk,
                 dv=dv,
                 seq_offsets=seq_offsets,
-                attn_bias=attn_bias,
-                seq2_offsets=seq2_offsets,
                 num_targets=num_targets,
                 N=ctx.N,
                 alpha=ctx.alpha,
                 max_attn_len=ctx.max_attn_len,
-                invalid_attn_mask_type=ctx.invalid_attn_mask_type,
+                causal=ctx.causal,
                 contextual_seq_len=ctx.contextual_seq_len,
                 sort_by_length_indices=sort_by_length_indices,
             )
@@ -2711,9 +1770,189 @@ class AttentionFunction(torch.autograd.Function):
                 None,
                 None,
                 None,
-                dbias,
-                None,
                 None,
                 None,
                 None,
             )
+
+
+@torch.fx.wrap
+def native_triton_hstu_mha(
+    N: int,
+    alpha: float,
+    q: torch.Tensor,
+    k: torch.Tensor,
+    v: torch.Tensor,
+    seq_offsets: torch.Tensor,
+    causal: bool,
+    num_targets: Optional[torch.Tensor] = None,
+    max_attn_len: Optional[int] = None,
+    contextual_seq_len: int = 0,
+    sort_by_length: bool = False,
+) -> torch.Tensor:
+    return _AttentionFunction.apply(
+        N,
+        alpha,
+        q,
+        k,
+        v,
+        seq_offsets,
+        causal,
+        num_targets,
+        max_attn_len,
+        contextual_seq_len,
+        sort_by_length,
+    )
+
+
+def triton_hstu_mha(
+    N: int,
+    alpha: float,
+    q: torch.Tensor,
+    k: torch.Tensor,
+    v: torch.Tensor,
+    seq_offsets: torch.Tensor,
+    causal: bool,
+    num_targets: Optional[torch.Tensor] = None,
+    max_attn_len: Optional[int] = None,
+    contextual_seq_len: int = 0,
+    sort_by_length: bool = False,
+    triton_cc: bool = False,
+) -> torch.Tensor:
+    q = switch_to_contiguous_if_needed(q)
+    k = switch_to_contiguous_if_needed(k)
+    v = switch_to_contiguous_if_needed(v)
+    seq_offsets = seq_offsets.contiguous()
+    if triton_cc:
+        return native_triton_hstu_mha(
+            N,
+            alpha,
+            q,
+            k,
+            v,
+            seq_offsets,
+            causal,
+            num_targets,
+            max_attn_len,
+            contextual_seq_len,
+            sort_by_length,
+        )
+    else:
+        return native_triton_hstu_mha(
+            N,
+            alpha,
+            q,
+            k,
+            v,
+            seq_offsets,
+            causal,
+            num_targets,
+            max_attn_len,
+            contextual_seq_len,
+            sort_by_length,
+        )
+
+
+@torch.fx.wrap
+def native_triton_cached_hstu_mha(
+    N: int,
+    alpha: float,
+    delta_q: torch.Tensor,
+    k: torch.Tensor,
+    v: torch.Tensor,
+    delta_x_offsets: torch.Tensor,
+    seq_offsets: torch.Tensor,
+    num_targets: Optional[torch.Tensor] = None,
+    max_attn_len: Optional[int] = None,
+) -> torch.Tensor:
+    Z = seq_offsets.size(0) - 1
+    AUTOTUNE_Z = prev_power_of_2(Z)
+    L, H, DimQ = delta_q.shape
+    DeltaSize = L // Z
+    _, _, DimV = v.shape
+    out = torch.empty((L, H, DimV), dtype=delta_q.dtype, device=delta_q.device)
+    grid = lambda meta: (  # noqa E731
+        triton.cdiv(DeltaSize, meta["BLOCK_M"]),
+        Z * H,
+    )
+    _hstu_attn_fwd[grid](
+        Q=delta_q,
+        K=k,
+        V=v,
+        sort_by_length_indices=None,
+        seq_offsets=seq_offsets,
+        delta_x_offsets=delta_x_offsets,
+        num_targets=num_targets,
+        Out=out,
+        stride_qm=delta_q.stride(0),
+        stride_qh=delta_q.stride(1),
+        stride_kn=k.stride(0),
+        stride_kh=k.stride(1),
+        stride_vn=v.stride(0),
+        stride_vh=v.stride(1),
+        stride_om=out.stride(0),
+        stride_oh=out.stride(1),
+        alpha=alpha,
+        CONTEXTUAL_SEQ_LEN=0,
+        Z=Z,
+        AUTOTUNE_Z=AUTOTUNE_Z,
+        H=H,
+        MAX_SEQ_LEN=N,
+        AUTOTUNE_MAX_SEQ_LEN=autotune_max_seq_len(N),
+        DimQ=DimQ,
+        DimV=DimV,
+        DeltaSize=DeltaSize,
+        MAX_ATTN_LEN=max_attn_len or 0,
+        CAUSAL=True,
+        HAS_MULTIPLE_TARGETS=num_targets is not None,
+        IS_DELTA_Q=True,
+        ALLOW_TF32=torch.backends.cuda.matmul.allow_tf32,
+        BLOCK_D_Q=DimQ,
+        BLOCK_D_V=DimV,
+        HAS_SORT_BY_LENGTH_INDICES=False,
+    )
+    return out
+
+
+def triton_cached_hstu_mha(
+    N: int,
+    alpha: float,
+    delta_q: torch.Tensor,
+    k: torch.Tensor,
+    v: torch.Tensor,
+    delta_x_offsets: torch.Tensor,
+    seq_offsets: torch.Tensor,
+    num_targets: Optional[torch.Tensor] = None,
+    max_attn_len: Optional[int] = None,
+    triton_cc: bool = False,
+) -> torch.Tensor:
+    seq_offsets = seq_offsets.contiguous()
+    delta_x_offsets = delta_x_offsets.contiguous()
+    delta_q = switch_to_contiguous_if_needed(delta_q)
+    k = switch_to_contiguous_if_needed(k)
+    v = switch_to_contiguous_if_needed(v)
+
+    if triton_cc:
+        return native_triton_cached_hstu_mha(
+            N=N,
+            alpha=alpha,
+            delta_q=delta_q,
+            k=k,
+            v=v,
+            delta_x_offsets=delta_x_offsets,
+            seq_offsets=seq_offsets,
+            num_targets=num_targets,
+            max_attn_len=max_attn_len,
+        )
+    else:
+        return native_triton_cached_hstu_mha(
+            N=N,
+            alpha=alpha,
+            delta_q=delta_q,
+            k=k,
+            v=v,
+            delta_x_offsets=delta_x_offsets,
+            seq_offsets=seq_offsets,
+            num_targets=num_targets,
+            max_attn_len=max_attn_len,
+        )
