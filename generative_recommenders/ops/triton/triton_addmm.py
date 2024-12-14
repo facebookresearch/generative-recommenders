@@ -24,6 +24,7 @@ import triton
 
 # @manual=//triton:triton
 import triton.language as tl
+from generative_recommenders.common import triton_autotune
 
 ENABLE_FULL_TURNING_SPACE = False
 
@@ -160,7 +161,7 @@ def get_mm_configs() -> List[triton.Config]:
         ]
 
 
-@triton.autotune(
+@triton_autotune(
     configs=get_mm_configs(),
     key=["N", "K"],
 )
