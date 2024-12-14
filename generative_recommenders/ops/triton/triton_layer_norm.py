@@ -1005,3 +1005,32 @@ class SwishLayerNormFunction(torch.autograd.Function):
         )
 
         return dx, dweight, dbias, None
+
+
+@torch.fx.wrap
+def triton_layer_norm(
+    x: torch.Tensor,
+    weight: Optional[torch.Tensor],
+    bias: Optional[torch.Tensor],
+    eps: float,
+) -> torch.Tensor:
+    return LayerNormFunction.apply(x, weight, bias, eps)
+
+
+def triton_rms_norm(
+    x: torch.Tensor,
+    weight: Optional[torch.Tensor],
+    eps: float,
+) -> torch.Tensor:
+    return RMSNormFunction.apply(x, weight, eps)
+
+
+@torch.fx.wrap
+def triton_swish_layer_norm(
+    x: torch.Tensor,
+    normalized_shape: List[int],
+    weight: torch.Tensor,
+    bias: torch.Tensor,
+    eps: float,
+) -> torch.Tensor:
+    return SwishLayerNormFunction.apply(x, weight, bias, eps)
