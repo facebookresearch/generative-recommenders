@@ -20,8 +20,8 @@ from typing import Optional, Tuple
 
 import torch
 from generative_recommenders.ops.triton.triton_hstu_attention import (
-    triton_attention_bwd,
-    triton_attention_fwd,
+    triton_hstu_attention_bwd,
+    triton_hstu_attention_fwd,
 )
 from generative_recommenders.ops.triton.triton_hstu_linear import (
     triton_addmm_bwd,
@@ -84,17 +84,15 @@ class _HSTUPreprocessAndAttentionFunction(torch.autograd.Function):
             _, sort_by_length_indices = torch.sort(
                 seq_lengths, descending=True, stable=False
             )
-        out = triton_attention_fwd(
+        out = triton_hstu_attention_fwd(
             N=max_seq_len,
             alpha=alpha,
             q=q,
             k=k,
             v=v,
             seq_offsets=seq_offsets,
-            invalid_attn_mask_type=invalid_attn_mask_type,
+            causal=True,
             num_targets=num_targets,
-            attn_bias=None,
-            seq2_offsets=None,
             max_attn_len=0,
             contextual_seq_len=contextual_seq_len,
             sort_by_length_indices=sort_by_length_indices,
@@ -121,7 +119,7 @@ class _HSTUPreprocessAndAttentionFunction(torch.autograd.Function):
             saved_tensors.append(sort_by_length_indices)
         ctx.save_for_backward(*saved_tensors)
         ctx.alpha = alpha
-        ctx.invalid_attn_mask_type = invalid_attn_mask_type
+        ctx.causal = True
         ctx.has_multiple_targets = num_targets is not None
         ctx.max_seq_len = max_seq_len
         ctx.max_attn_len = 0
@@ -223,7 +221,11 @@ class _HSTUPreprocessAndAttentionFunction(torch.autograd.Function):
         dk = dk.view(-1, ctx.num_heads, ctx.attn_dim)
         dv = dv.view(-1, ctx.num_heads, ctx.hidden_dim)
         # Note: the two operations below update duvqk in place
-        _dq, _dk, _dv, _ = triton_attention_bwd(
+        (
+            _dq,
+            _dk,
+            _dv,
+        ) = triton_hstu_attention_bwd(
             dout=dout,
             q=q,
             k=k,
@@ -232,13 +234,11 @@ class _HSTUPreprocessAndAttentionFunction(torch.autograd.Function):
             dk=dk,
             dv=dv,
             seq_offsets=seq_offsets,
-            attn_bias=None,
-            seq2_offsets=None,
             num_targets=num_targets,
             N=ctx.max_seq_len,
             max_attn_len=ctx.max_attn_len,
             alpha=ctx.alpha,
-            invalid_attn_mask_type=ctx.invalid_attn_mask_type,
+            causal=ctx.causal,
             contextual_seq_len=ctx.contextual_seq_len,
             sort_by_length_indices=sort_by_length_indices,
         )

@@ -41,11 +41,7 @@ class HSTUAttentionTest(unittest.TestCase):
         max_targets=st.sampled_from([20, 512]),
         attn_dim=st.sampled_from([16, 32, 64, 128]),
         hidden_dim=st.sampled_from([16, 32, 64, 128]),
-        attn_mask_type=st.sampled_from(
-            [
-                "lower_triangular",
-            ]
-        ),
+        causal=st.sampled_from([True]),
         has_multiple_targets=st.sampled_from([True, False]),
         dtype=st.sampled_from(
             [torch.bfloat16, torch.float32]
@@ -79,11 +75,7 @@ class HSTUAttentionTest(unittest.TestCase):
         max_targets=st.sampled_from([32]),
         attn_dim=st.just(128),
         hidden_dim=st.just(128),
-        attn_mask_type=st.sampled_from(
-            [
-                "lower_triangular",
-            ]
-        ),
+        causal=st.sampled_from([True]),
         has_multiple_targets=st.sampled_from([True, False]),
         dtype=st.sampled_from([torch.bfloat16]),
         has_max_attn_len=st.sampled_from([True, False]),
@@ -113,7 +105,7 @@ class HSTUAttentionTest(unittest.TestCase):
         max_targets: int,
         attn_dim: int,
         hidden_dim: int,
-        attn_mask_type: str,
+        causal: bool,
         has_multiple_targets: bool,
         has_max_attn_len: bool,
         dtype: torch.dtype,
@@ -126,15 +118,11 @@ class HSTUAttentionTest(unittest.TestCase):
         atol: Optional[float] = None,
         rtol: Optional[float] = None,
     ) -> None:
-        attn_mask_type = "lower_triangular"
         set_dev_mode(True)
         torch.backends.cudnn.allow_tf32 = True
         torch.backends.cuda.matmul.allow_tf32 = True
         from generative_recommenders.ops.hstu_attention import hstu_mha
 
-        if contextual_seq_len > 0 and attn_mask_type != "lower_triangular":
-            # user context mask is only supported for lower triangular mask
-            return
         alpha = 1.0 / (attn_dim**0.5)
         if sparsity > 0.0:
             lengths = generate_sparse_seq_len(
@@ -188,15 +176,12 @@ class HSTUAttentionTest(unittest.TestCase):
             k=k,
             v=v,
             seq_offsets=seq_offsets,
-            invalid_attn_mask_type=attn_mask_type,
+            causal=causal,
             num_targets=num_targets if has_multiple_targets else None,
-            attn_bias=None,
-            seq2_offsets=None,
-            training=False,
             dropout_pr=0.0,
-            kernel=ref_kernel,
             max_attn_len=max_attn_len,
             contextual_seq_len=contextual_seq_len,
+            kernel=ref_kernel,
         )
         dout = torch.randn_like(ref_out) * 0.01
         ref_out.backward(dout)
@@ -221,15 +206,12 @@ class HSTUAttentionTest(unittest.TestCase):
             k=k,
             v=v,
             seq_offsets=seq_offsets,
-            invalid_attn_mask_type=attn_mask_type,
+            causal=causal,
             num_targets=num_targets if has_multiple_targets else None,
-            attn_bias=None,
-            seq2_offsets=None,
-            training=False,
             dropout_pr=0.0,
-            kernel=real_kernel,
             max_attn_len=max_attn_len,
             contextual_seq_len=contextual_seq_len,
+            kernel=real_kernel,
         )
 
         torch.testing.assert_close(
