@@ -33,10 +33,8 @@ except OSError:
 from generative_recommenders.common import (
     autotune_max_seq_len,
     prev_power_of_2,
-    register_tritoncc_specs,
     switch_to_contiguous_if_needed,
     triton_autotune,
-    VersionedSpec,
 )
 
 
@@ -55,32 +53,6 @@ def _add_position_embeddings_configs() -> List[triton.Config]:
                     )
                 )
     return configs
-
-
-def _add_position_embeddings_tritoncc_named_specs() -> List[VersionedSpec]:
-    s: int = 16
-    return [
-        VersionedSpec(
-            spec={
-                "Jagged": (dtype, s),
-                "seq_offsets": ("*i64", s),
-                "high_inds": ("*i64", s),
-                "Dense": (dtype, s),
-                "Out": (dtype, s),
-                "AUTOTUNE_MAX_SEQ_LEN": "i32",
-                "D": "i32",
-                "scale": "f32",
-                "stride_jn": "i32",
-                "stride_dk": "i32",
-                "stride_on": "i32",
-                "SCALE_JAGGED": True,
-                "BLOCK_N": -1,  # autotuned
-                "BLOCK_D": BLOCK_D,
-            },
-        )
-        for dtype in ["*bf16", "*fp32"]
-        for BLOCK_D in [32, 64]
-    ]
 
 
 @triton_autotune(
@@ -139,16 +111,6 @@ def _add_position_embeddings_kernel(
         out_ptrs += BLOCK_D
         offs_d += BLOCK_D
         jagged_ptr_offsets += BLOCK_D
-
-
-_add_position_embeddings_kernel = register_tritoncc_specs(
-    func=_add_position_embeddings_kernel,
-    versioned_specs=_add_position_embeddings_tritoncc_named_specs(),
-)
-_add_position_embeddings_kernel = triton_autotune(
-    configs=_add_position_embeddings_configs(),
-    key=["AUTOTUNE_MAX_SEQ_LEN"],
-)(_add_position_embeddings_kernel.fn)
 
 
 @triton.jit
@@ -301,216 +263,6 @@ class _AddPositionEmbeddingsFunction(torch.autograd.Function):
         return d_jagged if scale_jagged else d_out, None, None, None, d_dense, None
 
 
-def _add_timestamp_position_embeddings_tritoncc_named_specs() -> List[VersionedSpec]:
-    s: int = 16
-    return (
-        [
-            VersionedSpec(
-                spec={
-                    "SeqEmb": (dtype, s),
-                    "Offsets": ("*i64", s),
-                    "Lengths": ("*i64", s),
-                    "PosEmb": (dtype, s),
-                    "TsEmb": (dtype, s),
-                    "Out": (dtype, s),
-                    "TS": ("*i64", s),
-                    "PosInds": ("*i32", s),
-                    "TsInds": ("*i32", s),
-                    "NumTargets": ("*i64", s),
-                    "AUTOTUNE_MAX_SEQ_LEN": "i32",
-                    "D": "i32",
-                    "num_time_buckets": "i32",
-                    "time_bucket_increments": "fp32",
-                    "time_bucket_scale": "fp32",
-                    "time_delta": "i32",
-                    "max_contextual_seq_len": "i32",
-                    "max_pos_ind": "i32",
-                    "stride_sn": ("i32", s),
-                    "stride_pn": ("i32", s),
-                    "stride_tn": ("i32", s),
-                    "stride_ts": "i32",
-                    "stride_on": ("i32", s),
-                    "TRAINING": False,
-                    "HAS_MULTIPLE_TARGETS": has_multiple_targets,
-                    "INTERLEAVE_TARGETS": interleave_targets,
-                    "TIME_BUCKET_FN": time_bucket_fn,
-                    "BLOCK_D": BLOCK_D,
-                    "BLOCK_N": -1,  # autotuned
-                },
-            )
-            for dtype in ["*bf16", "*fp32", "*fp16"]
-            for has_multiple_targets in [True, False]
-            for interleave_targets in [True, False]
-            for time_bucket_fn in ["log", "sqrt"]
-            for BLOCK_D in [32, 64]
-        ]
-        + [
-            VersionedSpec(
-                spec={
-                    "SeqEmb": (dtype, s),
-                    "Offsets": ("*i64", s),
-                    "Lengths": ("*i64", s),
-                    "PosEmb": (dtype, s),
-                    "TsEmb": (dtype, s),
-                    "Out": (dtype, s),
-                    "TS": ("*i64", s),
-                    "PosInds": ("*i32", s),
-                    "TsInds": ("*i32", s),
-                    "NumTargets": ("*i64", s),
-                    "AUTOTUNE_MAX_SEQ_LEN": "i32",
-                    "D": "i32",
-                    "num_time_buckets": "i32",
-                    "time_bucket_increments": "fp32",
-                    "time_bucket_scale": "fp32",
-                    "time_delta": "i32",
-                    "max_contextual_seq_len": "i32",
-                    "max_pos_ind": "i32",
-                    "stride_sn": ("i32", s),
-                    "stride_pn": ("i32", s),
-                    "stride_tn": ("i32", s),
-                    "stride_ts": "i32",
-                    "stride_on": ("i32", s),
-                    "TRAINING": False,
-                    "HAS_MULTIPLE_TARGETS": has_multiple_targets,
-                    "INTERLEAVE_TARGETS": interleave_targets,
-                    "TIME_BUCKET_FN": time_bucket_fn,
-                    "BLOCK_D": BLOCK_D,
-                    "BLOCK_N": -1,  # autotuned
-                },
-                version="standalone_cint_v5",
-            )
-            for dtype in ["*bf16", "*fp32", "*fp16"]
-            for has_multiple_targets in [True, False]
-            for interleave_targets in [True, False]
-            for time_bucket_fn in ["log", "sqrt"]
-            for BLOCK_D in [32, 64]
-        ]
-        + [
-            VersionedSpec(
-                spec={
-                    "SeqEmb": (dtype, s),
-                    "Offsets": ("*i64", s),
-                    "Lengths": ("*i64", s),
-                    "PosEmb": (dtype, s),
-                    "TsEmb": (dtype, s),
-                    "Out": (dtype, s),
-                    "TS": ("*i64", s),
-                    "PosInds": ("*i32", s),
-                    "TsInds": ("*i32", s),
-                    "NumTargets": ("*i64", s),
-                    "AUTOTUNE_MAX_SEQ_LEN": "i32",
-                    "D": "i32",
-                    "num_time_buckets": "i32",
-                    "time_bucket_increments": "fp32",
-                    "time_bucket_scale": "fp32",
-                    "time_delta": "i32",
-                    "max_contextual_seq_len": "i32",
-                    "max_pos_ind": "i32",
-                    "stride_sn": ("i32", s),
-                    "stride_pn": ("i32", s),
-                    "stride_tn": ("i32", s),
-                    "stride_ts": "i32",
-                    "stride_on": ("i32", s),
-                    "TRAINING": False,
-                    "HAS_MULTIPLE_TARGETS": has_multiple_targets,
-                    "INTERLEAVE_TARGETS": interleave_targets,
-                    "TIME_BUCKET_FN": time_bucket_fn,
-                    "BLOCK_D": BLOCK_D,
-                    "BLOCK_N": -1,  # autotuned
-                },
-                version="standalone_cint_v1_time_position_emb",
-            )
-            for dtype in ["*bf16", "*fp32"]
-            for has_multiple_targets in [True, False]
-            for interleave_targets in [True, False]
-            for time_bucket_fn in ["log", "sqrt"]
-            for BLOCK_D in [32, 64]
-        ]
-        + [
-            VersionedSpec(
-                spec={
-                    "SeqEmb": (dtype, s),
-                    "Offsets": ("*i64", s),
-                    "Lengths": ("*i64", s),
-                    "PosEmb": (dtype, s),
-                    "TsEmb": (dtype, s),
-                    "Out": (dtype, s),
-                    "TS": ("*i64", s),
-                    "PosInds": ("*i32", s),
-                    "TsInds": ("*i32", s),
-                    "NumTargets": ("*i64", s),
-                    "AUTOTUNE_MAX_SEQ_LEN": "i32",
-                    "D": "i32",
-                    "num_time_buckets": "i32",
-                    "time_bucket_increments": "fp32",
-                    "time_bucket_scale": "fp32",
-                    "time_delta": "i32",
-                    "max_contextual_seq_len": "i32",
-                    "max_pos_ind": "i32",
-                    "stride_sn": ("i32", s),
-                    "stride_pn": ("i32", s),
-                    "stride_tn": ("i32", s),
-                    "stride_ts": "i32",
-                    "stride_on": ("i32", s),
-                    "TRAINING": False,
-                    "HAS_MULTIPLE_TARGETS": has_multiple_targets,
-                    "INTERLEAVE_TARGETS": interleave_targets,
-                    "TIME_BUCKET_FN": time_bucket_fn,
-                    "BLOCK_D": BLOCK_D,
-                    "BLOCK_N": -1,  # autotuned
-                },
-                version="standalone_cint_v4",
-            )
-            for dtype in ["*bf16", "*fp32"]
-            for has_multiple_targets in [True, False]
-            for interleave_targets in [True, False]
-            for time_bucket_fn in ["log", "sqrt"]
-            for BLOCK_D in [32, 64]
-        ]
-        + [
-            VersionedSpec(
-                spec={
-                    "SeqEmb": (dtype, s),
-                    "Offsets": ("*i64", s),
-                    "Lengths": ("*i64", s),
-                    "PosEmb": (dtype, s),
-                    "TsEmb": (dtype, s),
-                    "Out": (dtype, s),
-                    "TS": ("*i64", s),
-                    "PosInds": ("*i32", s),
-                    "TsInds": ("*i32", s),
-                    "NumTargets": ("*i64", s),
-                    "AUTOTUNE_MAX_SEQ_LEN": "i32",
-                    "D": "i32",
-                    "num_time_buckets": "i32",
-                    "time_bucket_increments": "fp32",
-                    "time_bucket_scale": "fp32",
-                    "time_delta": "i32",
-                    "max_contextual_seq_len": "i32",
-                    "max_pos_ind": "i32",
-                    "stride_sn": ("i32", s),
-                    "stride_pn": ("i32", s),
-                    "stride_tn": ("i32", s),
-                    "stride_ts": "i32",
-                    "stride_on": ("i32", s),
-                    "TRAINING": False,
-                    "HAS_MULTIPLE_TARGETS": has_multiple_targets,
-                    "INTERLEAVE_TARGETS": interleave_targets,
-                    "TIME_BUCKET_FN": time_bucket_fn,
-                    "BLOCK_D": BLOCK_D,
-                    "BLOCK_N": -1,  # autotuned
-                },
-                version="amd_standalone_cint_v2",
-            )
-            for dtype in ["*bf16", "*fp32"]
-            for has_multiple_targets in [True, False]
-            for interleave_targets in [True, False]
-            for time_bucket_fn in ["log", "sqrt"]
-            for BLOCK_D in [32, 64]
-        ]
-    )
-
-
 @triton_autotune(
     configs=_add_position_embeddings_configs(),
     key=["AUTOTUNE_MAX_SEQ_LEN"],
@@ -613,16 +365,6 @@ def _add_timestamp_position_embeddings_kernel(
         ts_emb_offsets += BLOCK_D
         out_offsets += BLOCK_D
         offs_d += BLOCK_D
-
-
-_add_timestamp_position_embeddings_kernel = register_tritoncc_specs(
-    func=_add_timestamp_position_embeddings_kernel,
-    versioned_specs=_add_timestamp_position_embeddings_tritoncc_named_specs(),
-)
-_add_timestamp_position_embeddings_kernel = triton_autotune(
-    configs=_add_position_embeddings_configs(),
-    key=["AUTOTUNE_MAX_SEQ_LEN"],
-)(_add_timestamp_position_embeddings_kernel.fn)
 
 
 def bwd_pre_hook(nargs):
