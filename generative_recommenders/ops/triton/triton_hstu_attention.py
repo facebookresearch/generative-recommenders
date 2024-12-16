@@ -425,13 +425,9 @@ def _hstu_attn_fwd_compute(  # noqa C901
         else:
             low = start_m
             high = seq_len
-        # pyre-ignore[61]
         if low > 0:
-            # pyre-ignore[61]
             K_block_ptr = tl.advance(K_block_ptr, (0, low))
-            # pyre-ignore[61]
             V_block_ptr = tl.advance(V_block_ptr, (low, 0))
-        # pyre-ignore[61]
         for start_n in range(low, high, BLOCK_N):
             cur_offs_n = offs_n + start_n
             mask_n = cur_offs_n < seq_len
@@ -1513,8 +1509,8 @@ def triton_hstu_attention_fwd(
     seq_offsets: torch.Tensor,
     causal: bool,
     num_targets: Optional[torch.Tensor],
-    max_attn_len: Optional[int],
-    contextual_seq_len: Optional[int],
+    max_attn_len: int,
+    contextual_seq_len: int,
     sort_by_length_indices: Optional[torch.Tensor],
 ) -> torch.Tensor:
     Z = seq_offsets.numel() - 1
@@ -1522,8 +1518,6 @@ def triton_hstu_attention_fwd(
     L, H, DimQ = q.shape
     _, _, DimV = v.shape
     out = torch.empty_like(v)
-    max_attn_len = max_attn_len or 0
-    contextual_seq_len = contextual_seq_len or 0
     has_multiple_targets = num_targets is not None
     has_sort_by_length_indices = sort_by_length_indices is not None
     if L == 0:
@@ -1587,7 +1581,7 @@ def triton_hstu_attention_bwd(
     alpha: float,
     max_attn_len: int,
     causal: float,
-    contextual_seq_len: Optional[int],
+    contextual_seq_len: int,
     sort_by_length_indices: Optional[torch.Tensor],
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     dout = switch_to_contiguous_if_needed(dout)
@@ -1672,8 +1666,8 @@ class _AttentionFunction(torch.autograd.Function):
         seq_offsets: torch.Tensor,
         causal: bool,
         num_targets: Optional[torch.Tensor],
-        max_attn_len: Optional[int],
-        contextual_seq_len: Optional[int],
+        max_attn_len: int,
+        contextual_seq_len: int,
         sort_by_length: bool,
     ) -> torch.Tensor:
         sort_by_length_indices = None
@@ -1685,8 +1679,8 @@ class _AttentionFunction(torch.autograd.Function):
         saved_tensors = [q, k, v, seq_offsets]
         if num_targets is not None:
             saved_tensors.append(num_targets)
-        contextual_seq_len = contextual_seq_len or 0
-        max_attn_len = max_attn_len or 0
+        contextual_seq_len = contextual_seq_len
+        max_attn_len = max_attn_len
         if sort_by_length_indices is not None:
             saved_tensors.append(sort_by_length_indices)
         ctx.save_for_backward(*saved_tensors)
@@ -1786,7 +1780,7 @@ def native_triton_hstu_mha(
     seq_offsets: torch.Tensor,
     causal: bool,
     num_targets: Optional[torch.Tensor] = None,
-    max_attn_len: Optional[int] = None,
+    max_attn_len: int = 0,
     contextual_seq_len: int = 0,
     sort_by_length: bool = False,
 ) -> torch.Tensor:
@@ -1814,7 +1808,7 @@ def triton_hstu_mha(
     seq_offsets: torch.Tensor,
     causal: bool,
     num_targets: Optional[torch.Tensor] = None,
-    max_attn_len: Optional[int] = None,
+    max_attn_len: int = 0,
     contextual_seq_len: int = 0,
     sort_by_length: bool = False,
     triton_cc: bool = False,
@@ -1863,7 +1857,7 @@ def native_triton_cached_hstu_mha(
     delta_x_offsets: torch.Tensor,
     seq_offsets: torch.Tensor,
     num_targets: Optional[torch.Tensor] = None,
-    max_attn_len: Optional[int] = None,
+    max_attn_len: int = 0,
 ) -> torch.Tensor:
     Z = seq_offsets.size(0) - 1
     AUTOTUNE_Z = prev_power_of_2(Z)
@@ -1902,7 +1896,7 @@ def native_triton_cached_hstu_mha(
         DimQ=DimQ,
         DimV=DimV,
         DeltaSize=DeltaSize,
-        MAX_ATTN_LEN=max_attn_len or 0,
+        MAX_ATTN_LEN=max_attn_len,
         CAUSAL=True,
         HAS_MULTIPLE_TARGETS=num_targets is not None,
         IS_DELTA_Q=True,
@@ -1923,7 +1917,7 @@ def triton_cached_hstu_mha(
     delta_x_offsets: torch.Tensor,
     seq_offsets: torch.Tensor,
     num_targets: Optional[torch.Tensor] = None,
-    max_attn_len: Optional[int] = None,
+    max_attn_len: int = 0,
     triton_cc: bool = False,
 ) -> torch.Tensor:
     seq_offsets = seq_offsets.contiguous()

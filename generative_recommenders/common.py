@@ -16,6 +16,7 @@
 
 # pyre-strict
 
+import abc
 import dataclasses
 
 from dataclasses import dataclass
@@ -116,36 +117,30 @@ except ImportError:
         TRITON_CC = "TRITON_CC"
 
 
-class GRModuleBase(torch.nn.Module):
+class HammerModule(torch.nn.Module, abc.ABC):
     _is_inference: bool
     _use_triton_cc: bool
-    _custom_kernel: bool
     _hammer_kernel: Optional[HammerKernel] = None
 
     def __init__(
         self,
         is_inference: bool,
-        use_triton_cc: bool = True,
-        custom_kernel: bool = True,
+        use_triton_cc: bool = False,
         hammer_kernel: Optional[HammerKernel] = None,
     ) -> None:
         super().__init__()
         self._is_inference = is_inference
-        self._use_triton_cc = use_triton_cc
-        self._custom_kernel = custom_kernel
         self._hammer_kernel = hammer_kernel
+        self._use_triton_cc = use_triton_cc
 
     def hammer_kernel(self) -> HammerKernel:
         kernel = self._hammer_kernel
         if kernel is not None:
             return kernel
-        if self._custom_kernel:
-            if self._is_inference and self._use_triton_cc:
-                return HammerKernel.TRITON_CC
-            else:
-                return HammerKernel.TRITON
+        if self._is_inference and self._use_triton_cc:
+            return HammerKernel.TRITON_CC
         else:
-            return HammerKernel.PYTORCH
+            return HammerKernel.TRITON
 
     # pyre-ignore[2]
     def recursive_setattr(self, name: str, value: Any) -> None:
@@ -154,15 +149,15 @@ class GRModuleBase(torch.nn.Module):
                 setattr(module, name, value)
 
     @property
-    def predict_mode(self) -> bool:
+    def is_inference(self) -> bool:
         return self._is_inference
 
     @property
-    def eval_mode(self) -> bool:
+    def is_eval(self) -> bool:
         return (not self._is_inference) and (not self.training)
 
     @property
-    def train_mode(self) -> bool:
+    def is_train(self) -> bool:
         return (not self._is_inference) and self.training
 
 

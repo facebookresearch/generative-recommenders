@@ -43,7 +43,7 @@ def hstu_mha(
     dropout_pr: float = 0.0,
     training: bool = True,
     num_targets: Optional[torch.Tensor] = None,
-    max_attn_len: Optional[int] = None,
+    max_attn_len: int = 0,
     contextual_seq_len: int = 0,
     sort_by_length: bool = False,
     kernel: HammerKernel = HammerKernel.PYTORCH,
@@ -56,8 +56,6 @@ def hstu_mha(
         torch._assert(v.dim() == 3, "v must be 3-D")
         torch._assert(v.shape[0] == q.shape[0], "wrong v shape[0]")
         torch._assert(v.shape[1] == H, "wrong v shape[1]")
-        if max_attn_len is not None:
-            torch._assert(max_attn_len > 0, "max_attn_len must be larger than 0")
         torch._assert(causal, "only support causal attention")
 
     if kernel in [HammerKernel.TRITON, HammerKernel.TRITON_CC]:

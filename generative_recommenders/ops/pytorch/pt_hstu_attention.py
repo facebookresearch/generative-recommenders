@@ -36,7 +36,7 @@ def _get_invalid_attn_mask(
     N: int,
     seq_lengths: torch.Tensor,
     num_targets: Optional[torch.Tensor] = None,
-    max_attn_len: Optional[int] = None,
+    max_attn_len: int = 0,
     contextual_seq_len: int = 0,
     min_full_attn_seq_len: int = 0,
 ) -> torch.Tensor:
@@ -64,7 +64,7 @@ def _get_invalid_attn_mask(
     if not causal:
         row_col_dist = torch.where(row_col_dist > 0, row_col_dist, -row_col_dist)
     invalid_attn_mask = torch.logical_or(invalid_attn_mask, row_col_dist > 0)
-    if max_attn_len is not None and max_attn_len > 0:
+    if max_attn_len > 0:
         if min_full_attn_seq_len > 0:
             invalid_attn_mask = torch.logical_and(
                 invalid_attn_mask,
@@ -138,7 +138,7 @@ def pytorch_hstu_mha(
     dropout_pr: float = 0.0,
     training: bool = True,
     num_targets: Optional[torch.Tensor] = None,
-    max_attn_len: Optional[int] = None,
+    max_attn_len: int = 0,
     contextual_seq_len: int = 0,
 ) -> torch.Tensor:
     L, H, _ = q.shape
@@ -175,7 +175,7 @@ def _get_delta_invalid_attn_mask(
     seq_lengths: torch.Tensor,
     seq_offsets: torch.Tensor,
     num_targets: Optional[torch.Tensor] = None,
-    max_attn_len: Optional[int] = None,
+    max_attn_len: int = 0,
 ) -> torch.Tensor:
     B = seq_lengths.size(0)
     ids = torch.arange(0, max_seq_len, device=delta_x_offsets.device)
@@ -190,7 +190,7 @@ def _get_delta_invalid_attn_mask(
         col_ids = torch.clamp(col_ids, max=seq_lengths - num_targets)
     row_col_dist = row_ids - col_ids
     invalid_attn_mask = torch.logical_or(invalid_attn_mask, row_col_dist > 0)
-    if max_attn_len is not None:
+    if max_attn_len > 0:
         invalid_attn_mask = torch.logical_and(
             invalid_attn_mask, row_col_dist <= max_attn_len
         )
@@ -208,7 +208,7 @@ def pytorch_cached_hstu_mha(
     seq_offsets: torch.Tensor,
     num_targets: Optional[torch.Tensor] = None,
     attn_bias: Optional[torch.Tensor] = None,
-    max_attn_len: Optional[int] = None,
+    max_attn_len: int = 0,
 ) -> torch.Tensor:
     L, H, D = delta_q.shape
     _, _, V = v.shape

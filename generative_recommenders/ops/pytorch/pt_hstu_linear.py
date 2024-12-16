@@ -13,9 +13,8 @@
 # limitations under the License.
 
 #!/usr/bin/env python3
-# pyre-strict
 
-from typing import Optional
+# pyre-strict
 
 import torch
 import torch.nn.functional as F
@@ -74,8 +73,6 @@ def pytorch_hstu_compute_output(
     group_norm: bool = False,
     num_heads: int = 1,
     linear_dim: int = -1,
-    seed: Optional[int] = None,
-    recompute_y_in_backward: bool = False,
 ) -> torch.Tensor:
     y = pytorch_norm_mul_dropout(
         x=attn,

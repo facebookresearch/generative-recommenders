@@ -143,7 +143,7 @@ class HSTUAttentionTest(unittest.TestCase):
         if has_max_attn_len:
             max_attn_len = random.randint(1, max_uih_len // 5)
         else:
-            max_attn_len = None
+            max_attn_len = 0
         seq_offsets = torch.zeros(
             (batch_size + 1,), dtype=torch.int64, device=torch.device("cuda")
         )
