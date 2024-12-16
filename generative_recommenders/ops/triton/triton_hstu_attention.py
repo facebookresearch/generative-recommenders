@@ -26,12 +26,9 @@ import triton.language as tl
 
 from generative_recommenders.common import (
     autotune_max_seq_len,
-    NamedSpecType,
     prev_power_of_2,
-    register_tritoncc_specs,
     switch_to_contiguous_if_needed,
     triton_autotune,
-    VersionedSpec,
 )
 
 try:
@@ -427,13 +424,9 @@ def _hstu_attn_fwd_compute(  # noqa C901
         else:
             low = start_m
             high = seq_len
-        # pyre-ignore[61]
         if low > 0:
-            # pyre-ignore[61]
             K_block_ptr = tl.advance(K_block_ptr, (0, low))
-            # pyre-ignore[61]
             V_block_ptr = tl.advance(V_block_ptr, (low, 0))
-        # pyre-ignore[61]
         for start_n in range(low, high, BLOCK_N):
             cur_offs_n = offs_n + start_n
             mask_n = cur_offs_n < seq_len
@@ -726,113 +719,6 @@ def _hstu_attn_fwd_persistent(  # noqa C901
         tile_idx += num_progs
 
 
-def _get_named_specs() -> List[VersionedSpec]:
-    s: int = 16
-    CAUSAL: bool = True
-
-    def _common_specs(dtype: str = "*bf16") -> NamedSpecType:
-        return {
-            "Q": (dtype, s),
-            "K": (dtype, s),
-            "V": (dtype, s),
-            "seq_offsets": ("*i64", s),
-            "Out": (dtype, s),
-            "stride_qm": ("i32", s),
-            "stride_qh": ("i32", s),
-            "stride_kn": ("i32", s),
-            "stride_kh": ("i32", s),
-            "stride_vn": ("i32", s),
-            "stride_vh": ("i32", s),
-            "stride_om": ("i32", s),
-            "stride_oh": ("i32", s),
-            "alpha": "fp32",
-            "contextual_seq_len": "i32",
-            "Z": "i32",
-            "AUTOTUNE_Z": "i32",
-            "H": "i32",
-            "MAX_SEQ_LEN": "i32",
-            "AUTOTUNE_MAX_SEQ_LEN": "i32",
-            "DimQ": "i32",
-            "DimV": "i32",
-            "DeltaSize": "i32",
-            "sort_by_length_indices": ("*i64", s, False),
-            "CAUSAL": CAUSAL,
-            "BLOCK_M": -1,  # autotuned
-            "BLOCK_N": -1,  # autotuned
-            "MAX_ATTN_LEN": 0,
-            "HAS_SORT_BY_LENGTH_INDICES": False,
-        }
-
-    default_values = {
-        "MAX_ATTN_LEN": 0,
-        "HAS_CONTEXTUAL_SEQ_LEN": 0,
-        "HAS_SORT_BY_LENGTH_INDICES": 0,
-    }
-
-    return (
-        [
-            VersionedSpec(
-                spec={
-                    "delta_x_offsets": ("*i64", s, False),
-                    "num_targets": ("*i64", s, False),
-                    "HAS_MULTIPLE_TARGETS": False,
-                    "IS_DELTA_Q": False,
-                    "BLOCK_D_Q": block_dq,
-                    "BLOCK_D_V": block_dv,
-                    "ALLOW_TF32": True,
-                    "HAS_CONTEXTUAL_SEQ_LEN": has_contextual_seq_len,
-                    **_common_specs(dtype=dtype),
-                },
-                default_values=default_values,
-            )
-            for dtype in ["*bf16", "*fp16"]
-            for block_dq, block_dv in [(128, 128), (32, 64)]
-            for has_contextual_seq_len in [True, False]
-        ]
-        + [
-            VersionedSpec(
-                spec={
-                    "delta_x_offsets": ("*i64", s, is_delta_q),
-                    "num_targets": ("*i64", s, True),
-                    "HAS_MULTIPLE_TARGETS": True,
-                    "IS_DELTA_Q": is_delta_q,
-                    "BLOCK_D_Q": block,
-                    "BLOCK_D_V": block,
-                    "ALLOW_TF32": True,
-                    "HAS_CONTEXTUAL_SEQ_LEN": False,
-                    **_common_specs(dtype=dtype),
-                },
-                default_values=default_values,
-            )
-            for dtype in ["*bf16", "*fp16"]
-            for block in [64, 128]
-            for is_delta_q in [True, False]
-        ]
-        + [
-            VersionedSpec(
-                spec={
-                    "delta_x_offsets": ("*i64", s, is_delta_q),
-                    "num_targets": ("*i64", s, True),
-                    "HAS_MULTIPLE_TARGETS": True,
-                    "IS_DELTA_Q": is_delta_q,
-                    "BLOCK_D_Q": block,
-                    "BLOCK_D_V": block,
-                    "ALLOW_TF32": True,
-                    "HAS_CONTEXTUAL_SEQ_LEN": False,
-                    **_common_specs(dtype=dtype),
-                },
-                default_values=default_values,
-            )
-            for dtype in ["*bf16", "*fp16"]
-            for block in [64, 128]
-            for is_delta_q in [True, False]
-        ]
-    )
-
-
-_hstu_attn_fwd = register_tritoncc_specs(
-    func=_hstu_attn_fwd, versioned_specs=_get_named_specs()
-)
 _hstu_attn_fwd = triton_autotune(
     configs=_get_fw_configs(),
     key=[
@@ -846,9 +732,6 @@ _hstu_attn_fwd = triton_autotune(
     ],
 )(_hstu_attn_fwd.fn)
 
-_hstu_attn_fwd_persistent = register_tritoncc_specs(
-    func=_hstu_attn_fwd_persistent, versioned_specs=_get_named_specs()
-)
 _hstu_attn_fwd_persistent = triton_autotune(
     configs=_get_fw_configs(),
     key=[
@@ -1794,7 +1677,7 @@ class _AttentionFunction(torch.autograd.Function):
 
 
 @torch.fx.wrap
-def native_triton_hstu_mha(
+def triton_hstu_mha(
     N: int,
     alpha: float,
     q: torch.Tensor,
@@ -1822,56 +1705,8 @@ def native_triton_hstu_mha(
     )
 
 
-def triton_hstu_mha(
-    N: int,
-    alpha: float,
-    q: torch.Tensor,
-    k: torch.Tensor,
-    v: torch.Tensor,
-    seq_offsets: torch.Tensor,
-    causal: bool,
-    num_targets: Optional[torch.Tensor] = None,
-    max_attn_len: Optional[int] = None,
-    contextual_seq_len: int = 0,
-    sort_by_length: bool = False,
-    triton_cc: bool = False,
-) -> torch.Tensor:
-    q = switch_to_contiguous_if_needed(q)
-    k = switch_to_contiguous_if_needed(k)
-    v = switch_to_contiguous_if_needed(v)
-    seq_offsets = seq_offsets.contiguous()
-    if triton_cc:
-        return native_triton_hstu_mha(
-            N,
-            alpha,
-            q,
-            k,
-            v,
-            seq_offsets,
-            causal,
-            num_targets,
-            max_attn_len,
-            contextual_seq_len,
-            sort_by_length,
-        )
-    else:
-        return native_triton_hstu_mha(
-            N,
-            alpha,
-            q,
-            k,
-            v,
-            seq_offsets,
-            causal,
-            num_targets,
-            max_attn_len,
-            contextual_seq_len,
-            sort_by_length,
-        )
-
-
 @torch.fx.wrap
-def native_triton_cached_hstu_mha(
+def triton_cached_hstu_mha(
     N: int,
     alpha: float,
     delta_q: torch.Tensor,
@@ -1930,47 +1765,3 @@ def native_triton_cached_hstu_mha(
         HAS_SORT_BY_LENGTH_INDICES=False,
     )
     return out
-
-
-def triton_cached_hstu_mha(
-    N: int,
-    alpha: float,
-    delta_q: torch.Tensor,
-    k: torch.Tensor,
-    v: torch.Tensor,
-    delta_x_offsets: torch.Tensor,
-    seq_offsets: torch.Tensor,
-    num_targets: Optional[torch.Tensor] = None,
-    max_attn_len: Optional[int] = None,
-    triton_cc: bool = False,
-) -> torch.Tensor:
-    seq_offsets = seq_offsets.contiguous()
-    delta_x_offsets = delta_x_offsets.contiguous()
-    delta_q = switch_to_contiguous_if_needed(delta_q)
-    k = switch_to_contiguous_if_needed(k)
-    v = switch_to_contiguous_if_needed(v)
-
-    if triton_cc:
-        return native_triton_cached_hstu_mha(
-            N=N,
-            alpha=alpha,
-            delta_q=delta_q,
-            k=k,
-            v=v,
-            delta_x_offsets=delta_x_offsets,
-            seq_offsets=seq_offsets,
-            num_targets=num_targets,
-            max_attn_len=max_attn_len,
-        )
-    else:
-        return native_triton_cached_hstu_mha(
-            N=N,
-            alpha=alpha,
-            delta_q=delta_q,
-            k=k,
-            v=v,
-            delta_x_offsets=delta_x_offsets,
-            seq_offsets=seq_offsets,
-            num_targets=num_targets,
-            max_attn_len=max_attn_len,
-        )
