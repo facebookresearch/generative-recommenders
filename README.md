@@ -12,10 +12,20 @@ To reproduce the public experiments (traditional sequential recommender setting,
 
 #### Install dependencies.
 
-Install PyTorch based on official instructions. Then,
+We recommend using `requirements.txt`. This has been tested with Ubuntu 22.04, CUDA 12.4, Python 3.10, and PyTorch 2.2.1.
 
 ```bash
-pip3 install gin-config absl-py scikit-learn scipy matplotlib numpy apex hypothesis pandas fbgemm_gpu iopath tensorboard
+cd ~/venv/
+python3.10 -m venv gr-hstu
+cd ~/oss/generative-recommenders
+source ~/venv/gr-hstu/bin/activate
+pip install -r requirements.txt
+```
+
+Alternatively, you can manually install PyTorch based on official instructions. Then,
+
+```bash
+pip3 install gin-config absl-py scikit-learn scipy matplotlib numpy apex hypothesis pandas fbgemm_gpu==0.6.0 iopath tensorboard
 ```
 
 #### Download and preprocess data.
