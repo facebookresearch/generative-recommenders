@@ -16,11 +16,9 @@
 
 # pyre-strict
 
-import dataclasses
-
-from dataclasses import dataclass
+import abc
 from enum import Enum, unique
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, List, Optional, Tuple
 
 import torch
 
@@ -31,33 +29,9 @@ import triton
 from triton.runtime.autotuner import Autotuner
 
 try:
-    from hammer.ops.triton.utils import (
-        NamedSpecType,
-        register_tritoncc_specs,
-        SpecType,
-        triton_autotune,
-        VersionedSpec,
-    )
-    from hammer.utils import HammerKernel, is_dev_mode, set_dev_mode, set_verbose_level
+    from hammer.ops.triton.utils import triton_autotune
+    from hammer.utils import is_dev_mode, set_dev_mode, set_verbose_level
 except ImportError:
-    SpecType = Union[Tuple[str, int], Tuple[str, int, bool], int, str]
-    NamedSpecType = Dict[str, SpecType]
-
-    @dataclass
-    class VersionedSpec:
-        """
-        spec: a dict that maps each argument name to a spec
-        version: the version of the spec
-        """
-
-        spec: NamedSpecType = dataclasses.field(default_factory=dict)
-        version: str = ""
-        default_values: Dict[str, Any] = dataclasses.field(default_factory=dict)
-
-    # pyre-ignore[2,3]
-    def register_tritoncc_specs(func, versioned_specs):
-        return func
-
     # pyre-ignore
     def triton_autotune(
         configs: List[triton.Config],
@@ -108,44 +82,39 @@ except ImportError:
         global VERBOSE_LEVEL
         return VERBOSE_LEVEL
 
-    @unique
-    class HammerKernel(Enum):
-        TRITON = "TRITON"
-        PYTORCH = "PYTORCH"
-        CUDA = "CUDA"
-        TRITON_CC = "TRITON_CC"
+
+@unique
+class HammerKernel(Enum):
+    TRITON = "TRITON"
+    PYTORCH = "PYTORCH"
+    CUDA = "CUDA"
+    TRITON_CC = "TRITON_CC"
 
 
-class GRModuleBase(torch.nn.Module):
+class HammerModule(torch.nn.Module, abc.ABC):
     _is_inference: bool
     _use_triton_cc: bool
-    _custom_kernel: bool
     _hammer_kernel: Optional[HammerKernel] = None
 
     def __init__(
         self,
         is_inference: bool,
-        use_triton_cc: bool = True,
-        custom_kernel: bool = True,
+        use_triton_cc: bool = False,
         hammer_kernel: Optional[HammerKernel] = None,
     ) -> None:
         super().__init__()
         self._is_inference = is_inference
-        self._use_triton_cc = use_triton_cc
-        self._custom_kernel = custom_kernel
         self._hammer_kernel = hammer_kernel
+        self._use_triton_cc = use_triton_cc
 
     def hammer_kernel(self) -> HammerKernel:
         kernel = self._hammer_kernel
         if kernel is not None:
             return kernel
-        if self._custom_kernel:
-            if self._is_inference and self._use_triton_cc:
-                return HammerKernel.TRITON_CC
-            else:
-                return HammerKernel.TRITON
+        if self._is_inference and self._use_triton_cc:
+            return HammerKernel.TRITON_CC
         else:
-            return HammerKernel.PYTORCH
+            return HammerKernel.TRITON
 
     # pyre-ignore[2]
     def recursive_setattr(self, name: str, value: Any) -> None:
@@ -154,15 +123,15 @@ class GRModuleBase(torch.nn.Module):
                 setattr(module, name, value)
 
     @property
-    def predict_mode(self) -> bool:
+    def is_inference(self) -> bool:
         return self._is_inference
 
     @property
-    def eval_mode(self) -> bool:
+    def is_eval(self) -> bool:
         return (not self._is_inference) and (not self.training)
 
     @property
-    def train_mode(self) -> bool:
+    def is_train(self) -> bool:
         return (not self._is_inference) and self.training
 
 
@@ -290,3 +259,52 @@ def autotune_max_seq_len(runtime_max_seq_len: int) -> int:
             max_seq_len > 0 and l2_max_seq_len > 0
         ), "max_seq_len and l2_max_seq_len must be greater than 0"
         return l2_max_seq_len if runtime_max_seq_len <= l2_max_seq_len else max_seq_len
+
+
+@torch.fx.wrap
+def fx_unwrap_optional_tensor(optional: Optional[torch.Tensor]) -> torch.Tensor:
+    assert optional is not None, "Expected optional to be non-None Tensor"
+    return optional
+
+
+@torch.fx.wrap
+def fx_arange(len: int, device: torch.device) -> torch.Tensor:
+    return torch.arange(len, device=device)
+
+
+@torch.fx.wrap
+def fx_infer_max_len(
+    lengths: torch.Tensor,
+) -> int:
+    max_len = int(lengths.max().item())
+    if not torch.jit.is_scripting() and torch.compiler.is_compiling():
+        # Tell Dynamo this data-dependent value is in the range [0, 10**9)
+        torch._check_is_size(max_len)
+        torch._check(max_len < 10**9)
+        torch._check(max_len > 0)
+    return max_len
+
+
+@torch.fx.wrap
+def fx_mark_length_features(tensor: torch.Tensor) -> torch.Tensor:
+    return tensor
+
+
+@torch.fx.wrap
+def fx_torch_zeros(shape: List[int], device: torch.device) -> torch.Tensor:
+    return torch.zeros(shape, device=device)
+
+
+@torch.fx.wrap
+def jagged_to_padded_dense(
+    values: torch.Tensor,
+    offsets: List[torch.Tensor],
+    max_lengths: List[int],
+    padding_value: float,
+) -> torch.Tensor:
+    return torch.ops.fbgemm.jagged_to_padded_dense(
+        values=values,
+        offsets=offsets,
+        max_lengths=max_lengths,
+        padding_value=padding_value,
+    )

@@ -26,25 +26,20 @@ import triton.language as tl
 
 from generative_recommenders.common import (
     autotune_max_seq_len,
-    NamedSpecType,
     prev_power_of_2,
-    register_tritoncc_specs,
     switch_to_contiguous_if_needed,
     triton_autotune,
-    VersionedSpec,
 )
 
 try:
-    # @manual=//triton:triton
-    from triton.language.extra.libdevice import fast_dividef
+    from triton.language.extra.libdevice import fast_dividef  # @manual=//triton:triton
 except ImportError:
     try:
         # @manual=//triton:triton
         from triton.language.extra.cuda.libdevice import fast_dividef
     except ImportError:
-        # pyre-ignore: Undefined import [21]
-        # @manual=//triton:triton
-        from triton.language.math import fast_dividef
+        # pyre-ignore[21]
+        from triton.language.math import fast_dividef  # @manual=//triton:triton
 
 
 def _get_fw_configs() -> List[triton.Config]:  # noqa: C901
@@ -225,8 +220,6 @@ def _hstu_attn_fwd_one_block(  # noqa: C901
     seq_len,
     offs_m,
     offs_n,
-    mask_m,
-    mask_n,
     q,
     K_block_ptr,
     V_block_ptr,
@@ -238,9 +231,7 @@ def _hstu_attn_fwd_one_block(  # noqa: C901
     CAUSAL: tl.constexpr,
     HAS_MULTIPLE_TARGETS: tl.constexpr,
     HAS_CONTEXTUAL_SEQ_LEN: tl.constexpr,
-    IS_DELTA_Q: tl.constexpr,
     ALLOW_TF32: tl.constexpr,
-    BLOCK_M: tl.constexpr,
     BLOCK_N: tl.constexpr,
 ):
     start_n = tl.multiple_of(start_n, BLOCK_N)
@@ -275,15 +266,12 @@ def _hstu_attn_fwd_one_block(  # noqa: C901
             offs_n,
             max_ids,
         )
-    offs_n_minus_m = offs_n[None, :] - offs_m[:, None]
+    offs_m_minus_n = offs_m[:, None] - offs_n[None, :]
+    if not CAUSAL:
+        offs_m_minus_n = tl.where(offs_m_minus_n > 0, offs_m_minus_n, -offs_m_minus_n)
+    invalid_mask = invalid_mask or (offs_m_minus_n > 0)
     if MAX_ATTN_LEN > 0:
-        if CAUSAL:
-            invalid_mask = invalid_mask or (
-                offs_n_minus_m < 0 and offs_n_minus_m >= -MAX_ATTN_LEN
-            )
-    else:
-        if CAUSAL:
-            invalid_mask = invalid_mask or offs_n_minus_m < 0
+        invalid_mask = invalid_mask and offs_m_minus_n <= MAX_ATTN_LEN
     if HAS_CONTEXTUAL_SEQ_LEN:
         invalid_mask = invalid_mask or (
             offs_m[:, None] == 0 and offs_n[None, :] < max_ids
@@ -302,7 +290,6 @@ def _hstu_attn_fwd_compute(  # noqa C901
     K,
     V,
     seq_offsets,
-    delta_x_offsets,
     num_targets,
     Out,
     stride_qm,
@@ -314,11 +301,7 @@ def _hstu_attn_fwd_compute(  # noqa C901
     stride_om,
     stride_oh,
     alpha,
-    Z,
-    H,
     MAX_SEQ_LEN,
-    DimQ,
-    DimV,
     DeltaSize,
     contextual_seq_len,
     off_z,
@@ -342,8 +325,7 @@ def _hstu_attn_fwd_compute(  # noqa C901
     seq_len = (seq_end - seq_start).to(tl.int32)
     if IS_DELTA_Q:
         start_m_delta = pid * BLOCK_M
-        delta_start = tl.load(delta_x_offsets + off_z * DeltaSize)
-        start_m = (start_m_delta + delta_start - seq_start).to(tl.int32)
+        start_m = (start_m_delta + seq_len - DeltaSize).to(tl.int32)
     else:
         start_m_delta = 0
         start_m = pid * BLOCK_M
@@ -390,60 +372,48 @@ def _hstu_attn_fwd_compute(  # noqa C901
             block_shape=(BLOCK_N, BLOCK_D_V),
             order=(1, 0),
         )
-        mask_m = offs_m < seq_len
 
         q = tl.load(Q_block_ptr, boundary_check=(0,), padding_option="zero")
         acc = tl.zeros([BLOCK_M, BLOCK_D_V], dtype=tl.float32)
         if CAUSAL:
             if HAS_MULTIPLE_TARGETS:
+                uih_end = seq_len - n_targets
+            else:
+                uih_end = seq_len
+            if HAS_CONTEXTUAL_SEQ_LEN is True and start_m < contextual_seq_len:
+                # uih_end must be larger than start_m
+                low = 0
+                high = seq_len
+            else:
+                low = 0
+                high = start_m + BLOCK_M
                 if MAX_ATTN_LEN > 0:
-                    if start_m > seq_len - n_targets:
-                        low = seq_len - n_targets - MAX_ATTN_LEN
+                    if start_m > uih_end:
+                        low = uih_end - MAX_ATTN_LEN
                     else:
                         low = start_m - MAX_ATTN_LEN
-                    low = low if low > 0 else 0
-                else:
-                    low = 0
-                uih_end = (seq_len - n_targets + BLOCK_N - 1) // BLOCK_N * BLOCK_N
-                if uih_end < start_m:
-                    high = seq_len - n_targets
-                else:
-                    high = start_m + BLOCK_M
-                if HAS_CONTEXTUAL_SEQ_LEN:
-                    if start_m < contextual_seq_len:
-                        low = 0
+                    if HAS_CONTEXTUAL_SEQ_LEN:
+                        low = low if low > contextual_seq_len else 0
+                    else:
+                        low = low if low > 0 else 0
+                if HAS_MULTIPLE_TARGETS:
+                    uih_end = (uih_end + BLOCK_N - 1) // BLOCK_N * BLOCK_N
+                    if uih_end < start_m:
                         high = seq_len - n_targets
-            else:
-                if MAX_ATTN_LEN > 0:
-                    low = start_m - MAX_ATTN_LEN
-                    low = low if low > 0 else 0
-                else:
-                    low = 0
-                high = start_m + BLOCK_M
-                if HAS_CONTEXTUAL_SEQ_LEN:
-                    if start_m < contextual_seq_len:
-                        low = 0
-                        high = seq_len
         else:
-            low = start_m
+            low = 0
             high = seq_len
-        # pyre-ignore[61]
+
         if low > 0:
-            # pyre-ignore[61]
             K_block_ptr = tl.advance(K_block_ptr, (0, low))
-            # pyre-ignore[61]
             V_block_ptr = tl.advance(V_block_ptr, (low, 0))
-        # pyre-ignore[61]
+        end_n = low
         for start_n in range(low, high, BLOCK_N):
-            cur_offs_n = offs_n + start_n
-            mask_n = cur_offs_n < seq_len
             acc += _hstu_attn_fwd_one_block(
                 start_n=start_n,
                 seq_len=seq_len,
                 offs_m=offs_m,
-                offs_n=cur_offs_n,
-                mask_m=mask_m,
-                mask_n=mask_n,
+                offs_n=offs_n + start_n,
                 q=q,
                 K_block_ptr=K_block_ptr,
                 V_block_ptr=V_block_ptr,
@@ -455,34 +425,29 @@ def _hstu_attn_fwd_compute(  # noqa C901
                 CAUSAL=CAUSAL,
                 HAS_MULTIPLE_TARGETS=HAS_MULTIPLE_TARGETS,
                 HAS_CONTEXTUAL_SEQ_LEN=HAS_CONTEXTUAL_SEQ_LEN,
-                IS_DELTA_Q=IS_DELTA_Q,
                 ALLOW_TF32=ALLOW_TF32,
-                BLOCK_M=BLOCK_M,
                 BLOCK_N=BLOCK_N,
             )
             K_block_ptr = tl.advance(K_block_ptr, (0, BLOCK_N))
             V_block_ptr = tl.advance(V_block_ptr, (BLOCK_N, 0))
+            end_n += BLOCK_N
 
         if HAS_MULTIPLE_TARGETS and CAUSAL:
             # pyre-ignore[61]
             if uih_end < start_m:
                 low_delta = start_m
                 high_delta = start_m + BLOCK_M
-                offset = (low_delta - uih_end).to(tl.int32)  # pyre-ignore [61]
+                offset = (low_delta - end_n).to(tl.int32)
                 K_block_ptr = tl.advance(K_block_ptr, (0, offset))
                 V_block_ptr = tl.advance(V_block_ptr, (offset, 0))
                 for start_delta in tl.range(
                     low_delta, high_delta, BLOCK_N, num_stages=0
                 ):
-                    cur_offs_n = offs_n + start_delta
-                    mask_n = cur_offs_n < seq_len
                     acc += _hstu_attn_fwd_one_block(
                         start_n=start_delta,
                         seq_len=seq_len,
                         offs_m=offs_m,
-                        offs_n=cur_offs_n,
-                        mask_m=mask_m,
-                        mask_n=mask_n,
+                        offs_n=offs_n + start_delta,
                         q=q,
                         K_block_ptr=K_block_ptr,
                         V_block_ptr=V_block_ptr,
@@ -494,9 +459,7 @@ def _hstu_attn_fwd_compute(  # noqa C901
                         CAUSAL=CAUSAL,
                         HAS_MULTIPLE_TARGETS=HAS_MULTIPLE_TARGETS,
                         HAS_CONTEXTUAL_SEQ_LEN=HAS_CONTEXTUAL_SEQ_LEN,
-                        IS_DELTA_Q=IS_DELTA_Q,
                         ALLOW_TF32=ALLOW_TF32,
-                        BLOCK_M=BLOCK_M,
                         BLOCK_N=BLOCK_N,
                     )
                     K_block_ptr = tl.advance(K_block_ptr, (0, BLOCK_N))
@@ -538,7 +501,6 @@ def _hstu_attn_fwd(  # noqa C901
     V,
     sort_by_length_indices,
     seq_offsets,
-    delta_x_offsets,
     num_targets,
     Out,
     stride_qm,
@@ -582,7 +544,6 @@ def _hstu_attn_fwd(  # noqa C901
         K=K,
         V=V,
         seq_offsets=seq_offsets,
-        delta_x_offsets=delta_x_offsets,
         num_targets=num_targets,
         Out=Out,
         stride_qm=stride_qm,
@@ -594,11 +555,7 @@ def _hstu_attn_fwd(  # noqa C901
         stride_om=stride_om,
         stride_oh=stride_oh,
         alpha=alpha,
-        Z=Z,
-        H=H,
         MAX_SEQ_LEN=MAX_SEQ_LEN,
-        DimQ=DimQ,
-        DimV=DimV,
         DeltaSize=DeltaSize,
         contextual_seq_len=contextual_seq_len,
         off_z=off_z,
@@ -636,7 +593,6 @@ def _hstu_attn_fwd_persistent(  # noqa C901
     V,
     sort_by_length_indices,
     seq_offsets,
-    delta_x_offsets,
     num_targets,
     Out,
     stride_qm,
@@ -690,7 +646,6 @@ def _hstu_attn_fwd_persistent(  # noqa C901
             K=K,
             V=V,
             seq_offsets=seq_offsets,
-            delta_x_offsets=delta_x_offsets,
             num_targets=num_targets,
             Out=Out,
             stride_qm=stride_qm,
@@ -702,11 +657,7 @@ def _hstu_attn_fwd_persistent(  # noqa C901
             stride_om=stride_om,
             stride_oh=stride_oh,
             alpha=alpha,
-            Z=Z,
-            H=H,
             MAX_SEQ_LEN=MAX_SEQ_LEN,
-            DimQ=DimQ,
-            DimV=DimV,
             DeltaSize=DeltaSize,
             contextual_seq_len=contextual_seq_len,
             off_z=off_z,
@@ -726,113 +677,6 @@ def _hstu_attn_fwd_persistent(  # noqa C901
         tile_idx += num_progs
 
 
-def _get_named_specs() -> List[VersionedSpec]:
-    s: int = 16
-    CAUSAL: bool = True
-
-    def _common_specs(dtype: str = "*bf16") -> NamedSpecType:
-        return {
-            "Q": (dtype, s),
-            "K": (dtype, s),
-            "V": (dtype, s),
-            "seq_offsets": ("*i64", s),
-            "Out": (dtype, s),
-            "stride_qm": ("i32", s),
-            "stride_qh": ("i32", s),
-            "stride_kn": ("i32", s),
-            "stride_kh": ("i32", s),
-            "stride_vn": ("i32", s),
-            "stride_vh": ("i32", s),
-            "stride_om": ("i32", s),
-            "stride_oh": ("i32", s),
-            "alpha": "fp32",
-            "contextual_seq_len": "i32",
-            "Z": "i32",
-            "AUTOTUNE_Z": "i32",
-            "H": "i32",
-            "MAX_SEQ_LEN": "i32",
-            "AUTOTUNE_MAX_SEQ_LEN": "i32",
-            "DimQ": "i32",
-            "DimV": "i32",
-            "DeltaSize": "i32",
-            "sort_by_length_indices": ("*i64", s, False),
-            "CAUSAL": CAUSAL,
-            "BLOCK_M": -1,  # autotuned
-            "BLOCK_N": -1,  # autotuned
-            "MAX_ATTN_LEN": 0,
-            "HAS_SORT_BY_LENGTH_INDICES": False,
-        }
-
-    default_values = {
-        "MAX_ATTN_LEN": 0,
-        "HAS_CONTEXTUAL_SEQ_LEN": 0,
-        "HAS_SORT_BY_LENGTH_INDICES": 0,
-    }
-
-    return (
-        [
-            VersionedSpec(
-                spec={
-                    "delta_x_offsets": ("*i64", s, False),
-                    "num_targets": ("*i64", s, False),
-                    "HAS_MULTIPLE_TARGETS": False,
-                    "IS_DELTA_Q": False,
-                    "BLOCK_D_Q": block_dq,
-                    "BLOCK_D_V": block_dv,
-                    "ALLOW_TF32": True,
-                    "HAS_CONTEXTUAL_SEQ_LEN": has_contextual_seq_len,
-                    **_common_specs(dtype=dtype),
-                },
-                default_values=default_values,
-            )
-            for dtype in ["*bf16", "*fp16"]
-            for block_dq, block_dv in [(128, 128), (32, 64)]
-            for has_contextual_seq_len in [True, False]
-        ]
-        + [
-            VersionedSpec(
-                spec={
-                    "delta_x_offsets": ("*i64", s, is_delta_q),
-                    "num_targets": ("*i64", s, True),
-                    "HAS_MULTIPLE_TARGETS": True,
-                    "IS_DELTA_Q": is_delta_q,
-                    "BLOCK_D_Q": block,
-                    "BLOCK_D_V": block,
-                    "ALLOW_TF32": True,
-                    "HAS_CONTEXTUAL_SEQ_LEN": False,
-                    **_common_specs(dtype=dtype),
-                },
-                default_values=default_values,
-            )
-            for dtype in ["*bf16", "*fp16"]
-            for block in [64, 128]
-            for is_delta_q in [True, False]
-        ]
-        + [
-            VersionedSpec(
-                spec={
-                    "delta_x_offsets": ("*i64", s, is_delta_q),
-                    "num_targets": ("*i64", s, True),
-                    "HAS_MULTIPLE_TARGETS": True,
-                    "IS_DELTA_Q": is_delta_q,
-                    "BLOCK_D_Q": block,
-                    "BLOCK_D_V": block,
-                    "ALLOW_TF32": True,
-                    "HAS_CONTEXTUAL_SEQ_LEN": False,
-                    **_common_specs(dtype=dtype),
-                },
-                default_values=default_values,
-            )
-            for dtype in ["*bf16", "*fp16"]
-            for block in [64, 128]
-            for is_delta_q in [True, False]
-        ]
-    )
-
-
-_hstu_attn_fwd = register_tritoncc_specs(
-    func=_hstu_attn_fwd, versioned_specs=_get_named_specs()
-)
 _hstu_attn_fwd = triton_autotune(
     configs=_get_fw_configs(),
     key=[
@@ -846,9 +690,6 @@ _hstu_attn_fwd = triton_autotune(
     ],
 )(_hstu_attn_fwd.fn)
 
-_hstu_attn_fwd_persistent = register_tritoncc_specs(
-    func=_hstu_attn_fwd_persistent, versioned_specs=_get_named_specs()
-)
 _hstu_attn_fwd_persistent = triton_autotune(
     configs=_get_fw_configs(),
     key=[
@@ -922,17 +763,14 @@ def _hstu_attn_bwd_one_block(  # noqa C901
     # pyre-fixme[16]: Module `math` has no attribute `fast_dividef`.
     sig_trans = fast_dividef(1.0, 1.0 + tl.exp(-qk_trans))
     silu_trans = qk_trans * sig_trans * (1.0 / MAX_SEQ_LEN)
+    pos_offs_m_minus_n = pos_offs_m[None, :] - pos_offs_n[:, None]
+    if not CAUSAL:
+        pos_offs_m_minus_n = tl.where(
+            pos_offs_m_minus_n > 0, pos_offs_m_minus_n, -pos_offs_m_minus_n
+        )
+    invalid_mask_trans = invalid_mask_trans or (pos_offs_m_minus_n > 0)
     if MAX_ATTN_LEN > 0:
-        if CAUSAL:
-            invalid_mask_trans = invalid_mask_trans or (
-                pos_offs_m[None, :] > pos_offs_n[:, None]
-                and pos_offs_n[:, None] - pos_offs_m[None, :] >= -MAX_ATTN_LEN
-            )
-    else:
-        if CAUSAL:
-            invalid_mask_trans = (
-                invalid_mask_trans or pos_offs_m[None, :] > pos_offs_n[:, None]
-            )
+        invalid_mask_trans = invalid_mask_trans and pos_offs_m_minus_n <= MAX_ATTN_LEN
     if HAS_CONTEXTUAL_SEQ_LEN:
         invalid_mask_trans = invalid_mask_trans or (
             pos_offs_m[None, :] == 0 and pos_offs_n[:, None] < max_ids
@@ -1076,8 +914,8 @@ def _hstu_attn_bwd_one_col_block(  # noqa C901
     if HAS_MULTIPLE_TARGETS:
         max_ids = max_ids - n_targets
         pos_offs_n = tl.where(
-            offs_n < max_ids,
-            offs_n,
+            pos_offs_n < max_ids,
+            pos_offs_n,
             max_ids,
         )
     # loop over rows
@@ -1529,7 +1367,7 @@ def triton_hstu_attention_fwd(
     seq_offsets: torch.Tensor,
     causal: bool,
     num_targets: Optional[torch.Tensor],
-    max_attn_len: Optional[int],
+    max_attn_len: int,
     contextual_seq_len: int,
     sort_by_length_indices: Optional[torch.Tensor],
 ) -> torch.Tensor:
@@ -1538,7 +1376,6 @@ def triton_hstu_attention_fwd(
     L, H, DimQ = q.shape
     _, _, DimV = v.shape
     out = torch.empty_like(v)
-    max_attn_len = max_attn_len or 0
     has_multiple_targets = num_targets is not None
     has_contextual_seq_len = contextual_seq_len > 0
     has_sort_by_length_indices = sort_by_length_indices is not None
@@ -1556,7 +1393,6 @@ def triton_hstu_attention_fwd(
         V=v,
         sort_by_length_indices=sort_by_length_indices,
         seq_offsets=seq_offsets,
-        delta_x_offsets=None,
         num_targets=num_targets,
         Out=out,
         stride_qm=q.stride(0),
@@ -1690,7 +1526,7 @@ class _AttentionFunction(torch.autograd.Function):
         seq_offsets: torch.Tensor,
         causal: bool,
         num_targets: Optional[torch.Tensor],
-        max_attn_len: Optional[int],
+        max_attn_len: int,
         contextual_seq_len: int,
         sort_by_length: bool,
     ) -> torch.Tensor:
@@ -1703,7 +1539,6 @@ class _AttentionFunction(torch.autograd.Function):
         saved_tensors = [q, k, v, seq_offsets]
         if num_targets is not None:
             saved_tensors.append(num_targets)
-        max_attn_len = max_attn_len or 0
         if sort_by_length_indices is not None:
             saved_tensors.append(sort_by_length_indices)
         ctx.save_for_backward(*saved_tensors)
@@ -1794,7 +1629,7 @@ class _AttentionFunction(torch.autograd.Function):
 
 
 @torch.fx.wrap
-def native_triton_hstu_mha(
+def triton_hstu_mha(
     N: int,
     alpha: float,
     q: torch.Tensor,
@@ -1803,7 +1638,7 @@ def native_triton_hstu_mha(
     seq_offsets: torch.Tensor,
     causal: bool,
     num_targets: Optional[torch.Tensor] = None,
-    max_attn_len: Optional[int] = None,
+    max_attn_len: int = 0,
     contextual_seq_len: int = 0,
     sort_by_length: bool = False,
 ) -> torch.Tensor:
@@ -1822,65 +1657,17 @@ def native_triton_hstu_mha(
     )
 
 
-def triton_hstu_mha(
-    N: int,
-    alpha: float,
-    q: torch.Tensor,
-    k: torch.Tensor,
-    v: torch.Tensor,
-    seq_offsets: torch.Tensor,
-    causal: bool,
-    num_targets: Optional[torch.Tensor] = None,
-    max_attn_len: Optional[int] = None,
-    contextual_seq_len: int = 0,
-    sort_by_length: bool = False,
-    triton_cc: bool = False,
-) -> torch.Tensor:
-    q = switch_to_contiguous_if_needed(q)
-    k = switch_to_contiguous_if_needed(k)
-    v = switch_to_contiguous_if_needed(v)
-    seq_offsets = seq_offsets.contiguous()
-    if triton_cc:
-        return native_triton_hstu_mha(
-            N,
-            alpha,
-            q,
-            k,
-            v,
-            seq_offsets,
-            causal,
-            num_targets,
-            max_attn_len,
-            contextual_seq_len,
-            sort_by_length,
-        )
-    else:
-        return native_triton_hstu_mha(
-            N,
-            alpha,
-            q,
-            k,
-            v,
-            seq_offsets,
-            causal,
-            num_targets,
-            max_attn_len,
-            contextual_seq_len,
-            sort_by_length,
-        )
-
-
 @torch.fx.wrap
-def native_triton_cached_hstu_mha(
+def triton_cached_hstu_mha(
     N: int,
     alpha: float,
     delta_q: torch.Tensor,
     k: torch.Tensor,
     v: torch.Tensor,
-    delta_x_offsets: torch.Tensor,
     seq_offsets: torch.Tensor,
     num_targets: Optional[torch.Tensor] = None,
-    max_attn_len: Optional[int] = None,
+    max_attn_len: int = 0,
+    contextual_seq_len: int = 0,
 ) -> torch.Tensor:
     Z = seq_offsets.size(0) - 1
     AUTOTUNE_Z = prev_power_of_2(Z)
@@ -1892,13 +1679,13 @@ def native_triton_cached_hstu_mha(
         triton.cdiv(DeltaSize, meta["BLOCK_M"]),
         Z * H,
     )
+    has_contextual_seq_len = contextual_seq_len > 0
     _hstu_attn_fwd[grid](
         Q=delta_q,
         K=k,
         V=v,
         sort_by_length_indices=None,
         seq_offsets=seq_offsets,
-        delta_x_offsets=delta_x_offsets,
         num_targets=num_targets,
         Out=out,
         stride_qm=delta_q.stride(0),
@@ -1910,7 +1697,7 @@ def native_triton_cached_hstu_mha(
         stride_om=out.stride(0),
         stride_oh=out.stride(1),
         alpha=alpha,
-        contextual_seq_len=0,
+        contextual_seq_len=contextual_seq_len,
         Z=Z,
         AUTOTUNE_Z=AUTOTUNE_Z,
         H=H,
@@ -1919,58 +1706,14 @@ def native_triton_cached_hstu_mha(
         DimQ=DimQ,
         DimV=DimV,
         DeltaSize=DeltaSize,
-        MAX_ATTN_LEN=max_attn_len or 0,
+        MAX_ATTN_LEN=max_attn_len,
         CAUSAL=True,
         HAS_MULTIPLE_TARGETS=num_targets is not None,
         IS_DELTA_Q=True,
         ALLOW_TF32=torch.backends.cuda.matmul.allow_tf32,
         BLOCK_D_Q=DimQ,
         BLOCK_D_V=DimV,
-        HAS_CONTEXTUAL_SEQ_LEN=False,
+        HAS_CONTEXTUAL_SEQ_LEN=has_contextual_seq_len,
         HAS_SORT_BY_LENGTH_INDICES=False,
     )
     return out
-
-
-def triton_cached_hstu_mha(
-    N: int,
-    alpha: float,
-    delta_q: torch.Tensor,
-    k: torch.Tensor,
-    v: torch.Tensor,
-    delta_x_offsets: torch.Tensor,
-    seq_offsets: torch.Tensor,
-    num_targets: Optional[torch.Tensor] = None,
-    max_attn_len: Optional[int] = None,
-    triton_cc: bool = False,
-) -> torch.Tensor:
-    seq_offsets = seq_offsets.contiguous()
-    delta_x_offsets = delta_x_offsets.contiguous()
-    delta_q = switch_to_contiguous_if_needed(delta_q)
-    k = switch_to_contiguous_if_needed(k)
-    v = switch_to_contiguous_if_needed(v)
-
-    if triton_cc:
-        return native_triton_cached_hstu_mha(
-            N=N,
-            alpha=alpha,
-            delta_q=delta_q,
-            k=k,
-            v=v,
-            delta_x_offsets=delta_x_offsets,
-            seq_offsets=seq_offsets,
-            num_targets=num_targets,
-            max_attn_len=max_attn_len,
-        )
-    else:
-        return native_triton_cached_hstu_mha(
-            N=N,
-            alpha=alpha,
-            delta_q=delta_q,
-            k=k,
-            v=v,
-            delta_x_offsets=delta_x_offsets,
-            seq_offsets=seq_offsets,
-            num_targets=num_targets,
-            max_attn_len=max_attn_len,
-        )

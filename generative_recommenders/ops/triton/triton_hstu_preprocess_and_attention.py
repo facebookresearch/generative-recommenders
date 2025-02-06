@@ -50,13 +50,14 @@ class _HSTUPreprocessAndAttentionFunction(torch.autograd.Function):
         uvqk_bias: torch.Tensor,
         max_seq_len: int,
         seq_offsets: torch.Tensor,
-        alpha: float,
-        invalid_attn_mask_type: str,
+        attn_alpha: float,
+        causal: bool,
         num_targets: Optional[torch.Tensor],
-        recompute_uvqk_in_backward: bool = False,
-        recompute_normed_x_in_backward: bool = False,
-        contextual_seq_len: int = 0,
-        sort_by_length: bool = False,
+        max_attn_len: int,
+        contextual_seq_len: int,
+        recompute_uvqk_in_backward: bool,
+        recompute_normed_x_in_backward: bool,
+        sort_by_length: bool,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         normed_x, x_mean, x_rstd, BLOCK_D, num_warps = triton_weighted_layer_norm_fwd(
             x=x,
@@ -86,14 +87,14 @@ class _HSTUPreprocessAndAttentionFunction(torch.autograd.Function):
             )
         out = triton_hstu_attention_fwd(
             N=max_seq_len,
-            alpha=alpha,
+            alpha=attn_alpha,
             q=q,
             k=k,
             v=v,
             seq_offsets=seq_offsets,
-            causal=True,
+            causal=causal,
             num_targets=num_targets,
-            max_attn_len=0,
+            max_attn_len=max_attn_len,
             contextual_seq_len=contextual_seq_len,
             sort_by_length_indices=sort_by_length_indices,
         )
@@ -118,11 +119,11 @@ class _HSTUPreprocessAndAttentionFunction(torch.autograd.Function):
         if sort_by_length:
             saved_tensors.append(sort_by_length_indices)
         ctx.save_for_backward(*saved_tensors)
-        ctx.alpha = alpha
-        ctx.causal = True
+        ctx.attn_alpha = attn_alpha
+        ctx.causal = causal
         ctx.has_multiple_targets = num_targets is not None
         ctx.max_seq_len = max_seq_len
-        ctx.max_attn_len = 0
+        ctx.max_attn_len = max_attn_len
         ctx.recompute_normed_x_in_backward = recompute_normed_x_in_backward
         ctx.recompute_uvqk_in_backward = recompute_uvqk_in_backward
         ctx.hidden_dim = hidden_dim
@@ -152,6 +153,7 @@ class _HSTUPreprocessAndAttentionFunction(torch.autograd.Function):
         None,
         torch.Tensor,  # d_uvqk_weight
         torch.Tensor,  # d_uvqk_bias
+        None,
         None,
         None,
         None,
@@ -237,7 +239,7 @@ class _HSTUPreprocessAndAttentionFunction(torch.autograd.Function):
             num_targets=num_targets,
             N=ctx.max_seq_len,
             max_attn_len=ctx.max_attn_len,
-            alpha=ctx.alpha,
+            alpha=ctx.attn_alpha,
             causal=ctx.causal,
             contextual_seq_len=ctx.contextual_seq_len,
             sort_by_length_indices=sort_by_length_indices,
@@ -287,6 +289,7 @@ class _HSTUPreprocessAndAttentionFunction(torch.autograd.Function):
             None,
             None,
             None,
+            None,
         )
 
 
@@ -302,12 +305,13 @@ def triton_hstu_preprocess_and_attention(
     uvqk_bias: torch.Tensor,
     max_seq_len: int,
     seq_offsets: torch.Tensor,
-    alpha: float,
-    invalid_attn_mask_type: str,
+    attn_alpha: float,
+    causal: bool,
     num_targets: Optional[torch.Tensor],
+    max_attn_len: int = 0,
+    contextual_seq_len: int = 0,
     recompute_uvqk_in_backward: bool = False,
     recompute_normed_x_in_backward: bool = False,
-    contextual_seq_len: int = 0,
     sort_by_length: bool = False,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     return _HSTUPreprocessAndAttentionFunction.apply(
@@ -322,11 +326,12 @@ def triton_hstu_preprocess_and_attention(
         uvqk_bias,
         max_seq_len,
         seq_offsets,
-        alpha,
-        invalid_attn_mask_type,
+        attn_alpha,
+        causal,
         num_targets,
+        max_attn_len,
+        contextual_seq_len,
         recompute_uvqk_in_backward,
         recompute_normed_x_in_backward,
-        contextual_seq_len,
         sort_by_length,
     )

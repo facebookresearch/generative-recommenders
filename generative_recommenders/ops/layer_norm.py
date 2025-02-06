@@ -1,0 +1,184 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#    http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+#!/usr/bin/env python3
+
+# pyre-strict
+
+
+from typing import List
+
+import torch
+from generative_recommenders.ops.pytorch.pt_layer_norm import (
+    pytorch_layer_norm,
+    pytorch_swish_layer_norm,
+)
+from generative_recommenders.ops.triton.triton_layer_norm import triton_rms_norm
+
+try:
+    from hammer.ops.triton.cc.swish_layer_norm.triton_cc_swish_layer_norm import (
+        triton_cc_swish_layer_norm,
+    )
+except ImportError:
+    pass
+from generative_recommenders.common import HammerKernel, HammerModule
+from generative_recommenders.ops.triton.triton_layer_norm import (
+    triton_layer_norm,
+    triton_swish_layer_norm,
+)
+from torch.fx._symbolic_trace import is_fx_tracing
+
+torch.fx.wrap("triton_layer_norm")
+torch.fx.wrap("triton_swish_layer_norm")
+
+
+def layer_norm(
+    x: torch.Tensor,
+    weight: torch.Tensor,
+    bias: torch.Tensor,
+    eps: float = 1e-5,
+    kernel: HammerKernel = HammerKernel.PYTORCH,
+) -> torch.Tensor:
+    if kernel == HammerKernel.TRITON:
+        if not is_fx_tracing():
+            torch._assert(x.is_cuda, "x must be CUDA tensor")
+            torch._assert(weight.is_cuda, "weight must be CUDA tensor")
+            torch._assert(bias.is_cuda, "bias must be CUDA tensor")
+        return triton_layer_norm(x, weight, bias, eps)
+    elif kernel == HammerKernel.TRITON_CC:
+        return triton_cc_swish_layer_norm(
+            x,
+            weight,
+            bias,
+            eps,
+            is_swish=False,
+        )
+    else:
+        return pytorch_layer_norm(
+            x,
+            [
+                x.shape[-1],
+            ],
+            weight,
+            bias,
+            eps,
+        )
+
+
+def swish_layer_norm(
+    x: torch.Tensor,
+    weight: torch.Tensor,
+    bias: torch.Tensor,
+    eps: float = 1e-5,
+    kernel: HammerKernel = HammerKernel.PYTORCH,
+) -> torch.Tensor:
+    if kernel == HammerKernel.TRITON:
+        if not is_fx_tracing():
+            torch._assert(x.is_cuda, "x must be CUDA tensor")
+            torch._assert(weight.is_cuda, "weight must be CUDA tensor")
+            torch._assert(bias.is_cuda, "bias must be CUDA tensor")
+        return triton_swish_layer_norm(x, [x.shape[-1]], weight, bias, eps)
+    elif kernel == HammerKernel.TRITON_CC:
+        return triton_cc_swish_layer_norm(
+            x,
+            weight,
+            bias,
+            eps,
+            is_swish=True,
+        )
+    else:
+        return pytorch_swish_layer_norm(
+            x,
+            [
+                x.shape[-1],
+            ],
+            weight,
+            bias,
+            eps,
+        )
+
+
+class LayerNorm(HammerModule):
+    def __init__(
+        self,
+        dim: int,
+        eps: float = 1e-5,
+        is_inference: bool = False,
+    ) -> None:
+        super().__init__(is_inference=is_inference)
+        self._normalized_shape: List[int] = [dim]
+        self._eps = eps
+        self._weight = torch.nn.Parameter(
+            torch.ones(self._normalized_shape),
+        )
+        self._bias = torch.nn.Parameter(
+            torch.zeros(self._normalized_shape),
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return layer_norm(
+            x=x,
+            weight=self._weight,
+            bias=self._bias,
+            eps=self._eps,
+            kernel=self.hammer_kernel(),
+        )
+
+
+class RMSNorm(HammerModule):
+    def __init__(
+        self,
+        dim: int,
+        eps: float = 1e-5,
+        is_inference: bool = False,
+    ) -> None:
+        super().__init__(is_inference=is_inference)
+        self._eps = eps
+        self._weight = torch.nn.Parameter(torch.ones(dim))
+
+    def _norm(self, x: torch.Tensor) -> torch.Tensor:
+        return x * torch.rsqrt(x.pow(2).mean(-1, keepdim=True) + self._eps)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if self.hammer_kernel() == HammerKernel.TRITON:
+            return triton_rms_norm(x, self._weight, self._eps)
+        else:
+            output = self._norm(x.float()).type_as(x)
+            return output * self._weight
+
+
+class SwishLayerNorm(HammerModule):
+    def __init__(
+        self,
+        dim: int,
+        eps: float = 1e-5,
+        is_inference: bool = False,
+    ) -> None:
+        super().__init__(is_inference=is_inference)
+        self._normalized_shape: List[int] = [dim]
+        self._weight = torch.nn.Parameter(torch.ones(self._normalized_shape))
+        self._bias = torch.nn.Parameter(torch.zeros(self._normalized_shape))
+        self._eps = eps
+
+    def forward(
+        self,
+        x: torch.Tensor,
+    ) -> torch.Tensor:
+        return swish_layer_norm(
+            x=x,
+            weight=self._weight,
+            bias=self._bias,
+            eps=self._eps,
+            kernel=self.hammer_kernel(),
+        )

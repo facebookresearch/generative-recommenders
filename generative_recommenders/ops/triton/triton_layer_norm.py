@@ -332,7 +332,8 @@ def triton_weighted_layer_norm_fwd(
         raise RuntimeError("This layer norm doesn't support feature dim >= 64KB.")
 
     num_warps: int = min(max(BLOCK_D // 256, 1), 8)
-
+    if N == 0:
+        return y, mean, rstd, BLOCK_D, num_warps
     if learnable:
         # pyre-ignore[28]
         _weighted_layer_norm_fwd[(N,)](
@@ -393,6 +394,10 @@ def triton_weighted_layer_norm_bwd(
         _dbias = torch.empty((tile_num, D), dtype=torch.float32, device=x.device)
         dweight = torch.empty((D,), dtype=weight.dtype, device=x.device)
         dbias = torch.empty((D,), dtype=weight.dtype, device=x.device)
+        if N == 0:
+            dweight.zero_()
+            dbias.zero_()
+            return dx, dweight, dbias
         # pyre-ignore[28]
         _weighted_layer_norm_bwd_dx[(tile_num,)](
             dx,
@@ -435,6 +440,8 @@ def triton_weighted_layer_norm_bwd(
     else:
         N, D = x.shape
         dx = torch.empty_like(x)
+        if N == 0:
+            return dx, None, None
         # pyre-ignore[28]
         _layer_norm_bwd_dx[(N,)](
             dx,
@@ -759,6 +766,13 @@ class SwishLayerNormFunction(torch.autograd.Function):
         BLOCK_D = triton.next_power_of_2(D)
         num_warps = min(max(BLOCK_D // 256, 1), 8)
 
+        ctx.save_for_backward(x, weight, bias, mean, rstd)
+        ctx.BLOCK_D = BLOCK_D
+        ctx.num_warps = num_warps
+        ctx.eps = eps
+        if N == 0:
+            return y
+
         # pyre-ignore[28]
         _weighted_layer_norm_fwd[(N,)](
             x,
@@ -778,11 +792,6 @@ class SwishLayerNormFunction(torch.autograd.Function):
             num_warps=num_warps,
         )
 
-        ctx.save_for_backward(x, weight, bias, mean, rstd)
-        ctx.BLOCK_D = BLOCK_D
-        ctx.num_warps = num_warps
-        ctx.eps = eps
-
         return y
 
     @staticmethod
@@ -794,11 +803,15 @@ class SwishLayerNormFunction(torch.autograd.Function):
         N, D = x.shape
         dx = torch.empty_like(x)
         sms = torch.cuda.get_device_properties(x.device).multi_processor_count
-        tile_num = min(sms * 8, N // 4)
+        tile_num = max(1, min(sms * 8, N // 4))
         _dweight = torch.empty((tile_num, D), dtype=torch.float32, device=x.device)
         _dbias = torch.empty((tile_num, D), dtype=torch.float32, device=x.device)
         dweight = torch.empty((D,), dtype=weight.dtype, device=x.device)
         dbias = torch.empty((D,), dtype=weight.dtype, device=x.device)
+        if N == 0:
+            dweight.zero_()
+            dbias.zero_()
+            return dx, dweight, dbias, None
         # pyre-ignore[28]
         _weighted_layer_norm_bwd_dx[(tile_num,)](
             dx,
@@ -850,6 +863,7 @@ def triton_layer_norm(
     return LayerNormFunction.apply(x, weight, bias, eps)
 
 
+@torch.fx.wrap
 def triton_rms_norm(
     x: torch.Tensor,
     weight: Optional[torch.Tensor],
@@ -862,8 +876,8 @@ def triton_rms_norm(
 def triton_swish_layer_norm(
     x: torch.Tensor,
     normalized_shape: List[int],
-    weight: torch.Tensor,
-    bias: torch.Tensor,
+    weight: Optional[torch.Tensor],
+    bias: Optional[torch.Tensor],
     eps: float,
 ) -> torch.Tensor:
     return SwishLayerNormFunction.apply(x, weight, bias, eps)

@@ -33,7 +33,7 @@ import torch
 import torch.multiprocessing as mp
 
 from absl import app, flags
-from generative_recommenders.trainer.train import train_fn
+from generative_recommenders.research.trainer.train import train_fn
 
 logging.basicConfig(stream=sys.stdout, level=logging.INFO)
 

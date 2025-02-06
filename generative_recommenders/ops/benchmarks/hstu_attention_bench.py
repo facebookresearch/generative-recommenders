@@ -13,7 +13,7 @@ from generative_recommenders.common import (
     generate_sparse_seq_len,
     HammerKernel,
 )
-from generative_recommenders.ops.hstu_attention import cached_hstu_mha, hstu_mha
+from generative_recommenders.ops.hstu_attention import delta_hstu_mha, hstu_mha
 
 
 def _get_kernel(provider: str) -> HammerKernel:
@@ -231,13 +231,12 @@ def main(  # noqa: C901
             v = v.requires_grad_(True)
         assert provider in ["triton", "pytorch"]
         if has_delta_q:
-            fn = lambda: cached_hstu_mha(  # noqa E731
+            fn = lambda: delta_hstu_mha(  # noqa E731
                 max_seq_len=seq_len,
                 alpha=alpha,
                 delta_q=delta_q,
                 k=k,
                 v=v,
-                delta_x_offsets=delta_x_offsets,
                 seq_offsets=seq_offsets,
                 num_targets=num_targets,
                 kernel=_get_kernel(provider),
@@ -254,7 +253,7 @@ def main(  # noqa: C901
                 dropout_pr=0.0,
                 training=True,
                 num_targets=num_targets,
-                max_attn_len=max_attn_len if max_attn_len > 0 else None,
+                max_attn_len=max_attn_len,
                 contextual_seq_len=contextual_seq_len,
                 sort_by_length=True,
                 kernel=_get_kernel(provider),

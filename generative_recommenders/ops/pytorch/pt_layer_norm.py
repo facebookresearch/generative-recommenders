@@ -28,13 +28,14 @@ def pytorch_layer_norm(
     bias: torch.Tensor,
     eps: float,
 ) -> torch.Tensor:
+    dtype = x.dtype
     return torch.nn.functional.layer_norm(
-        x,
+        x.to(torch.float32),
         normalized_shape,
-        weight.to(x.dtype),
-        bias.to(x.dtype),
+        weight.to(torch.float32),
+        bias.to(torch.float32),
         eps,
-    )
+    ).to(dtype)
 
 
 def pytorch_swish_layer_norm(
@@ -44,12 +45,17 @@ def pytorch_swish_layer_norm(
     bias: torch.Tensor,
     eps: float,
 ) -> torch.Tensor:
-    return x * torch.sigmoid(
-        torch.nn.functional.layer_norm(
-            x,
-            normalized_shape,
-            weight.to(x.dtype),
-            bias.to(x.dtype),
-            eps,
+    dtype = x.dtype
+    x = x.to(torch.float32)
+    return (
+        x
+        * torch.sigmoid(
+            torch.nn.functional.layer_norm(
+                x,
+                normalized_shape,
+                weight.to(torch.float32),
+                bias.to(torch.float32),
+                eps,
+            )
         )
-    )
+    ).to(dtype)
