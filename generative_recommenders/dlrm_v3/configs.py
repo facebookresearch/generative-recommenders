@@ -115,6 +115,7 @@ def get_hstu_configs(dataset: str = "debug") -> DlrmHSTUConfig:
         ]
         hstu_config.uih_post_id_feature_name = "video_id"
         hstu_config.uih_action_time_feature_name = "action_timestamp"
+        hstu_config.uih_weight_feature_name = "action_weight"
         hstu_config.candidates_weight_feature_name = "item_action_weight"
         hstu_config.candidates_watchtime_feature_name = "item_target_watchtime"
         # There are more contextual features in the dataset, see https://kuairand.com/ for details
@@ -192,6 +193,7 @@ def get_hstu_configs(dataset: str = "debug") -> DlrmHSTUConfig:
                 task_type=MultitaskTaskType.BINARY_CLASSIFICATION,
             ),
         ]
+        hstu_config.action_weights = [1, 2, 4, 8, 16, 32, 64, 128]
     else:
         hstu_config.user_embedding_feature_names = [
             "uih_post_id",

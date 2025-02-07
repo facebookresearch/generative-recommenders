@@ -82,11 +82,13 @@ class DlrmHSTUConfig:
     item_embedding_feature_names: List[str] = field(default_factory=list)
     uih_post_id_feature_name: str = ""
     uih_action_time_feature_name: str = ""
+    uih_weight_feature_name: str = ""
     hstu_uih_feature_names: List[str] = field(default_factory=list)
     hstu_candidate_feature_names: List[str] = field(default_factory=list)
     merge_uih_candidate_feature_mapping: List[Tuple[str, str]] = field(
         default_factory=list
     )
+    action_weights: Optional[List[int]] = None
     enable_postprocessor: bool = True
     use_layer_norm_postprocessor: bool = False
 
@@ -130,7 +132,11 @@ class DlrmHSTU(HammerModule):
             output_embedding_dim=hstu_configs.hstu_transducer_embedding_dim,
             contextual_feature_to_max_length=hstu_configs.contextual_feature_to_max_length,
             contextual_feature_to_min_uih_length=hstu_configs.contextual_feature_to_min_uih_length,
+            uih_weight_name=hstu_configs.uih_weight_feature_name,
+            action_weights=hstu_configs.action_weights,
             is_inference=self._is_inference,
+            interleave_action_with_target=True,
+            interleave_action_with_uih=True,
         )
 
         positional_encoder = HSTUPositionalEncoder(
@@ -195,8 +201,8 @@ class DlrmHSTU(HammerModule):
             input_dropout_ratio=hstu_configs.hstu_input_dropout_rate,
             positional_encoder=positional_encoder,
             is_inference=self._is_inference,
-            pointwise_training=True,
             return_full_embeddings=False,
+            listwise=False,
         )
 
         self._item_embedding_mlp: torch.nn.Module = torch.nn.Sequential(
@@ -440,7 +446,6 @@ class DlrmHSTU(HammerModule):
                 seq_embeddings,
                 num_candidates=num_candidates,
             )
-
         with record_function("## multitask_module ##"):
             mt_target_preds, mt_target_labels, mt_target_weights, mt_losses = (
                 self._multitask_module(

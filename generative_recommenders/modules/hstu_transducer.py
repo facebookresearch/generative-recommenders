@@ -59,9 +59,9 @@ class HSTUTransducer(HammerModule):
         input_dropout_ratio: float = 0.0,
         positional_encoder: Optional[HSTUPositionalEncoder] = None,
         is_inference: bool = True,
-        pointwise_training: bool = True,
         return_full_embeddings: bool = False,
         training_dtype: torch.dtype = torch.float32,
+        listwise: bool = False,
     ) -> None:
         super().__init__(is_inference=is_inference)
         self._stu_module = stu_module
@@ -75,10 +75,10 @@ class HSTUTransducer(HammerModule):
             self._is_inference == self._input_preprocessor._is_inference
         ), f"input_preprocessor must have the same mode; self: {self._is_inference} vs input_preprocessor {self._input_preprocessor._is_inference}"
         self._positional_encoder: Optional[HSTUPositionalEncoder] = positional_encoder
-        self._pointwise_training: bool = pointwise_training
         self._input_dropout_ratio: float = input_dropout_ratio
         self._return_full_embeddings: bool = return_full_embeddings
         self._training_dtype = training_dtype
+        self._listwise_training: bool = listwise and self.is_train
 
     def _preprocess(
         self,
@@ -125,7 +125,9 @@ class HSTUTransducer(HammerModule):
                     seq_offsets=output_seq_offsets,
                     seq_timestamps=output_seq_timestamps,
                     seq_embeddings=output_seq_embeddings,
-                    num_targets=output_num_targets,
+                    num_targets=(
+                        None if self._listwise_training else output_num_targets
+                    ),
                 )
 
         output_seq_embeddings = torch.nn.functional.dropout(
@@ -159,11 +161,7 @@ class HSTUTransducer(HammerModule):
                 x=seq_embeddings,
                 x_lengths=seq_lengths,
                 x_offsets=seq_offsets,
-                num_targets=(
-                    None
-                    if (not self._is_inference and not self._pointwise_training)
-                    else num_targets
-                ),
+                num_targets=(None if self._listwise_training else num_targets),
             )
         return seq_embeddings
 
@@ -196,7 +194,11 @@ class HSTUTransducer(HammerModule):
                 offsets_left=uih_offsets,
                 offsets_right=candidates_offsets,
             )
-            if self._input_preprocessor.interleave_targets():
+            # pyre-ignore
+            interleave_target: bool = (
+                self._input_preprocessor.interleave_action_with_target
+            )
+            if interleave_target:
                 candidate_embeddings = candidate_embeddings.view(
                     -1, 2, candidate_embeddings.size(-1)
                 )[:, 0, :]
@@ -208,7 +210,7 @@ class HSTUTransducer(HammerModule):
                     offsets_right=candidates_offsets,
                 )
                 candidate_timestamps = candidate_timestamps.squeeze(-1)
-                if self._input_preprocessor.interleave_targets():
+                if interleave_target:
                     candidate_timestamps = candidate_timestamps.view(-1, 2)[:, 0]
                 candidate_embeddings = self._output_postprocessor(
                     seq_embeddings=candidate_embeddings,
