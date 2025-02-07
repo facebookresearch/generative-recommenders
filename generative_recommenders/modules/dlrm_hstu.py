@@ -320,9 +320,9 @@ class DlrmHSTU(HammerModule):
             candidates_features.lengths().view(len(candidates_features.keys()), -1)
         )[0]
         max_num_candidates = fx_infer_max_len(num_candidates)
-        uih_seq_lengths = fx_mark_length_features(
-            uih_features.lengths().view(len(uih_features.keys()), -1)
-        )[0]
+        uih_seq_lengths = uih_features[
+            self._hstu_configs.uih_post_id_feature_name
+        ].lengths()
         max_uih_len = fx_infer_max_len(uih_seq_lengths)
 
         # prepare payload features
