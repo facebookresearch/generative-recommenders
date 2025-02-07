@@ -21,16 +21,31 @@ from typing import Optional, Tuple
 import torch
 
 from generative_recommenders.common import HammerKernel
+from generative_recommenders.ops.pytorch.pt_jagged import (
+    pytorch_jagged_dense_bmm_broadcast_add,
+)
 from generative_recommenders.ops.pytorch.pt_jagged_tensors import (
     pytorch_concat_2D_jagged,
     pytorch_hstu_concat_l2_embeddings,
     pytorch_hstu_split_l2_embeddings,
     pytorch_split_2D_jagged,
 )
+
+from generative_recommenders.ops.triton.triton_jagged import (
+    triton_jagged_dense_bmm_broadcast_add,
+)
 from generative_recommenders.ops.triton.triton_jagged_tensors import (
     triton_concat_2D_jagged,
     triton_split_2D_jagged,
 )
+from torch.fx._symbolic_trace import is_fx_tracing
+
+try:
+    from hammer.ops.triton.cc.jagged_dense_bmm.triton_cc_jagged_dense_bmm import (
+        triton_cc_jagged_dense_bmm,
+    )
+except ImportError:
+    pass
 from torch.fx._symbolic_trace import is_fx_tracing
 
 
@@ -177,4 +192,50 @@ def hstu_concat_l2_embeddings(
             max_l2_len=max_l2_len,
             l2_x=l2_x,
             l2_offsets=l2_offsets,
+        )
+
+
+def jagged_dense_bmm_broadcast_add(
+    max_seq_len: int,
+    seq_offsets: torch.Tensor,
+    jagged: torch.Tensor,
+    dense: torch.Tensor,
+    bias: torch.Tensor,
+    kernel: HammerKernel = HammerKernel.PYTORCH,
+) -> torch.Tensor:
+    """
+    Computing out = jagged x dense + bias
+    jagged has shape (sum_B(M_i), K), dense has shape (B, K, N), and bias has shape (B, N)
+    out has shape (sum_B(M_i), N)
+    """
+    if not is_fx_tracing():
+        _, K = jagged.shape
+        B, _, N = dense.shape
+        torch._assert(dense.shape[1] == K, "wrong dense shape[1]")
+        torch._assert(seq_offsets.shape[0] == B + 1, "wrong seq_offsets shape[0]")
+        torch._assert(bias.shape[0] == B, "wrong bias shape[0]")
+        torch._assert(bias.shape[1] == N, "wrong bias shape[1]")
+    if kernel == HammerKernel.TRITON:
+        return triton_jagged_dense_bmm_broadcast_add(
+            max_seq_len=max_seq_len,
+            seq_offsets=seq_offsets,
+            jagged=jagged,
+            dense=dense,
+            bias=bias,
+        )
+    elif kernel == HammerKernel.TRITON_CC:
+        return triton_cc_jagged_dense_bmm(
+            max_seq_len=max_seq_len,
+            seq_offsets=seq_offsets,
+            jagged=jagged,
+            dense=dense,
+            bias=bias,
+        )
+    else:
+        return pytorch_jagged_dense_bmm_broadcast_add(
+            max_seq_len=max_seq_len,
+            seq_offsets=seq_offsets,
+            jagged=jagged,
+            dense=dense,
+            bias=bias,
         )

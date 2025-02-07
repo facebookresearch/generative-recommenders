@@ -34,6 +34,9 @@ def pytorch_jagged_dense_bmm(
     jagged: torch.Tensor,
     dense: torch.Tensor,
 ) -> torch.Tensor:
+    dtype = jagged.dtype
+    jagged = jagged.to(torch.float32)
+    dense = dense.to(torch.float32)
     padded_jagged = torch.ops.fbgemm.jagged_to_padded_dense(
         values=jagged,
         offsets=[seq_offsets],
@@ -44,7 +47,7 @@ def pytorch_jagged_dense_bmm(
     jagged_bmm_out = torch.ops.fbgemm.dense_to_jagged(
         bmm_out, [seq_offsets], total_L=jagged.shape[0]
     )[0]
-
+    jagged_bmm_out = jagged_bmm_out.to(dtype)
     return jagged_bmm_out
 
 
@@ -54,6 +57,9 @@ def pytorch_jagged_dense_broadcast_add(
     jagged: torch.Tensor,
     dense: torch.Tensor,
 ) -> torch.Tensor:
+    dtype = jagged.dtype
+    jagged = jagged.to(torch.float32)
+    dense = dense.to(torch.float32)
     padded_jagged = torch.ops.fbgemm.jagged_to_padded_dense(
         values=jagged,
         offsets=[seq_offsets],
@@ -64,6 +70,7 @@ def pytorch_jagged_dense_broadcast_add(
     jagged_out = torch.ops.fbgemm.dense_to_jagged(
         out, [seq_offsets], total_L=jagged.shape[0]
     )[0]
+    jagged_out = jagged_out.to(dtype)
     return jagged_out
 
 
@@ -74,13 +81,21 @@ def pytorch_jagged_dense_bmm_broadcast_add(
     dense: torch.Tensor,
     bias: torch.Tensor,
 ) -> torch.Tensor:
-    jagged = pytorch_jagged_dense_bmm(max_seq_len, seq_offsets, jagged, dense)
-    return pytorch_jagged_dense_broadcast_add(
-        max_seq_len=max_seq_len,
-        seq_offsets=seq_offsets,
-        jagged=jagged,
-        dense=bias,
+    dtype = jagged.dtype
+    jagged = jagged.to(torch.float32)
+    dense = dense.to(torch.float32)
+    padded_jagged = torch.ops.fbgemm.jagged_to_padded_dense(
+        values=jagged,
+        offsets=[seq_offsets],
+        max_lengths=[max_seq_len],
+        padding_value=0.0,
     )
+    bmm_out = torch.bmm(padded_jagged, dense)
+    jagged_out = torch.ops.fbgemm.dense_to_jagged(
+        bmm_out + bias.unsqueeze(1), [seq_offsets], total_L=jagged.shape[0]
+    )[0]
+    jagged_out = jagged_out.to(dtype)
+    return jagged_out
 
 
 @torch.fx.wrap
