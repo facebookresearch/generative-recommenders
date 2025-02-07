@@ -13,9 +13,8 @@
 # limitations under the License.
 
 #!/usr/bin/env python3
-# pyre-strict
 
-from typing import Optional
+# pyre-strict
 
 import torch
 import torch.nn.functional as F
@@ -34,20 +33,23 @@ def pytorch_norm_mul_dropout(
     num_heads: int = 1,
     linear_dim: int = -1,
 ) -> torch.Tensor:
+    dtype = x.dtype
+    x = x.to(torch.float32)
+    u = u.to(torch.float32)
     if group_norm:
         y = u * F.group_norm(
             x.view(-1, num_heads, linear_dim),
             num_groups=num_heads,
-            weight=weight,
-            bias=bias,
+            weight=weight.to(torch.float32),
+            bias=bias.to(torch.float32),
             eps=eps,
         ).view(-1, num_heads * linear_dim)
     else:
         y = u * F.layer_norm(
             x,
             normalized_shape=(x.shape[-1],),
-            weight=weight,
-            bias=bias,
+            weight=weight.to(torch.float32),
+            bias=bias.to(torch.float32),
             eps=eps,
         )
     if concat_ux:
@@ -57,7 +59,7 @@ def pytorch_norm_mul_dropout(
         p=dropout_ratio,
         training=training,
     )
-    return y
+    return y.to(dtype)
 
 
 def pytorch_hstu_compute_output(
@@ -74,9 +76,8 @@ def pytorch_hstu_compute_output(
     group_norm: bool = False,
     num_heads: int = 1,
     linear_dim: int = -1,
-    seed: Optional[int] = None,
-    recompute_y_in_backward: bool = False,
 ) -> torch.Tensor:
+    dtype = x.dtype
     y = pytorch_norm_mul_dropout(
         x=attn,
         u=u,
@@ -90,4 +91,4 @@ def pytorch_hstu_compute_output(
         num_heads=num_heads,
         linear_dim=linear_dim,
     )
-    return torch.addmm(x, y, output_weight)
+    return torch.addmm(x, y, output_weight.to(x.dtype)).to(dtype)

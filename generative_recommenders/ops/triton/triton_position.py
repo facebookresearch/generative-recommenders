@@ -290,7 +290,6 @@ def _add_timestamp_position_embeddings_kernel(
     stride_sn,
     stride_pn,
     stride_tn,
-    stride_ts,
     stride_on,
     TRAINING: tl.constexpr,
     HAS_MULTIPLE_TARGETS: tl.constexpr,
@@ -337,8 +336,8 @@ def _add_timestamp_position_embeddings_kernel(
         tl.store(PosInds + seq_start + offs_n, pos_inds, mask=mask_n)
     pos_emb_offsets = pos_inds[:, None] * stride_pn + offs_d[None, :]
     # timestamp encoding
-    ts = tl.load(TS + off_b * stride_ts + offs_n, mask=mask_n)
-    query_time = tl.load(TS + off_b * stride_ts + seq_len - 1)
+    ts = tl.load(TS + seq_start + offs_n, mask=mask_n)
+    query_time = tl.load(TS + seq_end - 1)
     ts = query_time - ts + time_delta
     ts = tl.where(ts > 1e-6, ts, 1e-6) / time_bucket_increments
     if TIME_BUCKET_FN == "log":
@@ -468,11 +467,6 @@ class _AddTimestampPositionEmbeddingsFunction(torch.autograd.Function):
 
         max_pos_ind = pos_embeddings.shape[0]
         B = seq_lengths.shape[0]
-        assert timestamps.shape[0] == B, "shape[0] of timestamps much match batch size"
-        assert (
-            timestamps.shape[1] >= max_seq_len
-        ), "shape[1] of timestamps much >= max_seq_len"
-
         N, D = seq_embeddings.shape
         assert len(pos_embeddings.shape) == 2
         assert len(ts_embeddings.shape) == 2
@@ -515,7 +509,6 @@ class _AddTimestampPositionEmbeddingsFunction(torch.autograd.Function):
             stride_sn=seq_embeddings.stride(0),
             stride_pn=pos_embeddings.stride(0),
             stride_tn=ts_embeddings.stride(0),
-            stride_ts=timestamps.stride(0),
             stride_on=out.stride(0),
             TRAINING=True,
             HAS_MULTIPLE_TARGETS=num_targets is not None,

@@ -41,7 +41,9 @@ def pytorch_jagged_dense_bmm(
         padding_value=0.0,
     )
     bmm_out = torch.bmm(padded_jagged, dense)
-    jagged_bmm_out = torch.ops.fbgemm.dense_to_jagged(bmm_out, [seq_offsets])[0]
+    jagged_bmm_out = torch.ops.fbgemm.dense_to_jagged(
+        bmm_out, [seq_offsets], total_L=jagged.shape[0]
+    )[0]
 
     return jagged_bmm_out
 
@@ -59,7 +61,9 @@ def pytorch_jagged_dense_broadcast_add(
         padding_value=0.0,
     )
     out = padded_jagged + dense.unsqueeze(1)
-    jagged_out = torch.ops.fbgemm.dense_to_jagged(out, [seq_offsets])[0]
+    jagged_out = torch.ops.fbgemm.dense_to_jagged(
+        out, [seq_offsets], total_L=jagged.shape[0]
+    )[0]
     return jagged_out
 
 
@@ -104,6 +108,7 @@ def pytorch_concat_2D_dense_jagged(
     return torch.ops.fbgemm.dense_to_jagged(
         concatted_dense,
         [concatted_offsets],
+        total_L=jagged_values.shape[0] + dense_size * B,
     )[0]
 
 

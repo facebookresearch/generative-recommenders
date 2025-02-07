@@ -24,6 +24,7 @@ from hammer.fx_utils import fx_unwrap_optional_tensor
 
 torch.ops.load_library("//deeplearning/fbgemm/fbgemm_gpu:sparse_ops")
 torch.ops.load_library("//deeplearning/fbgemm/fbgemm_gpu:sparse_ops_cpu")
+torch.ops.load_library("//hammer/oss/generative_recommenders/ops/cpp:cpp_ops")
 
 
 @torch.fx.wrap
@@ -118,7 +119,11 @@ def pytorch_add_timestamp_positional_embeddings(
     time_bucket_increments = 60.0
     time_bucket_divisor = 1.0
     time_delta = 0
-    timestamps = timestamps[:, :max_seq_len]
+    timestamps = torch.ops.gr.expand_1d_jagged_to_dense(
+        timestamps,
+        seq_offsets,
+        max_seq_len,
+    )
     query_time = torch.gather(
         timestamps, dim=1, index=(seq_lengths - 1).unsqueeze(1).clamp(min=0)
     )
