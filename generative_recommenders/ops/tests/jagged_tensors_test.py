@@ -18,9 +18,16 @@
 
 import unittest
 
+from typing import Optional
+
 import torch
 
-from generative_recommenders.common import gpu_unavailable, HammerKernel, set_dev_mode
+from generative_recommenders.common import (
+    generate_sparse_seq_len,
+    gpu_unavailable,
+    HammerKernel,
+    set_dev_mode,
+)
 
 from hypothesis import given, settings, strategies as st, Verbosity
 
@@ -527,3 +534,187 @@ class JaggedTensorsTest(unittest.TestCase):
         real_d_l2_x = l2_x.grad.clone()
         torch.testing.assert_close(ref_d_minus_l2_x, real_d_minus_l2_x)
         torch.testing.assert_close(ref_d_l2_x, real_d_l2_x)
+
+    @unittest.skipIf(*gpu_unavailable)
+    # pyre-ignore
+    @given(
+        batch_size=st.integers(4, 8),
+        max_seq_len=st.integers(50, 500),
+        D=st.integers(20, 200),
+        K=st.integers(30, 200),
+        dtype=st.sampled_from(
+            [torch.float32, torch.bfloat16, torch.float16]
+            if torch.cuda.get_device_capability(torch.device("cuda"))[0] >= 8
+            else [torch.float32]
+        ),
+        contiguous=st.booleans(),
+    )
+    @settings(
+        verbosity=Verbosity.verbose,
+        max_examples=20,
+        deadline=None,
+    )
+    # pyre-ignore[2]
+    def test_jagged_dense_bmm_broadcast_add_triton(self, *args, **kwargs) -> None:
+        self._test_jagged_dense_bmm_broadcast_add(
+            *args,
+            **kwargs,
+            test_backward=True,
+            atol=None,
+            rtol=None,
+            ref_kernel=HammerKernel.PYTORCH,
+            real_kernel=HammerKernel.TRITON,
+        )
+
+    @unittest.skipIf(*gpu_unavailable)
+    # pyre-ignore
+    @given(
+        batch_size=st.sampled_from([130]),
+        max_seq_len=st.sampled_from([32768]),
+        D=st.sampled_from([512]),
+        K=st.sampled_from([512]),
+        dtype=st.sampled_from([torch.float32, torch.bfloat16]),
+        contiguous=st.booleans(),
+    )
+    @settings(
+        verbosity=Verbosity.verbose,
+        max_examples=1,
+        deadline=None,
+    )
+    def test_jagged_dense_bmm_broadcast_add_triton_large_tensor(
+        self,
+        # pyre-fixme[2]: Parameter must be annotated.
+        *args,
+        **kwargs,  # pyre-ignore[2]
+    ) -> None:
+        self._test_jagged_dense_bmm_broadcast_add(
+            *args,
+            **kwargs,
+            test_backward=True,
+            atol=None,
+            rtol=None,
+            ref_kernel=HammerKernel.TRITON,
+            real_kernel=HammerKernel.TRITON,
+        )
+
+    def _test_jagged_dense_bmm_broadcast_add(
+        self,
+        batch_size: int,
+        max_seq_len: int,
+        D: int,
+        K: int,
+        dtype: torch.dtype,
+        ref_kernel: HammerKernel,
+        real_kernel: HammerKernel,
+        test_backward: bool,
+        contiguous: bool = True,
+        atol: Optional[float] = None,
+        rtol: Optional[float] = None,
+        sparsity: float = -1,
+    ) -> None:
+        set_dev_mode(True)
+        torch.backends.cudnn.allow_tf32 = False
+        torch.backends.cuda.matmul.allow_tf32 = False
+        from generative_recommenders.ops.jagged_tensors import (
+            jagged_dense_bmm_broadcast_add,
+        )
+
+        if sparsity > 0.0:
+            lengths = generate_sparse_seq_len(
+                size=batch_size,
+                max_seq_len=max_seq_len,
+                sparsity=sparsity,
+                device=torch.device("cuda"),
+            ).to(torch.int64)
+        else:
+            lengths = torch.randint(
+                max_seq_len + 1, size=(batch_size,), device=torch.device("cuda")
+            )
+        # Test the edge case with an empty row
+        seq_offsets = torch.zeros(
+            (batch_size + 1,), dtype=torch.int64, device=torch.device("cuda")
+        )
+        seq_offsets[1:] = torch.cumsum(lengths, dim=0)
+        jagged_size = int(seq_offsets[-1].item())
+        jagged = (
+            torch.empty((jagged_size, D), dtype=dtype, device=torch.device("cuda"))
+            .uniform_(-1.0, 1.0)
+            .requires_grad_()
+        )
+        dense = (
+            torch.empty((batch_size, D, K), dtype=dtype, device=torch.device("cuda"))
+            .uniform_(-1.0, 1.0)
+            .requires_grad_()
+        )
+        bias = (
+            torch.empty((batch_size, K), dtype=dtype, device=torch.device("cuda"))
+            .uniform_(-1.0, 1.0)
+            .requires_grad_()
+        )
+
+        if not contiguous:
+            dense = (
+                dense.transpose(1, 2)
+                .contiguous()
+                .transpose(1, 2)
+                .detach()
+                .clone()
+                .requires_grad_()
+            )
+
+        ref_out = jagged_dense_bmm_broadcast_add(
+            max_seq_len=max_seq_len,
+            seq_offsets=seq_offsets,
+            jagged=jagged,
+            dense=dense,
+            bias=bias,
+            kernel=ref_kernel,
+        ).to(jagged.dtype)
+        if test_backward:
+            dout = torch.randn_like(ref_out) * 0.01
+            ref_out.backward(dout)
+            # pyre-ignore
+            ref_d_jagged, jagged.grad = jagged.grad.clone(), None
+            ref_d_dense, dense.grad = dense.grad.clone(), None
+            ref_d_bias, bias.grad = bias.grad.clone(), None
+
+        jagged = jagged.detach().clone().requires_grad_()
+        dense = dense.detach().clone().requires_grad_()
+        bias = bias.detach().clone().requires_grad_()
+        real_out = jagged_dense_bmm_broadcast_add(
+            max_seq_len=max_seq_len,
+            seq_offsets=seq_offsets,
+            jagged=jagged,
+            dense=dense,
+            bias=bias,
+            kernel=real_kernel,
+        )
+        torch.testing.assert_close(
+            ref_out,
+            real_out,
+            atol=atol,
+            rtol=rtol,
+        )
+        if test_backward:
+            real_out.backward(dout)  # pyre-ignore
+            real_d_jagged = jagged.grad.clone()
+            real_d_dense = dense.grad.clone()
+            real_d_bias = bias.grad.clone()
+            torch.testing.assert_close(
+                ref_d_jagged,  # pyre-ignore
+                real_d_jagged,
+                atol=atol,
+                rtol=rtol,
+            )
+            torch.testing.assert_close(
+                ref_d_dense,  # pyre-ignore
+                real_d_dense,
+                atol=atol,
+                rtol=rtol,
+            )
+            torch.testing.assert_close(
+                ref_d_bias,  # pyre-ignore
+                real_d_bias,
+                atol=atol,
+                rtol=rtol,
+            )

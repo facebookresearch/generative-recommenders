@@ -291,6 +291,15 @@ def fx_mark_length_features(tensor: torch.Tensor) -> torch.Tensor:
 
 
 @torch.fx.wrap
+def fx_torch_ones(
+    shape: List[int],
+    device: torch.device,
+    dtype: torch.dtype,
+) -> torch.Tensor:
+    return torch.ones(shape, device=device, dtype=dtype)
+
+
+@torch.fx.wrap
 def fx_torch_zeros(shape: List[int], device: torch.device) -> torch.Tensor:
     return torch.zeros(shape, device=device)
 
