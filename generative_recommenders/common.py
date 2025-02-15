@@ -29,6 +29,12 @@ import triton
 from triton.runtime.autotuner import Autotuner
 
 try:
+    torch.ops.load_library("//deeplearning/fbgemm/fbgemm_gpu:sparse_ops")
+    torch.ops.load_library("//deeplearning/fbgemm/fbgemm_gpu:sparse_ops_cpu")
+except OSError:
+    pass
+
+try:
     from hammer.ops.triton.utils import triton_autotune
     from hammer.utils import is_dev_mode, set_dev_mode, set_verbose_level
 except ImportError:
@@ -305,15 +311,6 @@ def fx_torch_zeros(shape: List[int], device: torch.device) -> torch.Tensor:
 
 
 @torch.fx.wrap
-def fx_torch_ones(
-    shape: List[int],
-    device: torch.device,
-    dtype: torch.dtype,
-) -> torch.Tensor:
-    return torch.ones(shape, device=device, dtype=dtype)
-
-
-@torch.fx.wrap
 def jagged_to_padded_dense(
     values: torch.Tensor,
     offsets: List[torch.Tensor],
@@ -326,3 +323,14 @@ def jagged_to_padded_dense(
         max_lengths=max_lengths,
         padding_value=padding_value,
     )
+
+
+@torch.fx.wrap
+def dense_to_jagged(
+    dense: torch.Tensor,
+    x_offsets: List[torch.Tensor],
+) -> torch.Tensor:
+    return torch.ops.fbgemm.dense_to_jagged(
+        dense=dense,
+        x_offsets=x_offsets,
+    )[0]
