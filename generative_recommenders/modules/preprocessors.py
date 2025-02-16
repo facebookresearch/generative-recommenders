@@ -67,14 +67,6 @@ class InputPreprocessor(HammerModule):
         """
         pass
 
-    @abc.abstractmethod
-    def interleave_action_with_target(self) -> bool:
-        pass
-
-    @abc.abstractmethod
-    def interleave_action_with_uih(self) -> bool:
-        pass
-
 
 class ContextualPreprocessor(InputPreprocessor):
     def __init__(
