@@ -34,6 +34,20 @@ from generative_recommenders.ops.triton.triton_addmm import _addmm_fwd
 
 
 @triton.jit
+def _fast_rand(seed, offsets):
+    random = seed + offsets + 1
+    random = random.to(tl.uint32)
+    # Xorshift32
+    random ^= random << 13
+    random ^= random >> 17
+    random ^= random << 5
+    # cast to float
+    random = ((0x7F) << 23) | (random >> 9)
+    random = random.to(tl.float32, bitcast=True) - 1
+    return random
+
+
+@triton.jit
 def _ln_mul_dropout_fwd(
     X,
     U,
@@ -86,19 +100,19 @@ def _ln_mul_dropout_fwd(
         random_offsets = row * BLOCK_D + cols
         if CONCAT_UX:
             # apply dropout on u
-            random_u = tl.rand(seed, random_offsets)
+            random_u = _fast_rand(seed, random_offsets)
             u_keep = random_u > dropout_ratio
             u = tl.where(u_keep, u / (1.0 - dropout_ratio), 0.0)
             # apply dropout on x
-            random_x = tl.rand(seed, random_offsets + D)
+            random_x = _fast_rand(seed, random_offsets + D)
             x_keep = random_x > dropout_ratio
             x = tl.where(x_keep, x / (1.0 - dropout_ratio), 0.0)
             # apply dropout on y
-            random_y = tl.rand(seed, random_offsets + 2 * D)
+            random_y = _fast_rand(seed, random_offsets + 2 * D)
             y_keep = random_y > dropout_ratio
             y = tl.where(y_keep, y / (1.0 - dropout_ratio), 0.0)
         else:
-            random = tl.rand(seed, random_offsets)
+            random = _fast_rand(seed, random_offsets)
             y_keep = random > dropout_ratio
             # write-back
             y = tl.where(y_keep, y / (1.0 - dropout_ratio), 0.0)
@@ -180,19 +194,19 @@ def _ln_mul_dropout_bwd_dx_du(
             random_offsets = row * BLOCK_D + cols
             if CONCAT_UX:
                 # apply dropout on du
-                random_du = tl.rand(seed, random_offsets)
+                random_du = _fast_rand(seed, random_offsets)
                 du_keep = random_du > dropout_ratio
                 du = tl.where(du_keep, du / (1.0 - dropout_ratio), 0.0)
                 # apply dropout on dx
-                random_dx = tl.rand(seed, random_offsets + D)
+                random_dx = _fast_rand(seed, random_offsets + D)
                 dx_keep = random_dx > dropout_ratio
                 dx = tl.where(dx_keep, dx / (1.0 - dropout_ratio), 0.0)
                 # apply dropout on dy
-                random_dy = tl.rand(seed, random_offsets + 2 * D)
+                random_dy = _fast_rand(seed, random_offsets + 2 * D)
                 dy_keep = random_dy > dropout_ratio
                 dy = tl.where(dy_keep, dy / (1.0 - dropout_ratio), 0.0)
             else:
-                random = tl.rand(seed, random_offsets)
+                random = _fast_rand(seed, random_offsets)
                 dy_keep = random > dropout_ratio
                 # write-back
                 dy = tl.where(dy_keep, dy / (1.0 - dropout_ratio), 0.0)
@@ -602,20 +616,20 @@ def _group_norm_mul_dropout_fwd(
         if CONCAT_UX:
             random_offsets = row * 3 * D * Heads + offsets
             # apply dropout on u
-            random_u = tl.rand(seed, random_offsets)
+            random_u = _fast_rand(seed, random_offsets)
             u_keep = random_u > dropout_ratio
             u = tl.where(u_keep, u / (1.0 - dropout_ratio), 0.0)
             # apply dropout on x
-            random_x = tl.rand(seed, random_offsets + Heads * D)
+            random_x = _fast_rand(seed, random_offsets + Heads * D)
             x_keep = random_x > dropout_ratio
             x = tl.where(x_keep, x / (1.0 - dropout_ratio), 0.0)
             # apply dropout on y
-            random_y = tl.rand(seed, random_offsets + 2 * Heads * D)
+            random_y = _fast_rand(seed, random_offsets + 2 * Heads * D)
             y_keep = random_y > dropout_ratio
             y = tl.where(y_keep, y / (1.0 - dropout_ratio), 0.0)
         else:
             random_offsets = row * D * Heads + offsets
-            random = tl.rand(seed, random_offsets)
+            random = _fast_rand(seed, random_offsets)
             y_keep = random > dropout_ratio
             # write-back
             y = tl.where(y_keep, y / (1.0 - dropout_ratio), 0.0)
@@ -688,20 +702,20 @@ def _group_norm_mul_dropout_bwd_dx_du(
         if CONCAT_UX:
             random_offsets = row * 3 * D * Heads + offsets
             # apply dropout on du
-            random_du = tl.rand(seed, random_offsets)
+            random_du = _fast_rand(seed, random_offsets)
             du_keep = random_du > dropout_ratio
             du = tl.where(du_keep, du / (1.0 - dropout_ratio), 0.0)
             # apply dropout on dx
-            random_dx = tl.rand(seed, random_offsets + Heads * D)
+            random_dx = _fast_rand(seed, random_offsets + Heads * D)
             dx_keep = random_dx > dropout_ratio
             dx = tl.where(dx_keep, dx / (1.0 - dropout_ratio), 0.0)
             # apply dropout on dy
-            random_dy = tl.rand(seed, random_offsets + 2 * Heads * D)
+            random_dy = _fast_rand(seed, random_offsets + 2 * Heads * D)
             dy_keep = random_dy > dropout_ratio
             dy = tl.where(dy_keep, dy / (1.0 - dropout_ratio), 0.0)
         else:
             random_offsets = row * D * Heads + offsets
-            random = tl.rand(seed, random_offsets)
+            random = _fast_rand(seed, random_offsets)
             dy_keep = random > dropout_ratio
             # write-back
             dy = tl.where(dy_keep, dy / (1.0 - dropout_ratio), 0.0)
