@@ -27,6 +27,8 @@ from generative_recommenders.common import (
     fx_mark_length_features,
     HammerKernel,
     HammerModule,
+    init_mlp_weights_optional_bias,
+    set_static_max_seq_lens,
 )
 from generative_recommenders.modules.hstu_transducer import HSTUTransducer
 from generative_recommenders.modules.multitask_module import (
@@ -40,7 +42,6 @@ from generative_recommenders.modules.postprocessors import (
 )
 from generative_recommenders.modules.preprocessors import ContextualPreprocessor
 from generative_recommenders.modules.stu import STU, STULayer, STULayerConfig, STUStack
-from generative_recommenders.modules.utils import init_mlp_weights_optional_bias
 from generative_recommenders.ops.jagged_tensors import concat_2D_jagged
 from generative_recommenders.ops.layer_norm import LayerNorm, SwishLayerNorm
 from torch.autograd.profiler import record_function
@@ -63,6 +64,9 @@ class SequenceEmbedding(NamedTuple):
 
 @dataclass
 class DlrmHSTUConfig:
+    max_seq_len: int = 2056
+    max_num_candidates: int = 10
+    max_num_candidates_inference: int = 5
     hstu_num_heads: int = 1
     hstu_attn_linear_dim: int = 256
     hstu_attn_qk_dim: int = 128
@@ -103,6 +107,8 @@ class DlrmHSTU(HammerModule):
         super().__init__(is_inference=is_inference)
         logger.info(f"Initialize HSTU module with configs {hstu_configs}")
         self._hstu_configs = hstu_configs
+        set_static_max_seq_lens([self._hstu_configs.max_seq_len])
+
         self._embedding_collection = EmbeddingCollection(
             tables=list(embedding_tables.values()),
             need_indices=False,
@@ -126,19 +132,19 @@ class DlrmHSTU(HammerModule):
             is_inference=self._is_inference,
         )
 
-        # Preprocessor setup
+        # preprocessor setup
         preprocessor = ContextualPreprocessor(
             input_embedding_dim=hstu_configs.hstu_embedding_table_dim,
             output_embedding_dim=hstu_configs.hstu_transducer_embedding_dim,
             contextual_feature_to_max_length=hstu_configs.contextual_feature_to_max_length,
             contextual_feature_to_min_uih_length=hstu_configs.contextual_feature_to_min_uih_length,
-            uih_weight_name=hstu_configs.uih_weight_feature_name,
-            action_weights=hstu_configs.action_weights,
-            is_inference=self._is_inference,
-            interleave_action_with_target=True,
-            interleave_action_with_uih=True,
+            action_embedding_dim=8,
+            action_feature_name=self._hstu_configs.uih_weight_feature_name,
+            action_weights=self._hstu_configs.action_weights,
+            is_inference=is_inference,
         )
 
+        # positional encoder
         positional_encoder = HSTUPositionalEncoder(
             num_position_buckets=8192,
             num_time_buckets=2048,
@@ -168,6 +174,7 @@ class DlrmHSTU(HammerModule):
         else:
             postprocessor = None
 
+        # construct HSTU
         stu_module: STU = STUStack(
             stu_list=[
                 STULayer(
@@ -205,6 +212,7 @@ class DlrmHSTU(HammerModule):
             listwise=False,
         )
 
+        # item embeddings
         self._item_embedding_mlp: torch.nn.Module = torch.nn.Sequential(
             torch.nn.Linear(
                 in_features=hstu_configs.hstu_embedding_table_dim

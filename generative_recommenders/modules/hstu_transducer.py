@@ -195,10 +195,8 @@ class HSTUTransducer(HammerModule):
                 offsets_right=candidates_offsets,
             )
             # pyre-ignore
-            interleave_target: bool = (
-                self._input_preprocessor.interleave_action_with_target
-            )
-            if interleave_target:
+            interleave_targets: bool = self._input_preprocessor.interleave_targets()
+            if interleave_targets:
                 candidate_embeddings = candidate_embeddings.view(
                     -1, 2, candidate_embeddings.size(-1)
                 )[:, 0, :]
@@ -210,7 +208,7 @@ class HSTUTransducer(HammerModule):
                     offsets_right=candidates_offsets,
                 )
                 candidate_timestamps = candidate_timestamps.squeeze(-1)
-                if interleave_target:
+                if interleave_targets:
                     candidate_timestamps = candidate_timestamps.view(-1, 2)[:, 0]
                 candidate_embeddings = self._output_postprocessor(
                     seq_embeddings=candidate_embeddings,

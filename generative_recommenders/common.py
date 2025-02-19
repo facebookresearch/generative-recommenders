@@ -17,6 +17,7 @@
 # pyre-strict
 
 import abc
+import copy
 from enum import Enum, unique
 from typing import Any, List, Optional, Tuple
 
@@ -231,20 +232,14 @@ def prev_power_of_2(x: int) -> int:
         return out // 2 if out > x else out
 
 
-STATIC_MAX_SEQ_LEN = -1
-L2_STATIC_MAX_SEQ_LEN = -1
-USE_RUNTIME_MAX_SEQ_LEN = True
+STATIC_MAX_SEQ_LENS: List[int] = []
+USE_RUNTIME_MAX_SEQ_LEN: bool = True
 
 
-def set_static_max_seq_lens(max_seq_len: int, l2_max_seq_len: int) -> None:
-    global STATIC_MAX_SEQ_LEN
-    global L2_STATIC_MAX_SEQ_LEN
-    STATIC_MAX_SEQ_LEN = max_seq_len
-    L2_STATIC_MAX_SEQ_LEN = l2_max_seq_len
-
-
-def get_static_max_seq_lens() -> Tuple[int, int]:
-    return STATIC_MAX_SEQ_LEN, L2_STATIC_MAX_SEQ_LEN
+def set_static_max_seq_lens(max_seq_lens: List[int]) -> None:
+    global STATIC_MAX_SEQ_LENS
+    STATIC_MAX_SEQ_LENS = copy.deepcopy(max_seq_lens)
+    STATIC_MAX_SEQ_LENS.sort()
 
 
 def set_use_runtime_max_seq_len(use_runtime_max_seq_len: bool) -> None:
@@ -252,19 +247,16 @@ def set_use_runtime_max_seq_len(use_runtime_max_seq_len: bool) -> None:
     USE_RUNTIME_MAX_SEQ_LEN = use_runtime_max_seq_len
 
 
-def use_runtime_max_seq_len() -> bool:
-    return USE_RUNTIME_MAX_SEQ_LEN
-
-
 def autotune_max_seq_len(runtime_max_seq_len: int) -> int:
-    if use_runtime_max_seq_len():
+    global USE_RUNTIME_MAX_SEQ_LEN
+
+    if USE_RUNTIME_MAX_SEQ_LEN:
         return prev_power_of_2(runtime_max_seq_len)
     else:
-        max_seq_len, l2_max_seq_len = get_static_max_seq_lens()
-        assert (
-            max_seq_len > 0 and l2_max_seq_len > 0
-        ), "max_seq_len and l2_max_seq_len must be greater than 0"
-        return l2_max_seq_len if runtime_max_seq_len <= l2_max_seq_len else max_seq_len
+        for max_len in STATIC_MAX_SEQ_LENS:
+            if max_len >= runtime_max_seq_len:
+                return max_len
+        return STATIC_MAX_SEQ_LENS[-1]
 
 
 @torch.fx.wrap
@@ -334,3 +326,10 @@ def dense_to_jagged(
         dense=dense,
         x_offsets=x_offsets,
     )[0]
+
+
+def init_mlp_weights_optional_bias(m: torch.nn.Module) -> None:
+    if isinstance(m, torch.nn.Linear):
+        torch.nn.init.xavier_uniform_(m.weight)
+        if m.bias is not None:
+            m.bias.data.fill_(0.0)

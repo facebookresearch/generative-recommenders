@@ -172,9 +172,6 @@ class DLRMv3RandomDataset(Dataset):
         self,
         hstu_config: DlrmHSTUConfig,
         num_aggregated_samples: int = 10000,
-        max_seq_len: int = 2056,
-        max_num_candidates: int = 10,
-        max_num_candidates_inference: int = 5,
         is_inference: bool = False,
         *args,
         **kwargs,
@@ -183,16 +180,18 @@ class DLRMv3RandomDataset(Dataset):
             hstu_config=hstu_config,
         )
         self.hstu_config: DlrmHSTUConfig = hstu_config
-        self._max_num_candidates: int = max_num_candidates
-        self._max_num_candidates_inference: int = max_num_candidates_inference
-        self._max_seq_len: int = max_seq_len
+        self._max_num_candidates: int = hstu_config.max_num_candidates
+        self._max_num_candidates_inference: int = (
+            hstu_config.max_num_candidates_inference
+        )
+        self._max_seq_len: int = hstu_config.max_seq_len
         self._uih_keys: List[str] = hstu_config.hstu_uih_feature_names
         self._candidates_keys: List[str] = hstu_config.hstu_candidate_feature_names
         self._contextual_feature_to_max_length: Dict[str, int] = (
             hstu_config.contextual_feature_to_max_length
         )
         self._max_uih_len: int = (
-            max_seq_len
+            self._max_seq_len
             - self._max_num_candidates
             - len(self._contextual_feature_to_max_length)
             if self._contextual_feature_to_max_length
