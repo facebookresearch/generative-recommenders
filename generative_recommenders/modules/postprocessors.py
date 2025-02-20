@@ -20,7 +20,7 @@ from abc import abstractmethod
 from typing import Dict, List, Tuple
 
 import torch
-from generative_recommenders.common import HammerModule
+from generative_recommenders.common import HammerModule, init_mlp_weights_optional_bias
 
 
 @torch.fx.wrap
@@ -95,13 +95,6 @@ class LayerNormPostprocessor(OutputPostprocessor):
         return self._layer_norm(seq_embeddings.to(self._layer_norm.weight.dtype))
 
 
-def _init_mlp_weights_optional_bias(m: torch.nn.Module) -> None:
-    if type(m) is torch.nn.Linear:
-        torch.nn.init.xavier_normal_(m.weight)
-        if m.bias is not None:
-            m.bias.data.fill_(0.0)
-
-
 @torch.fx.wrap
 def _unsqueeze_if_needed(t: torch.Tensor, embedding: torch.Tensor) -> torch.Tensor:
     if embedding.dim() == 3:
@@ -135,7 +128,7 @@ class TimestampLayerNormPostprocessor(OutputPostprocessor):
         self._time_feature_combiner: torch.nn.Module = torch.nn.Linear(
             embedding_dim + 2 * len(time_duration_features),
             embedding_dim,
-        ).apply(_init_mlp_weights_optional_bias)
+        ).apply(init_mlp_weights_optional_bias)
 
     def _concat_time_features(
         self,
