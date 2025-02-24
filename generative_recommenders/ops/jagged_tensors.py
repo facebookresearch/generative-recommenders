@@ -46,7 +46,10 @@ try:
     )
 except ImportError:
     pass
-from torch.fx._symbolic_trace import is_fx_tracing
+
+
+torch.fx.wrap("triton_concat_2D_jagged")
+torch.fx.wrap("triton_split_2D_jagged")
 
 
 def concat_2D_jagged(

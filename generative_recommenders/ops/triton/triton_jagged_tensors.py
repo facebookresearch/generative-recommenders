@@ -350,6 +350,7 @@ class _Split2DJaggedFunction(torch.autograd.Function):
         return None, d_jagged_in, None, None, None, None, None
 
 
+@torch.fx.wrap
 def triton_concat_2D_jagged(
     values_left: torch.Tensor,
     values_right: torch.Tensor,
@@ -370,6 +371,7 @@ def triton_concat_2D_jagged(
     )
 
 
+@torch.fx.wrap
 def triton_split_2D_jagged(
     max_seq_len: int,
     values: torch.Tensor,
