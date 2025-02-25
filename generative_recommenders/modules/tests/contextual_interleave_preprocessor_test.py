@@ -38,6 +38,11 @@ class ContextualInterleavePreprocessorTest(unittest.TestCase):
         enable_interleaving=st.sampled_from([True, False]),
         enable_pmlp=st.sampled_from([True, False]),
         is_train=st.sampled_from([True, False]),
+        dtype=st.sampled_from(
+            [torch.float32, torch.bfloat16]
+            if torch.cuda.get_device_capability(torch.device("cuda"))[0] >= 8
+            else [torch.float32]
+        ),
     )
     @unittest.skipIf(*gpu_unavailable)
     @settings(verbosity=Verbosity.verbose, max_examples=50, deadline=None)
@@ -46,6 +51,7 @@ class ContextualInterleavePreprocessorTest(unittest.TestCase):
         enable_interleaving: bool,
         enable_pmlp: bool,
         is_train: bool,
+        dtype: torch.dtype,
     ) -> None:
         device = torch.device("cuda")
 
@@ -123,6 +129,7 @@ class ContextualInterleavePreprocessorTest(unittest.TestCase):
             enable_interleaving=enable_interleaving,
             is_inference=False,
         ).to(device)
+        preprocessor.set_training_dtype(dtype)
         if not is_train:
             preprocessor.eval()
 
@@ -130,7 +137,9 @@ class ContextualInterleavePreprocessorTest(unittest.TestCase):
         seq_lengths = [6, 3]
         num_targets = [2, 1]
         seq_embeddings = torch.rand(
-            (sum(seq_lengths), input_embedding_dim), device=device
+            (sum(seq_lengths), input_embedding_dim),
+            device=device,
+            dtype=dtype,
         )
         seq_timestamps = torch.tensor(
             [1, 2, 3, 4, 5, 6, 10, 20, 30],
@@ -153,9 +162,9 @@ class ContextualInterleavePreprocessorTest(unittest.TestCase):
             seq_embeddings=seq_embeddings,
             seq_payloads={
                 # contextual
-                "c_0": torch.rand((2, input_embedding_dim), device=device),
+                "c_0": torch.rand((2, input_embedding_dim), device=device, dtype=dtype),
                 "c_0_offsets": torch.tensor([0, 1, 1], device=device),
-                "c_1": torch.rand((4, input_embedding_dim), device=device),
+                "c_1": torch.rand((4, input_embedding_dim), device=device, dtype=dtype),
                 "c_1_offsets": torch.tensor([0, 2, 3], device=device),
                 # action
                 "watchtimes": torch.tensor(watchtimes, device=device),
@@ -164,10 +173,10 @@ class ContextualInterleavePreprocessorTest(unittest.TestCase):
                 "a0": torch.rand_like(seq_embeddings).requires_grad_(True),
                 "a1": torch.rand_like(seq_embeddings).requires_grad_(True),
                 "t0": torch.rand(
-                    sum(num_targets), input_embedding_dim, device=device
+                    sum(num_targets), input_embedding_dim, device=device, dtype=dtype
                 ).requires_grad_(True),
                 "t1": torch.rand(
-                    sum(num_targets), input_embedding_dim, device=device
+                    sum(num_targets), input_embedding_dim, device=device, dtype=dtype
                 ).requires_grad_(True),
             },
             num_targets=torch.tensor(num_targets, device=device),

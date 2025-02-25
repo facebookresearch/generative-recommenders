@@ -99,18 +99,21 @@ class HammerKernel(Enum):
 
 
 class HammerModule(torch.nn.Module, abc.ABC):
-    _is_inference: bool
-    _use_triton_cc: bool
+    _is_inference: bool = False
+    _use_triton_cc: bool = True
+    _training_dtype: torch.dtype = torch.float32
     _hammer_kernel: Optional[HammerKernel] = None
 
     def __init__(
         self,
         is_inference: bool,
+        training_dytpe: torch.dtype = torch.float32,
         use_triton_cc: bool = False,
         hammer_kernel: Optional[HammerKernel] = None,
     ) -> None:
         super().__init__()
         self._is_inference = is_inference
+        self._training_dtype = training_dytpe
         self._hammer_kernel = hammer_kernel
         self._use_triton_cc = use_triton_cc
 
@@ -128,6 +131,22 @@ class HammerModule(torch.nn.Module, abc.ABC):
         for _, module in self.named_modules():
             if hasattr(module, name):
                 setattr(module, name, value)
+
+    def set_use_triton_cc(self, use_triton_cc: bool) -> None:
+        self._use_triton_cc = use_triton_cc
+        self.recursive_setattr("_use_triton_cc", use_triton_cc)
+
+    def set_is_inference(self, is_inference: bool) -> None:
+        self._is_inference = is_inference
+        self.recursive_setattr("_is_inference", is_inference)
+
+    def set_training_dtype(self, training_dtype: torch.dtype) -> None:
+        self._training_dtype = training_dtype
+        self.recursive_setattr("_training_dtype", training_dtype)
+
+    def set_hammer_kernel(self, hammer_kernel: HammerKernel) -> None:
+        self._hammer_kernel = hammer_kernel
+        self.recursive_setattr("_hammer_kernel", hammer_kernel)
 
     @property
     def is_inference(self) -> bool:

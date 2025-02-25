@@ -332,85 +332,92 @@ class ContextualInterleavePreprocessor(InputPreprocessor):
         torch.Tensor,
         Dict[str, torch.Tensor],
     ]:
-        # get contextual_embeddings
-        contextual_embeddings: Optional[torch.Tensor] = None
-        pmlp_contextual_embeddings: Optional[torch.Tensor] = None
-        if self._max_contextual_seq_len > 0:
-            contextual_input_embeddings = get_contextual_input_embeddings(
-                seq_lengths=seq_lengths,
-                seq_payloads=seq_payloads,
-                contextual_feature_to_max_length=self._contextual_feature_to_max_length,
-                contextual_feature_to_min_uih_length=self._contextual_feature_to_min_uih_length,
-                dtype=seq_embeddings.dtype,
-            )
-            if isinstance(
-                self._action_embedding_mlp, ParameterizedContextualizedMLP
-            ) or isinstance(self._action_embedding_mlp, ParameterizedContextualizedMLP):
-                pmlp_contextual_embeddings = torch.nn.functional.dropout(
-                    contextual_input_embeddings,
-                    p=self._pmlp_contextual_dropout_ratio,
-                    training=self.training,
+        with torch.autocast(
+            "cuda",
+            dtype=torch.bfloat16,
+            enabled=(not self.is_inference and self._training_dtype == torch.bfloat16),
+        ):
+            # get contextual_embeddings
+            contextual_embeddings: Optional[torch.Tensor] = None
+            pmlp_contextual_embeddings: Optional[torch.Tensor] = None
+            if self._max_contextual_seq_len > 0:
+                contextual_input_embeddings = get_contextual_input_embeddings(
+                    seq_lengths=seq_lengths,
+                    seq_payloads=seq_payloads,
+                    contextual_feature_to_max_length=self._contextual_feature_to_max_length,
+                    contextual_feature_to_min_uih_length=self._contextual_feature_to_min_uih_length,
+                    dtype=seq_embeddings.dtype,
                 )
-            contextual_embeddings = torch.baddbmm(
-                self._batched_contextual_linear_bias.to(
-                    contextual_input_embeddings.dtype
-                ),
-                contextual_input_embeddings.view(
-                    -1, self._max_contextual_seq_len, self._input_embedding_dim
-                ).transpose(0, 1),
-                self._batched_contextual_linear_weights.to(
-                    contextual_input_embeddings.dtype
-                ),
-            ).transpose(0, 1)
+                if isinstance(
+                    self._action_embedding_mlp, ParameterizedContextualizedMLP
+                ) or isinstance(
+                    self._action_embedding_mlp, ParameterizedContextualizedMLP
+                ):
+                    pmlp_contextual_embeddings = torch.nn.functional.dropout(
+                        contextual_input_embeddings,
+                        p=self._pmlp_contextual_dropout_ratio,
+                        training=self.training,
+                    )
+                contextual_embeddings = torch.baddbmm(
+                    self._batched_contextual_linear_bias.to(
+                        contextual_input_embeddings.dtype
+                    ),
+                    contextual_input_embeddings.view(
+                        -1, self._max_contextual_seq_len, self._input_embedding_dim
+                    ).transpose(0, 1),
+                    self._batched_contextual_linear_weights.to(
+                        contextual_input_embeddings.dtype
+                    ),
+                ).transpose(0, 1)
 
-        # content embeddings
-        seq_offsets = torch.ops.fbgemm.asynchronous_complete_cumsum(seq_lengths)
-        content_embeddings = self._content_encoder(
-            max_seq_len=max_seq_len,
-            seq_embeddings=seq_embeddings,
-            seq_lengths=seq_lengths,
-            seq_offsets=seq_offsets,
-            seq_payloads=seq_payloads,
-            num_targets=num_targets,
-        )
-        content_embeddings = self._content_embedding_mlp(
-            seq_embeddings=content_embeddings,
-            seq_offsets=seq_offsets,
-            max_seq_len=max_seq_len,
-            contextual_embeddings=pmlp_contextual_embeddings,
-        )
+            # content embeddings
+            seq_offsets = torch.ops.fbgemm.asynchronous_complete_cumsum(seq_lengths)
+            content_embeddings = self._content_encoder(
+                max_seq_len=max_seq_len,
+                seq_embeddings=seq_embeddings,
+                seq_lengths=seq_lengths,
+                seq_offsets=seq_offsets,
+                seq_payloads=seq_payloads,
+                num_targets=num_targets,
+            )
+            content_embeddings = self._content_embedding_mlp(
+                seq_embeddings=content_embeddings,
+                seq_offsets=seq_offsets,
+                max_seq_len=max_seq_len,
+                contextual_embeddings=pmlp_contextual_embeddings,
+            )
 
-        # action embeddings
-        action_embeddings = self._action_encoder(
-            max_seq_len=max_seq_len,
-            seq_lengths=seq_lengths,
-            seq_offsets=seq_offsets,
-            seq_payloads=seq_payloads,
-            num_targets=num_targets,
-        )
-        action_embeddings = self._action_embedding_mlp(
-            seq_embeddings=action_embeddings,
-            seq_offsets=seq_offsets,
-            max_seq_len=max_seq_len,
-            contextual_embeddings=pmlp_contextual_embeddings,
-        )
+            # action embeddings
+            action_embeddings = self._action_encoder(
+                max_seq_len=max_seq_len,
+                seq_lengths=seq_lengths,
+                seq_offsets=seq_offsets,
+                seq_payloads=seq_payloads,
+                num_targets=num_targets,
+            )
+            action_embeddings = self._action_embedding_mlp(
+                seq_embeddings=action_embeddings,
+                seq_offsets=seq_offsets,
+                max_seq_len=max_seq_len,
+                contextual_embeddings=pmlp_contextual_embeddings,
+            )
 
-        (
-            output_max_seq_len,
-            output_seq_lengths,
-            output_seq_offsets,
-            output_seq_timestamps,
-            output_seq_embeddings,
-            output_num_targets,
-        ) = self.combine_embeddings(
-            max_seq_len=max_seq_len,
-            seq_lengths=seq_lengths,
-            seq_timestamps=seq_timestamps,
-            content_embeddings=content_embeddings,
-            action_embeddings=action_embeddings,
-            contextual_embeddings=contextual_embeddings,
-            num_targets=num_targets,
-        )
+            (
+                output_max_seq_len,
+                output_seq_lengths,
+                output_seq_offsets,
+                output_seq_timestamps,
+                output_seq_embeddings,
+                output_num_targets,
+            ) = self.combine_embeddings(
+                max_seq_len=max_seq_len,
+                seq_lengths=seq_lengths,
+                seq_timestamps=seq_timestamps,
+                content_embeddings=content_embeddings,
+                action_embeddings=action_embeddings,
+                contextual_embeddings=contextual_embeddings,
+                num_targets=num_targets,
+            )
 
         return (
             output_max_seq_len,

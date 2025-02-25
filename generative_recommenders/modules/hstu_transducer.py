@@ -60,7 +60,6 @@ class HSTUTransducer(HammerModule):
         positional_encoder: Optional[HSTUPositionalEncoder] = None,
         is_inference: bool = True,
         return_full_embeddings: bool = False,
-        training_dtype: torch.dtype = torch.float32,
         listwise: bool = False,
     ) -> None:
         super().__init__(is_inference=is_inference)
@@ -77,7 +76,6 @@ class HSTUTransducer(HammerModule):
         self._positional_encoder: Optional[HSTUPositionalEncoder] = positional_encoder
         self._input_dropout_ratio: float = input_dropout_ratio
         self._return_full_embeddings: bool = return_full_embeddings
-        self._training_dtype = training_dtype
         self._listwise_training: bool = listwise and self.is_train
 
     def _preprocess(
@@ -194,7 +192,6 @@ class HSTUTransducer(HammerModule):
                 offsets_left=uih_offsets,
                 offsets_right=candidates_offsets,
             )
-            # pyre-ignore
             interleave_targets: bool = self._input_preprocessor.interleave_targets()
             if interleave_targets:
                 candidate_embeddings = candidate_embeddings.view(
