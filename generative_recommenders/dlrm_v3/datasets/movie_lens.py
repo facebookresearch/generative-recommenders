@@ -35,9 +35,12 @@ class DLRMv3MovieLensDataset(DLRMv3RandomDataset):
         ratings_file: str,
         is_inference: bool,
         *args,
+        max_seq_len: int = 2056,
         **kwargs,
     ):
-        super().__init__(hstu_config=hstu_config, is_inference=is_inference)
+        super().__init__(
+            hstu_config=hstu_config, is_inference=is_inference, max_seq_len=max_seq_len
+        )
         self.ratings_frame: pd.DataFrame = pd.read_csv(
             ratings_file,
             delimiter=",",
