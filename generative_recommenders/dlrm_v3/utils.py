@@ -39,6 +39,7 @@ from generative_recommenders.modules.multitask_module import (
 from torch.profiler import profile, profiler, ProfilerActivity  # pyre-ignore [21]
 from torch.utils.tensorboard import SummaryWriter
 from torchrec.metrics.auc import AUCMetricComputation
+from torchrec.metrics.ctr import CTRMetricComputation
 from torchrec.metrics.mae import MAEMetricComputation
 from torchrec.metrics.mse import MSEMetricComputation
 from torchrec.metrics.ne import NEMetricComputation
@@ -168,6 +169,17 @@ class MetricsLogger:
             self.all_metrics_train.append(
                 (
                     AUCMetricComputation(
+                        my_rank=rank,
+                        batch_size=batch_size,
+                        n_tasks=len(all_classification_tasks),
+                        window_size=window_size,
+                    ).to(device),
+                    MultitaskTaskType.BINARY_CLASSIFICATION,
+                )
+            )
+            self.all_metrics_train.append(
+                (
+                    CTRMetricComputation(
                         my_rank=rank,
                         batch_size=batch_size,
                         n_tasks=len(all_classification_tasks),
