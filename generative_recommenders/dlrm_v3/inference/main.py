@@ -117,9 +117,9 @@ class Runner:
         self.metrics: Optional[MetricsLogger] = None
         if compute_eval:
             self.metrics = MetricsLogger(
-                multitask_configs=model.hstu_config.multitask_configs,  # pyre-ignore [6]
+                multitask_configs=model.hstu_config.multitask_configs,
                 batch_size=batchsize,
-                window_size=1000,
+                window_size=160,
                 device=torch.device("cpu"),
                 rank=0,
             )

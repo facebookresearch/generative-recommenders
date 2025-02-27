@@ -122,10 +122,13 @@ class MetricsLogger:
         self,
         multitask_configs: List[TaskConfig],
         batch_size: int,
-        window_size: int,
         device: torch.device,
         rank: int,
-        tensorboard_log_path: str = "",
+        window_size: int = 10,
+        auc_window_size: int = 100,
+        tensorboard_log_path: Optional[str] = None,
+        train_batch_log_frequency: int = 10,
+        eval_batch_log_frequency: int = 10,
     ) -> None:
         self.multitask_configs: List[TaskConfig] = multitask_configs
         all_classification_tasks: List[str] = [
@@ -154,6 +157,8 @@ class MetricsLogger:
         self.all_metrics_train: List[
             Tuple[RecMetricComputation, MultitaskTaskType]
         ] = []
+
+        logger.info(f"Window size = {window_size} AUC window size = {auc_window_size}")
         if all_classification_tasks:
             self.all_metrics_train.append(
                 (
@@ -170,7 +175,7 @@ class MetricsLogger:
                 (
                     AUCMetricComputation(
                         my_rank=rank,
-                        batch_size=batch_size,
+                        batch_size=auc_window_size,
                         n_tasks=len(all_classification_tasks),
                         window_size=window_size,
                     ).to(device),
@@ -218,8 +223,17 @@ class MetricsLogger:
         )
         self.global_step: int = 0
         self.tb_logger: Optional[SummaryWriter] = None
-        if tensorboard_log_path != "":
+        if tensorboard_log_path is not None:
             self.tb_logger = SummaryWriter(log_dir=tensorboard_log_path)
+
+        self._train_batch_log_frequency: int = train_batch_log_frequency
+        self._eval_batch_log_frequency: int = eval_batch_log_frequency
+
+        if (
+            eval_batch_log_frequency > window_size // batch_size
+            or train_batch_log_frequency > window_size // batch_size
+        ):
+            raise Exception("Must log more frequently than window size!")
 
     def all_metrics(
         self, mode: MetricMode
@@ -253,7 +267,7 @@ class MetricsLogger:
             )
         self.global_step += 1
 
-    def compute(self, mode: MetricMode) -> Dict[str, float]:
+    def _compute(self, mode: MetricMode) -> Dict[str, float]:
         all_computed_metrics = {}
 
         for metric, _ in self.all_metrics(mode=mode):
@@ -273,7 +287,15 @@ class MetricsLogger:
         additional_logs: Optional[Dict[str, Dict[str, torch.Tensor]]] = None,
     ) -> Dict[str, float]:
         assert self.tb_logger is not None
-        all_computed_metrics = self.compute(mode=mode)
+        if mode == MetricMode.TRAIN:
+            log_interval = self._train_batch_log_frequency
+        else:
+            log_interval = self._eval_batch_log_frequency
+
+        if self.global_step == 0 or self.global_step % log_interval != 0:
+            return {}
+
+        all_computed_metrics = self._compute(mode=mode)
         for k, v in all_computed_metrics.items():
             self.tb_logger.add_scalar(  # pyre-ignore [16]
                 k,
