@@ -26,7 +26,6 @@ from generative_recommenders.dlrm_v3.datasets.utils import (
     separate_uih_candidates,
 )
 from generative_recommenders.modules.dlrm_hstu import DlrmHSTUConfig
-from minimal_viable_ai.core.model_family_api.configs import EmbeddingTable
 from torchrec.sparse.jagged_tensor import KeyedJaggedTensor
 
 
@@ -43,7 +42,7 @@ class DLRMv3KuaiRandDataset(DLRMv3RandomDataset):
     def __init__(
         self,
         hstu_config: DlrmHSTUConfig,
-        embedding_config: Dict[str, EmbeddingTable],
+        embedding_config: Dict[str, Any],
         seq_logs_file: str,
         is_inference: bool,
     ) -> None:
