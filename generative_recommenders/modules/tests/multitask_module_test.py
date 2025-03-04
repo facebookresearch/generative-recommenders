@@ -18,7 +18,7 @@
 
 import unittest
 
-from typing import Dict, List
+from typing import Dict, List, Tuple
 
 import torch
 from generative_recommenders.common import gpu_unavailable, set_dev_mode
@@ -80,6 +80,40 @@ _task_configs: List[List[TaskConfig]] = [
     ],
     [
         TaskConfig(
+            task_name="type_1",
+            task_weight=2,
+            task_type=MultitaskTaskType.REGRESSION,
+        ),
+    ],
+    [
+        TaskConfig(
+            task_name="is_click",
+            task_weight=1,
+            task_type=MultitaskTaskType.BINARY_CLASSIFICATION,
+        ),
+        TaskConfig(
+            task_name="is_like",
+            task_weight=2,
+            task_type=MultitaskTaskType.BINARY_CLASSIFICATION,
+        ),
+        TaskConfig(
+            task_name="is_follow",
+            task_weight=4,
+            task_type=MultitaskTaskType.BINARY_CLASSIFICATION,
+        ),
+        TaskConfig(
+            task_name="rating",
+            task_weight=1,
+            task_type=MultitaskTaskType.REGRESSION,
+        ),
+        TaskConfig(
+            task_name="vvp",
+            task_weight=2,
+            task_type=MultitaskTaskType.REGRESSION,
+        ),
+    ],
+    [
+        TaskConfig(
             task_name="is_click",
             task_weight=1,
             task_type=MultitaskTaskType.BINARY_CLASSIFICATION,
@@ -108,6 +142,39 @@ _task_configs: List[List[TaskConfig]] = [
 ]
 
 
+def _get_random_supervision_labels_and_weights(
+    num_examples: int,
+    task_configs: List[TaskConfig],
+    device: torch.device,
+) -> Tuple[Dict[str, torch.Tensor], Dict[str, torch.Tensor]]:
+    supervision_labels: Dict[str, torch.Tensor] = {}
+    supervision_weights: Dict[str, torch.Tensor] = {}
+    for task in task_configs:
+        if task.task_type == MultitaskTaskType.REGRESSION:
+            supervision_labels[task.task_name] = torch.randn(
+                num_examples, device=device
+            )
+        elif task.task_type == MultitaskTaskType.REGRESSION:
+            supervision_labels[task.task_name] = torch.randint(
+                0,
+                11,
+                (num_examples,),
+                device=device,
+            )
+            supervision_labels[task.task_name] = torch.randn(
+                num_examples, device=device
+            )
+        else:
+            supervision_labels[task.task_name] = torch.randint(
+                0,
+                10,
+                (num_examples,),
+                device=device,
+            )
+
+    return supervision_labels, supervision_weights
+
+
 class MultiTaskModuleTest(unittest.TestCase):
     # pyre-ignore
     @given(
@@ -134,11 +201,10 @@ class MultiTaskModuleTest(unittest.TestCase):
 
         L = 200
         embedding_dim = 64
-        candidates_weight_feature_name = "candidate_weight"
-        candidates_watchtime_feature_name = "candidate_watchtime"
         causal_multitask_weights = 0.3
 
         task_configs: List[TaskConfig] = _task_configs[task_config_idx]
+        task_configs.sort(key=lambda x: x.task_type)
         multitask_module = DefaultMultitaskModule(
             task_configs=task_configs,
             embedding_dim=embedding_dim,
@@ -147,35 +213,35 @@ class MultiTaskModuleTest(unittest.TestCase):
                 SwishLayerNorm(512),
                 torch.nn.Linear(in_features=512, out_features=num_tasks),
             ),
-            candidates_weight_feature_name=candidates_weight_feature_name,
-            candidates_watchtime_feature_name=candidates_watchtime_feature_name,
             causal_multitask_weights=causal_multitask_weights,
             is_inference=is_inference,
         ).to(device)
-
+        multitask_module.set_training_dtype(dtype)
+        supervision_labels, supervision_weights = (
+            _get_random_supervision_labels_and_weights(
+                num_examples=L,
+                task_configs=task_configs,
+                device=device,
+            )
+        )
         encoded_user_embeddings = torch.rand(L, embedding_dim, device=device)
         item_embeddings = torch.rand(L, embedding_dim, device=device)
-        candidate_weight = torch.rand(L, device=device)
-        candidate_watchtime = torch.rand(L, device=device).to(torch.int64)
-        payload_features: Dict[str, torch.Tensor] = {
-            candidates_weight_feature_name: candidate_weight,
-            candidates_watchtime_feature_name: candidate_watchtime,
-        }
 
         (
-            candidates_preds,
-            candidates_labels,
-            candidates_weights,
-            candidates_losses,
+            mt_preds,
+            mt_labels,
+            mt_weights,
+            mt_losses,
         ) = multitask_module(
             encoded_user_embeddings=encoded_user_embeddings,
             item_embeddings=item_embeddings,
-            payload_features=payload_features,
+            supervision_labels=supervision_labels,
+            supervision_weights=supervision_weights,
         )
 
-        self.assertEqual(candidates_preds.size(), (len(task_configs), L))
+        self.assertEqual(mt_preds.size(), (len(task_configs), L))
         if not is_inference:
-            self.assertEqual(candidates_labels.size(), (len(task_configs), L))
-            self.assertEqual(candidates_weights.size(), (len(task_configs), L))
+            self.assertEqual(mt_labels.size(), (len(task_configs), L))
+            self.assertEqual(mt_weights.size(), (len(task_configs), L))
             if training:
-                self.assertEqual(candidates_losses.size(), (len(task_configs),))
+                self.assertEqual(mt_losses.size(), (len(task_configs),))
