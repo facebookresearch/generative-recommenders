@@ -86,7 +86,7 @@ class ContentEncoder(HammerModule):
                 self._target_enrich_dummy_embeddings[i]
                 .view(1, 1, -1)
                 .repeat(seq_lengths.size(0), max_seq_len, 1)
-            )
+            ).to(seq_embeddings.dtype)
             mask = torch.arange(max_seq_len, device=seq_offsets.device).view(
                 1, max_seq_len
             )
@@ -94,7 +94,7 @@ class ContentEncoder(HammerModule):
                 mask >= (seq_lengths - num_targets).unsqueeze(1),
                 mask < seq_lengths.unsqueeze(1),
             )
-            padded_enrich_embeddings[mask] = seq_payloads[f]
+            padded_enrich_embeddings[mask] = seq_payloads[f].to(seq_embeddings.dtype)
             enrich_embeddings = dense_to_jagged(
                 padded_enrich_embeddings,
                 [seq_offsets],

@@ -394,7 +394,7 @@ class ContextualInterleavePreprocessor(InputPreprocessor):
                 seq_offsets=seq_offsets,
                 seq_payloads=seq_payloads,
                 num_targets=num_targets,
-            )
+            ).to(seq_embeddings.dtype)
             action_embeddings = self._action_embedding_mlp(
                 seq_embeddings=action_embeddings,
                 seq_offsets=seq_offsets,
