@@ -1303,6 +1303,26 @@ def triton_jagged_dense_bmm(
     return _JaggedDenseBmmFunction.apply(max_seq_len, seq_offsets, jagged, dense)
 
 
+# TODO: This wrapper is needed to make the triton function wrappeable
+def triton_split_2D_jagged_wrapper(
+    values: torch.Tensor,
+    max_seq_len: int,
+    offsets_a: Optional[torch.Tensor] = None,
+    offsets_b: Optional[torch.Tensor] = None,
+    dense_size: int = 0,
+    n_prefix_to_right: int = 0,
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    return triton_split_2D_jagged(
+        values,
+        max_seq_len,
+        offsets_a,
+        offsets_b,
+        dense_size,
+        n_prefix_to_right,
+    )
+
+
+@torch.fx.wrap
 def triton_split_2D_jagged(
     values: torch.Tensor,
     max_seq_len: int,
