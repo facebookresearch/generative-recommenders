@@ -1303,6 +1303,7 @@ def triton_jagged_dense_bmm(
     return _JaggedDenseBmmFunction.apply(max_seq_len, seq_offsets, jagged, dense)
 
 
+@torch.fx.wrap
 def triton_split_2D_jagged(
     values: torch.Tensor,
     max_seq_len: int,
