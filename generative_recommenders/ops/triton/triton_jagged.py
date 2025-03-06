@@ -1113,8 +1113,22 @@ class _Split2DJaggedFunction(torch.autograd.Function):
         else:
             assert offsets_a is not None and offsets_b is not None
             B = offsets_a.shape[0] - 1
-            seq_len_a = int(offsets_a[-1].item())
-            seq_len_b = int(offsets_b[-1].item())
+            # Select the last offset item using torch.index_select instead of
+            # "int(offsets_a[-1].item())" so that it won't cause "Cannot cast
+            # FakeTensor to python number" error for lowering. The assumption here
+            # is that we can move calculation to gpu and does not need that in cpu.
+            if torch.compiler.is_compiling():
+                offsets_a_last_idx = torch.tensor(offsets_a.size(0) - 1).to(
+                    offsets_a.device
+                )
+                offsets_b_last_idx = torch.tensor(offsets_b.size(0) - 1).to(
+                    offsets_b.device
+                )
+                seq_len_a = offsets_a.index_select(dim=0, index=offsets_a_last_idx)
+                seq_len_b = offsets_b.index_select(dim=0, index=offsets_b_last_idx)
+            else:
+                seq_len_a = int(offsets_a[-1].item())
+                seq_len_b = int(offsets_b[-1].item())
         _, D = values.shape
         BLOCK_D = triton.next_power_of_2(D)
         values_a = torch.empty((seq_len_a, D), device=values.device, dtype=values.dtype)
