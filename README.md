@@ -108,7 +108,9 @@ python run_fractal_expansion.py --input-csv-file tmp/ml-20m/ratings.csv --write-
 
 ### Efficiency experiments
 
-``ops/triton`` currently contains triton kernels needed for efficiency experiments (forward pass). More code (incl integration glue code) to be added at a later point in time. If it's urgent, please feel free to open PRs.
+``ops/triton`` currently contains triton kernels needed for efficiency experiments. More code (incl integration glue code) to be added at a later point in time. If it's urgent, please feel free to open PRs.
+
+``ops/cpp`` contains efficient CUDA kernels. In particular, ``ops/cpp/hstu_attention`` contains the attention implementation based on [FlashAttention V3](https://github.com/Dao-AILab/flash-attention) with state-of-the-art efficiency on H100 GPUs.
 
 
 ## License
