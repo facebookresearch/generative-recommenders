@@ -120,11 +120,9 @@ def _compute_labels_and_weights(
     mt_lables_list: List[torch.Tensor] = []
     mt_weights_list: List[torch.Tensor] = []
     for task in task_configs:
-        mt_lables_list.append(supervision_labels[task.task_name].to(dtype))
+        mt_lables_list.append(supervision_labels[task.task_name])
         mt_weights_list.append(
-            supervision_weights.get(task.task_name, default_supervision_weight).to(
-                dtype
-            )
+            supervision_weights.get(task.task_name, default_supervision_weight)
         )
     if len(task_configs) > 1:
         mt_labels = torch.stack(mt_lables_list, dim=0)
@@ -249,6 +247,8 @@ class DefaultMultitaskModule(MultitaskModule):
                 task_offsets=self._task_offsets,
                 has_multiple_task_types=self._has_multiple_task_types,
             )
+
+        # losses are always computed in fp32
         mt_labels: Optional[torch.Tensor] = None
         mt_weights: Optional[torch.Tensor] = None
         mt_losses: Optional[torch.Tensor] = None

@@ -153,24 +153,14 @@ def _get_random_supervision_labels_and_weights(
         if task.task_type == MultitaskTaskType.REGRESSION:
             supervision_labels[task.task_name] = torch.randn(
                 num_examples, device=device
-            )
-        elif task.task_type == MultitaskTaskType.REGRESSION:
+            ).to(torch.float32)
+        else:
             supervision_labels[task.task_name] = torch.randint(
                 0,
                 11,
                 (num_examples,),
                 device=device,
-            )
-            supervision_labels[task.task_name] = torch.randn(
-                num_examples, device=device
-            )
-        else:
-            supervision_labels[task.task_name] = torch.randint(
-                0,
-                10,
-                (num_examples,),
-                device=device,
-            )
+            ).to(torch.float32)
 
     return supervision_labels, supervision_weights
 
