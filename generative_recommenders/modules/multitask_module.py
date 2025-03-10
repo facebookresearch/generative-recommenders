@@ -260,18 +260,17 @@ class DefaultMultitaskModule(MultitaskModule):
                 device=encoded_user_embeddings.device,
                 dtype=encoded_user_embeddings.dtype,
             )
-            if self.training:
-                mt_losses = _compute_loss(
-                    task_offsets=self._task_offsets,
-                    causal_multitask_weights=self._causal_multitask_weights,
-                    mt_logits=mt_logits,
-                    mt_labels=mt_labels,
-                    mt_weights=mt_weights,
-                    has_multiple_task_types=self._has_multiple_task_types,
-                )
-                mt_losses.to(orig_dtype)
-                mt_labels.to(orig_dtype)
-                mt_weights.to(orig_dtype)
+            mt_losses = _compute_loss(
+                task_offsets=self._task_offsets,
+                causal_multitask_weights=self._causal_multitask_weights,
+                mt_logits=mt_logits,
+                mt_labels=mt_labels,
+                mt_weights=mt_weights,
+                has_multiple_task_types=self._has_multiple_task_types,
+            )
+            mt_losses.to(orig_dtype)
+            mt_labels.to(orig_dtype)
+            mt_weights.to(orig_dtype)
             mt_preds.to(orig_dtype)
 
         return (
