@@ -111,7 +111,7 @@ def _get_supervision_labels_and_weights(
         elif task.task_type == MultitaskTaskType.BINARY_CLASSIFICATION:
             supervision_labels[task.task_name] = (
                 torch.bitwise_and(supervision_bitmasks, task.task_weight) > 0
-            ).to(torch.int)
+            ).to(torch.float32)
         else:
             raise RuntimeError("Unsupported MultitaskTaskType")
     return supervision_labels, supervision_weights
