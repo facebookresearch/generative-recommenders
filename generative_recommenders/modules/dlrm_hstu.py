@@ -52,8 +52,6 @@ from torchrec.modules.embedding_modules import EmbeddingCollection
 
 logger: logging.Logger = logging.getLogger(__name__)
 
-torch.ops.load_library("//hammer/oss/generative_recommenders/ops/cpp:cpp_ops")
-
 torch.fx.wrap("fx_infer_max_len")
 torch.fx.wrap("len")
 
@@ -250,16 +248,13 @@ class DlrmHSTU(HammerModule):
         seq_embeddings: Dict[str, SequenceEmbedding],
     ) -> Dict[str, torch.Tensor]:
         if len(self._hstu_configs.contextual_feature_to_max_length) > 0:
-            contextual_lengths = torch.stack(
-                [
-                    seq_embeddings[x].lengths
-                    for x in self._hstu_configs.contextual_feature_to_max_length.keys()
-                ],
-                dim=0,
-            )
-            contextual_offsets = torch.ops.gr.batched_complete_cumsum(
-                contextual_lengths
-            )
+            contextual_offsets: List[torch.Tensor] = []
+            for x in self._hstu_configs.contextual_feature_to_max_length.keys():
+                contextual_offsets.append(
+                    torch.ops.fbgemm.asynchronous_complete_cumsum(
+                        seq_embeddings[x].lengths
+                    )
+                )
         else:
             # Dummy, offsets are unused
             contextual_offsets = torch.empty((0, 0))

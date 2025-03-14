@@ -35,7 +35,6 @@ from torch.profiler import record_function
 logger: logging.Logger = logging.getLogger(__name__)
 torch.fx.wrap("len")
 
-torch.ops.load_library("//hammer/oss/generative_recommenders/ops/cpp:cpp_ops")
 torch.ops.load_library("//deeplearning/fbgemm/fbgemm_gpu:sparse_ops")
 torch.ops.load_library("//deeplearning/fbgemm/fbgemm_gpu:sparse_ops_cpu")
 
