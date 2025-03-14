@@ -29,6 +29,10 @@ from generative_recommenders.common import (
     switch_to_contiguous_if_needed,
     triton_autotune,
 )
+from generative_recommenders.fb.ops.fp8.fp8_addmm import fp8_addmm_fwd_rowwise_fused
+from generative_recommenders.fb.ops.fp8.layer_norm_quantization import (
+    triton_layer_norm_mul_dropout_quantization_fwd,
+)
 
 from generative_recommenders.ops.triton.triton_addmm import _addmm_fwd
 
@@ -1197,6 +1201,7 @@ class HSTUComputeOutputFunction(torch.autograd.Function):
         linear_dim: int = -1,
         seed: Optional[int] = None,
         recompute_y_in_backward: bool = False,
+        fp8_in_addmm_fwd: bool = False,
     ) -> torch.Tensor:
         if group_norm:
             y, mean, rstd, BLOCK_D, BLOCK_H, num_warps, seed = (
@@ -1215,28 +1220,42 @@ class HSTUComputeOutputFunction(torch.autograd.Function):
                 )
             )
             ctx.BLOCK_H = BLOCK_H
+            y_scale, y_fp8 = None, None
         else:
-            y, mean, rstd, BLOCK_D, num_warps, seed = triton_layer_norm_mul_dropout_fwd(
-                x=attn,
-                u=u,
-                weight=norm_weight,
-                bias=norm_bias,
-                eps=eps,
-                dropout_ratio=dropout_ratio,
-                training=training,
-                concat_ux=concat_ux,
-                seed=seed,
+            y, mean, rstd, BLOCK_D, num_warps, seed, y_scale, y_fp8 = (
+                triton_layer_norm_mul_dropout_quantization_fwd(
+                    x=attn,
+                    u=u,
+                    weight=norm_weight,
+                    bias=norm_bias,
+                    eps=eps,
+                    dropout_ratio=dropout_ratio,
+                    training=training,
+                    concat_ux=concat_ux,
+                    seed=seed,
+                    quantize_output=fp8_in_addmm_fwd,
+                    save_y=not recompute_y_in_backward,
+                )
             )
 
         # NOTE: for AMD training, we go with torch.addmm instead of the triton
         # version before Triton on AMD achieves on-par perf with NV GPU.
         if torch.version.hip:
+            assert y is not None
             out = torch.addmm(x, y, output_weight)
         else:
-            out = triton_addmm_fwd(x=y, w=output_weight, y=x)
+            if fp8_in_addmm_fwd:
+                assert y_scale is not None and y_fp8 is not None
+                out = fp8_addmm_fwd_rowwise_fused(
+                    x_fp8=y_fp8, w=output_weight, y=x, x_scale=y_scale
+                )
+            else:
+                assert y is not None
+                out = triton_addmm_fwd(x=y, w=output_weight, y=x)
 
         saved_tensors = [attn, u, norm_weight, norm_bias, mean, rstd, output_weight]
         if not recompute_y_in_backward:
+            # pyre-ignore
             saved_tensors.append(y)
         ctx.save_for_backward(*saved_tensors)
         ctx.BLOCK_D = BLOCK_D
@@ -1263,6 +1282,7 @@ class HSTUComputeOutputFunction(torch.autograd.Function):
         torch.Tensor,  # d_norm_weight
         torch.Tensor,  # d_norm_bias
         torch.Tensor,  # d_output_weight
+        None,
         None,
         None,
         None,
@@ -1340,6 +1360,7 @@ class HSTUComputeOutputFunction(torch.autograd.Function):
             None,
             None,
             None,
+            None,
         )
 
 
@@ -1404,6 +1425,7 @@ def triton_hstu_compute_output(
     linear_dim: int = -1,
     seed: Optional[int] = None,
     recompute_y_in_backward: bool = False,
+    fp8_in_addmm_fwd: bool = False,
 ) -> torch.Tensor:
     return HSTUComputeOutputFunction.apply(
         attn,
@@ -1421,4 +1443,5 @@ def triton_hstu_compute_output(
         linear_dim,
         seed,
         recompute_y_in_backward,
+        fp8_in_addmm_fwd,
     )
