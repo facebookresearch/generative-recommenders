@@ -516,13 +516,17 @@ class _AddTimestampPositionEmbeddingsFunction(torch.autograd.Function):
             TIME_BUCKET_FN=time_bucket_fn,
             BLOCK_D=BLOCK_D,
         )
-        values = torch.arange(0, N, dtype=torch.int32, device=timestamps.device)
-        sorted_ts_key_inds, sorted_ts_value_inds = torch.ops.hammer.sort_kv_pairs(
-            ts_inds, values
-        )
-        sorted_pos_key_inds, sorted_pos_value_inds = torch.ops.hammer.sort_kv_pairs(
-            pos_inds, values
-        )
+        try:
+            values = torch.arange(0, N, dtype=torch.int32, device=timestamps.device)
+            sorted_ts_key_inds, sorted_ts_value_inds = torch.ops.hammer.sort_kv_pairs(
+                ts_inds, values
+            )
+            sorted_pos_key_inds, sorted_pos_value_inds = torch.ops.hammer.sort_kv_pairs(
+                pos_inds, values
+            )
+        except Exception:
+            sorted_ts_key_inds, sorted_ts_value_inds = torch.sort(ts_inds)
+            sorted_pos_key_inds, sorted_pos_value_inds = torch.sort(pos_inds)
         ctx.save_for_backward(
             sorted_pos_key_inds,
             sorted_pos_value_inds,
