@@ -1,8 +1,6 @@
-absl_py==2.1.0
-faiss_gpu==1.7.2
-fbgemm_gpu==0.6.0
-gin_config==0.5.0
-numpy<2
-pandas==2.2.2
-tensorboard
-torch==2.2.1
+torch>=2.6.0
+fbgemm_gpu>=1.1.0
+torchrec>=1.1.0
+gin_config>=0.5.0
+pandas>=2.2.0
+tensorboard>=2.19.0
