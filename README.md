@@ -1,38 +1,40 @@
 # Generative Recommenders
 
-Repository hosting code for ``Actions Speak Louder than Words: Trillion-Parameter Sequential Transducers for Generative Recommendations`` (https://arxiv.org/abs/2402.17152, ICML'24) and related code, where we demonstrate that the ubiquitously used classical deep learning recommendation paradigm (DLRMs) can be reformulated as a generative modeling problem (Generative Recommenders or GRs) to overcome known compute scaling bottlenecks, propose efficient algorithms such as HSTU and M-FALCON to accelerate training and inference for large-scale sequential models by 10x-1000x, and demonstrate scaling law for the first-time in deployed, billion-user scale recommendation systems.
+Repository hosting code for ``Actions Speak Louder than Words: Trillion-Parameter Sequential Transducers for Generative Recommendations`` ([ICML'24](https://dl.acm.org/doi/10.5555/3692070.3694484)) and related code, where we demonstrate that the ubiquitously used classical deep learning recommendation paradigm (DLRMs) can be reformulated as a generative modeling problem (Generative Recommenders or GRs) to overcome known compute scaling bottlenecks, propose efficient algorithms such as HSTU and M-FALCON to accelerate training and inference for large-scale sequential models by 10x-1000x, and demonstrate scaling law for the first-time in deployed, billion-user scale recommendation systems.
 
 ## Getting started
 
-### Public experiments
-
-To reproduce the public experiments (traditional sequential recommender setting, Section 4.1.1) on MovieLens and Amazon Reviews in the paper, please follow these steps:
-
-#### Install dependencies.
-
-We recommend using `requirements.txt`. This has been tested with Ubuntu 22.04, CUDA 12.4, Python 3.10, and PyTorch 2.2.1.
+We recommend using `requirements.txt`. This has been tested with Ubuntu 22.04, CUDA 12.4, and Python 3.10.
 
 ```bash
-cd ~/venv/
-python3.10 -m venv gr-hstu
-cd ~/oss/generative-recommenders
-source ~/venv/gr-hstu/bin/activate
-pip install -r requirements.txt
+pip3 install -r requirements.txt
 ```
 
 Alternatively, you can manually install PyTorch based on official instructions. Then,
 
 ```bash
-pip3 install gin-config absl-py scikit-learn scipy matplotlib numpy apex hypothesis pandas fbgemm_gpu==0.6.0 iopath tensorboard
+pip3 install gin-config pandas fbgemm_gpu torchrec tensorboard
 ```
+
+We have created a DLRM model using HSTU and have developed benchmarks for both training and inference.
+
+#### Run model training.
+
+To be added
+
+#### Run model inference.
+
+To be added
+
+## Paper experiments
+
+To reproduce the public experiments in our paper (traditional sequential recommender setting, Section 4.1.1) on MovieLens and Amazon Reviews in the paper, please follow these steps:
 
 #### Download and preprocess data.
 
 ```bash
 mkdir -p tmp/ && python3 preprocess_public_data.py
 ```
-
-#### Run model training.
 
 A GPU with 24GB or more HBM should work for most datasets.
 
@@ -103,14 +105,12 @@ unzip ml-3b.zip && rm ml-3b.zip
 To generate the synthetic dataset on your own:
 
 ```bash
-python run_fractal_expansion.py --input-csv-file tmp/ml-20m/ratings.csv --write-dataset True --output-prefix tmp/ml-3b/
+python3 run_fractal_expansion.py --input-csv-file tmp/ml-20m/ratings.csv --write-dataset True --output-prefix tmp/ml-3b/
 ```
 
-### Efficiency experiments
+## Efficiency experiments
 
-``ops/triton`` currently contains triton kernels needed for efficiency experiments. More code (incl integration glue code) to be added at a later point in time. If it's urgent, please feel free to open PRs.
-
-``ops/cpp`` contains efficient CUDA kernels. In particular, ``ops/cpp/hstu_attention`` contains the attention implementation based on [FlashAttention V3](https://github.com/Dao-AILab/flash-attention) with state-of-the-art efficiency on H100 GPUs.
+``ops/triton`` currently contains triton kernels needed for efficiency experiments. ``ops/cpp`` contains efficient CUDA kernels. In particular, ``ops/cpp/hstu_attention`` contains the attention implementation based on [FlashAttention V3](https://github.com/Dao-AILab/flash-attention) with state-of-the-art efficiency on H100 GPUs.
 
 
 ## License
