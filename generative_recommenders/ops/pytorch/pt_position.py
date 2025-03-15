@@ -24,8 +24,11 @@ from generative_recommenders.common import (
     jagged_to_padded_dense,
 )
 
-torch.ops.load_library("//deeplearning/fbgemm/fbgemm_gpu:sparse_ops")
-torch.ops.load_library("//deeplearning/fbgemm/fbgemm_gpu:sparse_ops_cpu")
+try:
+    torch.ops.load_library("//deeplearning/fbgemm/fbgemm_gpu:sparse_ops")
+    torch.ops.load_library("//deeplearning/fbgemm/fbgemm_gpu:sparse_ops_cpu")
+except OSError:
+    pass
 
 
 @torch.fx.wrap

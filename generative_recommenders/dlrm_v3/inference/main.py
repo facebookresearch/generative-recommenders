@@ -21,6 +21,8 @@ import argparse
 import array
 import json
 import logging
+
+logging.basicConfig(level=logging.INFO)
 import math
 import os
 import sys
@@ -54,7 +56,6 @@ from generative_recommenders.dlrm_v3.utils import (
 )
 
 
-logging.basicConfig(level=logging.INFO)
 logger: logging.Logger = logging.getLogger("main")
 
 torch.multiprocessing.set_start_method("spawn", force=True)
