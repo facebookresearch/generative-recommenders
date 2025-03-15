@@ -49,6 +49,7 @@ template <
     class ArchTag_,
     bool Causal,
     bool Local,
+    bool Contexual_mask,
     bool Jagged,
     bool Has_targets,
     bool Mma1_is_RS,
@@ -480,7 +481,9 @@ struct CollectiveMainloopFwdSm90 {
     StrideDescale const stride_q_descale, stride_k_descale, stride_v_descale;
     float const max_seq_len_inv;
     float const alpha;
-    int const max_attn_len = 0;
+    int const max_attn_len;
+    int const min_full_attn_seq_len;
+    int const contextual_seq_len;
     int const* const seq_offsets = nullptr;
     int const* const num_targets = nullptr;
   };
@@ -505,6 +508,8 @@ struct CollectiveMainloopFwdSm90 {
     float const max_seq_len_inv;
     float const alpha;
     int const max_attn_len;
+    int const min_full_attn_seq_len;
+    int const contextual_seq_len;
     int const* const seq_offsets = nullptr;
     int const* const num_targets = nullptr;
   };
@@ -573,6 +578,8 @@ struct CollectiveMainloopFwdSm90 {
         args.max_seq_len_inv,
         args.alpha,
         args.max_attn_len,
+        args.min_full_attn_seq_len,
+        args.contextual_seq_len,
         args.seq_offsets,
         args.num_targets};
   }
@@ -587,10 +594,25 @@ struct CollectiveMainloopFwdSm90 {
   }
 
   CUTLASS_DEVICE
-  cute::tuple<int, int>
-  get_n_block_min_max(int max_attn_len, int uihlen, int m_block) {
+  cute::tuple<int, int> get_n_block_min_max(
+      int max_attn_len,
+      int min_full_attn_seq_len,
+      int contextual_seq_len,
+      int uihlen,
+      int m_block) {
     static constexpr int kBlockM = get<0>(TileShape_MNK{});
     static constexpr int kBlockN = get<1>(TileShape_MNK{});
+    if constexpr (Contexual_mask) {
+      if (m_block * kBlockM < contextual_seq_len) {
+        return {0, cute::ceil_div(uihlen, kBlockN)};
+      }
+    }
+    if constexpr (Has_targets) {
+      int m_idx_max = (m_block + 1) * kBlockM;
+      if (m_idx_max > uihlen) {
+        return {0, cute::ceil_div(uihlen, kBlockN)};
+      }
+    }
     int n_block_max;
     int n_block_min;
     // Non-target part, n_block_max
@@ -603,17 +625,21 @@ struct CollectiveMainloopFwdSm90 {
     // Non-target part, n_block_min
     if constexpr (Local) {
       int m_idx_min = m_block * kBlockM;
-      n_block_min = std::max(int(0), (m_idx_min - max_attn_len) / kBlockN);
+      int m_idx_max = (m_block + 1) * kBlockM;
+      if (min_full_attn_seq_len == 0 ||
+          m_idx_max <= uihlen - min_full_attn_seq_len) {
+        n_block_min = std::max(int(0), (m_idx_min - max_attn_len) / kBlockN);
+        if constexpr (Contexual_mask) {
+          // row contexual without sink
+          if (n_block_min * kBlockN < contextual_seq_len) {
+            n_block_min = 0;
+          }
+        }
+      } else {
+        n_block_min = 0;
+      }
     } else {
       n_block_min = 0;
-    }
-    // Target part
-    if constexpr (Has_targets) {
-      int m_idx_max = (m_block + 1) * kBlockM;
-      if (m_idx_max > uihlen) {
-        n_block_min = 0;
-        n_block_max = cute::ceil_div(uihlen, kBlockN);
-      }
     }
     return {n_block_min, n_block_max};
   }
@@ -637,6 +663,37 @@ struct CollectiveMainloopFwdSm90 {
     }
   }
 
+  CUTLASS_DEVICE
+  int get_contexual_n_block_max(
+      int n_block_min,
+      int min_full_attn_seq_len,
+      int contextual_seq_len,
+      int uihlen,
+      int m_block) {
+    return 0;
+    // TODO: reenable below once contexual + semi local implementation is
+    // finalized
+    static constexpr int kBlockM = get<0>(TileShape_MNK{});
+    static constexpr int kBlockN = get<1>(TileShape_MNK{});
+    if constexpr (!Local) {
+      return 0;
+    }
+    if (m_block * kBlockM < contextual_seq_len) {
+      return 0;
+    }
+    int m_idx_max = (m_block + 1) * kBlockM;
+    if constexpr (Has_targets) {
+      if (m_idx_max > uihlen) {
+        return 0;
+      }
+    }
+    if (min_full_attn_seq_len == 0 ||
+        m_idx_max <= uihlen - min_full_attn_seq_len) {
+      return std::min(n_block_min, cute::ceil_div(contextual_seq_len, kBlockN));
+    }
+    return 0;
+  }
+
   template <typename SchedulerPrefetch, typename SharedStorage>
   CUTLASS_DEVICE void load(
       Params const& params,
@@ -657,8 +714,12 @@ struct CollectiveMainloopFwdSm90 {
         return;
       }
     }
-    auto [n_block_min, n_block_max] =
-        get_n_block_min_max(params.max_attn_len, seqlen_info.uihlen, m_block);
+    auto [n_block_min, n_block_max] = get_n_block_min_max(
+        params.max_attn_len,
+        params.min_full_attn_seq_len,
+        params.contextual_seq_len,
+        seqlen_info.uihlen,
+        m_block);
 #ifdef HSTU_FLASH_ATTN_DEBUG_INFO
     if (n_block_max <= n_block_min) {
       std::printf(
@@ -944,18 +1005,28 @@ struct CollectiveMainloopFwdSm90 {
       auto [target_n_block_min, target_n_block_max] =
           get_target_n_block_min_max(
               n_block_max, seqlen_info.uihlen, seqlen_info.seqlen, m_block);
-#ifdef HSTU_FLASH_ATTN_DEBUG_INFO
-      if (thread_idx == 0) {
-        std::printf(
-            "mainloop_fwd_sm90: get_target_n_block_min_max: target_n_block_min (%d), target_n_block_max (%d), m_block (%d) \n",
-            target_n_block_min,
-            target_n_block_max,
-            m_block);
-      }
-#endif
 #pragma unroll 1
       for (n_block = target_n_block_max - 1; n_block >= target_n_block_min;
            --n_block) {
+        if (should_load_KV) {
+          load_V(n_block, smem_pipe_write);
+          load_K(n_block, smem_pipe_write);
+        }
+        if constexpr (Transpose_V) {
+          copy_Vt_to_V(smem_pipe_write);
+        }
+        ++smem_pipe_write;
+      }
+    }
+    if constexpr (Contexual_mask) {
+      int contexual_n_block_max = get_contexual_n_block_max(
+          n_block_min,
+          params.min_full_attn_seq_len,
+          params.contextual_seq_len,
+          seqlen_info.uihlen,
+          m_block);
+#pragma unroll 1
+      for (n_block = contexual_n_block_max - 1; n_block >= 0; --n_block) {
         if (should_load_KV) {
           load_V(n_block, smem_pipe_write);
           load_K(n_block, smem_pipe_write);
@@ -1069,8 +1140,12 @@ struct CollectiveMainloopFwdSm90 {
         return false;
       }
     }
-    auto [n_block_min, n_block_max] =
-        get_n_block_min_max(params.max_attn_len, seqlen_info.uihlen, m_block);
+    auto [n_block_min, n_block_max] = get_n_block_min_max(
+        params.max_attn_len,
+        params.min_full_attn_seq_len,
+        params.contextual_seq_len,
+        seqlen_info.uihlen,
+        m_block);
 
 #ifdef HSTU_FLASH_ATTN_DEBUG_INFO
     if (n_block_max <= n_block_min) {
@@ -1152,6 +1227,8 @@ struct CollectiveMainloopFwdSm90 {
         thread_idx,
         seqlen_info.seqlen,
         params.max_attn_len,
+        params.min_full_attn_seq_len,
+        params.contextual_seq_len,
         seqlen_info.uihlen);
 
     auto& barrier_Q = shared_storage.pipelines.barrier_Q;
@@ -1183,6 +1260,7 @@ struct CollectiveMainloopFwdSm90 {
           false /*Seqlenk_mask*/,
           Causal,
           Local,
+          Contexual_mask,
           false /*Target_mask*/>(tSrS, m_block, n_block);
     } else if (
         m_idx_max <= cute::ceil_div(seqlen_info.uihlen, kBlockM) * kBlockM) {
@@ -1191,6 +1269,7 @@ struct CollectiveMainloopFwdSm90 {
           true /*Seqlenk_mask*/,
           Causal,
           Local,
+          Contexual_mask,
           Has_targets>(tSrS, m_block, n_block);
     } else {
       mask.template apply<
@@ -1198,6 +1277,7 @@ struct CollectiveMainloopFwdSm90 {
           true /*Seqlenk_mask*/,
           false /*Causal*/,
           false,
+          Contexual_mask,
           Has_targets>(tSrS, m_block, n_block);
     }
     if constexpr (Is_FP8 && !V_colmajor) {
@@ -1274,6 +1354,7 @@ struct CollectiveMainloopFwdSm90 {
               false /*Seqlenk_mask*/,
               Causal,
               Local,
+              Contexual_mask,
               false /*Has_targets*/>(tSrS, m_block, n_block);
         };
         int const m_idx_min = m_block * kBlockM;
@@ -1286,11 +1367,17 @@ struct CollectiveMainloopFwdSm90 {
       }
     }
 
-    int const n_block_min_before_local_mask = !Local
-        ? n_block_min
-        : std::max(
-              n_block_min,
-              cute::ceil_div(m_idx_max - params.max_attn_len, kBlockN));
+    int n_block_min_before_local_mask = n_block_min;
+    if constexpr (Local) {
+      if (m_idx_max <=
+          cute::ceil_div(
+              seqlen_info.uihlen - params.min_full_attn_seq_len, kBlockM) *
+              kBlockM) {
+        n_block_min_before_local_mask = std::max(
+            n_block_min,
+            cute::ceil_div(m_idx_max - params.max_attn_len, kBlockN));
+      }
+    }
     auto no_mask_fn = [](auto& tSrS, int n_block) {};
 #pragma unroll 1
     for (; n_block >= n_block_min_before_local_mask; --n_block) {
@@ -1304,6 +1391,7 @@ struct CollectiveMainloopFwdSm90 {
             false /*Seqlenk_mask*/,
             false /*Causal_mask*/,
             Local,
+            Contexual_mask,
             false /*Has_targets*/>(tSrS, m_block, n_block);
       };
 #pragma unroll 1
@@ -1321,13 +1409,35 @@ struct CollectiveMainloopFwdSm90 {
             false /*Seqlenq_mask*/,
             true /*Seqlenk_mask*/,
             false /*Causal_mask*/,
-            false, /*Local*/
+            false /*Local*/,
+            Contexual_mask,
             Has_targets>(tSrS, m_block, n_block);
       };
 #pragma unroll 1
       for (n_block = target_n_block_max - 1; n_block >= target_n_block_min;
            --n_block) {
         fwd_step_intra_warp_pipeline(n_block, target_mask_fn);
+      }
+    }
+    if constexpr (Contexual_mask) {
+      int contexual_n_block_max = get_contexual_n_block_max(
+          n_block_min,
+          params.min_full_attn_seq_len,
+          params.contextual_seq_len,
+          seqlen_info.uihlen,
+          m_block);
+      auto contexual_mask_fn = [&](auto& tSrS, int n_block) {
+        mask.template apply<
+            false /*Seqlenq_mask*/,
+            true /*Seqlenk_mask*/,
+            false /*Causal_mask*/,
+            Local,
+            Contexual_mask,
+            Has_targets>(tSrS, m_block, n_block);
+      };
+#pragma unroll 1
+      for (n_block = contexual_n_block_max - 1; n_block >= 0; --n_block) {
+        fwd_step_intra_warp_pipeline(n_block, contexual_mask_fn);
       }
     }
     // Tell producers that smem_q is ready

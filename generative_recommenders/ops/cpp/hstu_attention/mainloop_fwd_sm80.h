@@ -49,6 +49,7 @@ template <
     class ArchTag_,
     bool Causal,
     bool Local,
+    bool Contexual_mask,
     bool Jagged,
     bool Has_targets>
 struct CollectiveMainloopFwdSm80 {
@@ -254,7 +255,9 @@ struct CollectiveMainloopFwdSm80 {
     StrideDescale const stride_q_descale, stride_k_descale, stride_v_descale;
     float const max_seq_len_inv;
     float const alpha;
-    int const max_attn_len = 0;
+    int const max_attn_len;
+    int const min_full_attn_seq_len;
+    int const contextual_seq_len;
     int const* const seq_offsets = nullptr;
     int const* const num_targets = nullptr;
   };
@@ -276,6 +279,8 @@ struct CollectiveMainloopFwdSm80 {
     float const max_seq_len_inv;
     float const alpha;
     int const max_attn_len;
+    int const min_full_attn_seq_len;
+    int const contextual_seq_len;
     int const* const seq_offsets = nullptr;
     int const* const num_targets = nullptr;
   };
@@ -318,6 +323,8 @@ struct CollectiveMainloopFwdSm80 {
         args.max_seq_len_inv,
         args.alpha,
         args.max_attn_len,
+        args.min_full_attn_seq_len,
+        args.contextual_seq_len,
         args.seq_offsets,
         args.num_targets};
   }
@@ -702,6 +709,8 @@ struct CollectiveMainloopFwdSm80 {
         thread_idx,
         seqlen_info.seqlen,
         params.max_attn_len,
+        params.min_full_attn_seq_len,
+        params.contextual_seq_len,
         seqlen_info.uihlen);
 
     int smem_pipe_read = 0, smem_pipe_write = kStages - 1;
@@ -817,6 +826,7 @@ struct CollectiveMainloopFwdSm80 {
             false /*Seqlenk_mask*/,
             Causal,
             Local,
+            false /*Contexual_mask*/,
             false /*Target_mask*/>(tSrS, m_block, n_block);
       };
       fwd_step(
@@ -829,6 +839,7 @@ struct CollectiveMainloopFwdSm80 {
             true /*Seqlenk_mask*/,
             Causal,
             Local,
+            false /*Contexual_mask*/,
             Has_targets>(tSrS, m_block, n_block);
       };
       fwd_step(
@@ -840,6 +851,7 @@ struct CollectiveMainloopFwdSm80 {
             true /*Seqlenk_mask*/,
             false /*Causal*/,
             false /*Local*/,
+            false /*Contexual_mask*/,
             Has_targets>(tSrS, m_block, n_block);
       };
       fwd_step(
@@ -855,6 +867,7 @@ struct CollectiveMainloopFwdSm80 {
               false /*Seqlenk_mask*/,
               Causal,
               Local,
+              false /*Contexual_mask*/,
               false /*Target_mask*/>(tSrS, m_block, n_block);
         };
         int const m_idx_min = m_block * kBlockM;
@@ -884,6 +897,7 @@ struct CollectiveMainloopFwdSm80 {
             false /*Seqlenk_mask*/,
             false /*Causal_mask*/,
             Local,
+            false /*Contexual_mask*/,
             false /*Target_mask*/>(tSrS, m_block, n_block);
       };
 #pragma unroll 1
@@ -899,7 +913,8 @@ struct CollectiveMainloopFwdSm80 {
             false /*Seqlenq_mask*/,
             true /*Seqlenk_mask*/,
             false /*Causal_mask*/,
-            false, /*Local*/
+            false /*Local*/,
+            false /*Contexual_mask*/,
             Has_targets>(tSrS, m_block, n_block);
       };
 #pragma unroll 1
