@@ -1,0 +1,48 @@
+batch_size = 16
+dataset = "kuairand-1k"
+
+# model parameters
+make_model.dataset = %dataset
+make_model.use_gpu = True
+make_model.custom_kernel = False
+make_model.bf16_training = False
+make_model.max_hash_size = None
+
+# dense model optimizer
+dense_optimizer_factory_and_class.learning_rate = 0.001
+dense_optimizer_factory_and_class.optimizer_name = "Adam"
+dense_optimizer_factory_and_class.momentum = 0
+dense_optimizer_factory_and_class.weight_decay = 0
+dense_optimizer_factory_and_class.eps = 1e-8
+dense_optimizer_factory_and_class.betas = (0.95, 0.999)
+dense_optimizer_factory_and_class.ams_grad = False
+
+# sparse model optimizer
+sparse_optimizer_factory_and_class.learning_rate = 0.001
+sparse_optimizer_factory_and_class.optimizer_name = "RowWiseAdagrad"
+sparse_optimizer_factory_and_class.momentum = 0
+sparse_optimizer_factory_and_class.weight_decay = 0
+sparse_optimizer_factory_and_class.eps = 1e-8
+sparse_optimizer_factory_and_class.betas = (0.95, 0.999)
+sparse_optimizer_factory_and_class.ams_grad = False
+
+# dataloader configs
+make_train_test_dataloaders.batch_size = %batch_size
+make_train_test_dataloaders.dataset_type = %dataset
+make_train_test_dataloaders.train_split_percentage = 0.75
+make_train_test_dataloaders.new_path_prefix = "/home/linjianma"
+make_train_test_dataloaders.num_workers = 2
+make_train_test_dataloaders.prefetch_factor = 4
+make_train_test_dataloaders.max_seq_len = 2048
+
+# train loop variables
+train_loop.num_epochs = 5
+train_loop.output_trace = True
+train_loop.metric_log_frequency = 10
+
+# logger variables
+MetricsLogger.tensorboard_log_path = "/tmp/tensorboard_log_path.log"
+
+# checkpoint
+# save_dmp_checkpoint.path = "/home/linjianma/ckpts/kuairand_1k"
+# load_dmp_checkpoint.path = "/home/linjianma/ckpts/kuairand_1k/2025_01_12_17_56_43/"

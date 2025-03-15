@@ -18,13 +18,21 @@ pip3 install gin-config pandas fbgemm_gpu torchrec tensorboard
 
 We have created a DLRM model using HSTU and have developed benchmarks for both training and inference.
 
-#### Run model training.
+#### Run model training with 4 GPUs
 
-To be added
+```bash
+LOCAL_WORLD_SIZE=4 WORLD_SIZE=4 python3 generative_recommenders/dlrm_v3/trainer/train_ranker.py --dataset debug --mode train
+```
 
-#### Run model inference.
+#### Run model inference with 4 GPUs
 
-To be added
+```bash
+git clone --recurse-submodules https://github.com/mlcommons/inference.git mlperf_inference
+cd mlperf_inference/loadgen
+CFLAGS="-std=c++14 -O3" python -m pip install .
+
+LOCAL_WORLD_SIZE=4 WORLD_SIZE=4 python3 generative_recommenders/dlrm_v3/inference/main.py --dataset debug
+```
 
 ## Paper experiments
 
