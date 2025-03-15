@@ -106,6 +106,7 @@ void set_params_fprop(
     bool causal,
     float alpha,
     const int max_attn_len,
+    const int min_full_attn_seq_len,
     const int contextual_seq_len,
     const int sm_margin = 0) {
   // Reset the parameters
@@ -146,8 +147,13 @@ void set_params_fprop(
 
   params.alpha = alpha;
 
-  params.is_causal = causal;
   params.is_local = max_attn_len > 0;
+  params.is_causal = causal && (!params.is_local);
+  params.has_contexual_mask = contextual_seq_len > 0;
+
+  params.max_attn_len = max_attn_len;
+  params.min_full_attn_seq_len = min_full_attn_seq_len;
+  params.contextual_seq_len = contextual_seq_len;
 
   params.arch = at::cuda::getCurrentDeviceProperties()->major * 10 +
       at::cuda::getCurrentDeviceProperties()->minor;
@@ -188,6 +194,7 @@ void set_params_dgrad(
     const bool causal,
     const float alpha,
     const int max_attn_len,
+    const int min_full_attn_seq_len,
     const int contextual_seq_len,
     bool deterministic = false,
     int const sm_margin = 0) {
@@ -207,6 +214,7 @@ void set_params_dgrad(
       causal,
       alpha,
       max_attn_len,
+      min_full_attn_seq_len,
       contextual_seq_len,
       sm_margin);
 
@@ -395,6 +403,7 @@ at::Tensor hstu_mha_fwd(
     bool causal,
     std::optional<at::Tensor>& num_targets,
     int max_attn_len,
+    int min_full_attn_seq_len,
     int contextual_seq_len,
     std::optional<at::Tensor>& q_descale, // (b, h_k), not (b, h)
     std::optional<at::Tensor>& k_descale, // (b, h_k)
@@ -455,13 +464,16 @@ at::Tensor hstu_mha_fwd(
         "num_targets_ must have dtype torch.int32");
   }
   if (is_jagged && has_multiple_targets) {
+    auto uih_lengths = seq_offsets_.slice(0, 1)
+                           .sub(seq_offsets_.slice(0, 0, -1))
+                           .sub(num_targets_);
     TORCH_CHECK(
-        (seq_offsets_.slice(0, 1)
-             .sub(seq_offsets_.slice(0, 0, -1))
-             .gt(num_targets_))
-                .sum()
-                .item<int64_t>() == num_targets_.size(0),
+        (uih_lengths.gt(0)).sum().item<int64_t>() == num_targets_.size(0),
         "some uih seqlen is 0");
+    TORCH_CHECK(
+        (uih_lengths.greater_equal(contextual_seq_len)).sum().item<int64_t>() ==
+            num_targets_.size(0),
+        "some uih seqlen is less than contextual_seq_len");
   }
   TORCH_CHECK(
       q.size(-1) == k.size(-1) && k.size(-1) == v.size(-1),
@@ -482,9 +494,21 @@ at::Tensor hstu_mha_fwd(
       qk_head_size <= max_headdim && v_head_size <= max_headdim,
       "FlashAttention forward only supports head dimension at most " +
           std::to_string(max_headdim));
-
-  if (max_attn_len >= max_seq_len - 1) {
-    max_attn_len = -1;
+  TORCH_CHECK(
+      max_attn_len < max_seq_len - 1 && max_attn_len >= 0,
+      "max_attn_len must be between 0 and " + std::to_string(max_seq_len - 2));
+  TORCH_CHECK(
+      min_full_attn_seq_len <= max_seq_len && min_full_attn_seq_len >= 0,
+      "min_full_attn_seq_len must be between 0 and " +
+          std::to_string(max_seq_len));
+  TORCH_CHECK(
+      contextual_seq_len <= max_seq_len - 1 && contextual_seq_len >= 0,
+      "contextual_seq_len must be between 0 and " +
+          std::to_string(max_seq_len - 1));
+  if (max_attn_len > 0) {
+    TORCH_CHECK(
+        min_full_attn_seq_len > 0,
+        "min_full_attn_seq_len=0 not supported when max_attn_len > 0");
   }
   if (!is_jagged) {
     CHECK_SHAPE(q, batch_size, max_seq_len, num_heads, qk_head_size);
@@ -539,6 +563,7 @@ at::Tensor hstu_mha_fwd(
       causal,
       alpha,
       max_attn_len,
+      min_full_attn_seq_len,
       contextual_seq_len,
       sm_margin);
   params.o_ptr = out.data_ptr();
@@ -688,6 +713,7 @@ std::vector<at::Tensor> hstu_mha_bwd(
     bool causal,
     std::optional<const at::Tensor>& num_targets,
     int max_attn_len,
+    int min_full_attn_seq_len,
     int contextual_seq_len,
     bool sort_by_length,
     bool const deterministic,
@@ -783,9 +809,17 @@ std::vector<at::Tensor> hstu_mha_bwd(
       qk_head_size <= max_headdim && v_head_size <= max_headdim,
       "FlashAttention backward only supports head dimension at most " +
           std::to_string(max_headdim));
-  if (max_attn_len >= max_seq_len - 1) {
-    max_attn_len = -1;
-  }
+  TORCH_CHECK(
+      max_attn_len < max_seq_len - 1 && max_attn_len >= 0,
+      "max_attn_len must be between 0 and " + std::to_string(max_seq_len - 2));
+  TORCH_CHECK(
+      min_full_attn_seq_len <= max_seq_len && min_full_attn_seq_len >= 0,
+      "min_full_attn_seq_len must be between 0 and " +
+          std::to_string(max_seq_len));
+  TORCH_CHECK(
+      contextual_seq_len <= max_seq_len - 1 && contextual_seq_len >= 0,
+      "contextual_seq_len must be between 0 and " +
+          std::to_string(max_seq_len - 1));
   if (!is_jagged) {
     CHECK_SHAPE(q, batch_size, max_seq_len, num_heads, qk_head_size);
     CHECK_SHAPE(k, batch_size, max_seq_len, num_heads, qk_head_size);
@@ -894,6 +928,7 @@ std::vector<at::Tensor> hstu_mha_bwd(
       causal,
       alpha,
       max_attn_len,
+      min_full_attn_seq_len,
       contextual_seq_len,
       deterministic,
       sm_margin);

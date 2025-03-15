@@ -47,6 +47,7 @@ template <
     typename Element,
     bool Causal,
     bool Local,
+    bool Contexual_mask,
     bool Jagged,
     bool Has_targets,
     bool Deterministic,
@@ -128,6 +129,7 @@ void run_flash_bwd(Flash_bwd_params& params, cudaStream_t stream) {
           cutlass::arch::Sm90,
           Causal,
           Local,
+          Contexual_mask,
           Jagged,
           Has_targets,
           Deterministic,
@@ -148,6 +150,7 @@ void run_flash_bwd(Flash_bwd_params& params, cudaStream_t stream) {
           cutlass::arch::Sm80,
           Causal,
           Local,
+          Contexual_mask,
           Jagged,
           Has_targets,
           Deterministic,
@@ -213,6 +216,8 @@ void run_flash_bwd(Flash_bwd_params& params, cudaStream_t stream) {
        !Jagged ? params.qk_d_rounded * params.max_seq_len_rounded * params.h
                : 0}, // stride_dQaccum
       params.max_attn_len,
+      params.min_full_attn_seq_len,
+      params.contextual_seq_len,
       1.0f / params.max_seq_len,
       params.alpha,
       params.b,
@@ -395,27 +400,30 @@ template <
 void run_mha_bwd_dispatch(Flash_bwd_params& params, cudaStream_t stream) {
   BOOL_SWITCH(params.seq_offsets != nullptr, Jagged, [&] {
     BOOL_SWITCH(params.num_targets != nullptr, Has_targets, [&] {
-      run_flash_bwd<
-          Arch,
-          kHeadDim,
-          kBlockM,
-          kBlockN,
-          T,
-          Causal,
-          Local,
-          Jagged,
-          Has_targets,
-          false /*Deterministic*/,
-          Stages_dO,
-          Stages_dS_or_QSm80,
-          SdP_swapAB,
-          dKV_swapAB,
-          dQ_swapAB,
-          NumMmaWarpGroups,
-          AtomLayoutMSdP,
-          AtomLayoutNdKV,
-          AtomLayoutMdQ,
-          V_in_regs>(params, stream);
+      BOOL_SWITCH(params.has_contexual_mask, Contexual_mask, [&] {
+        run_flash_bwd<
+            Arch,
+            kHeadDim,
+            kBlockM,
+            kBlockN,
+            T,
+            Causal,
+            Local,
+            Contexual_mask,
+            Jagged,
+            Has_targets,
+            false /*Deterministic*/,
+            Stages_dO,
+            Stages_dS_or_QSm80,
+            SdP_swapAB,
+            dKV_swapAB,
+            dQ_swapAB,
+            NumMmaWarpGroups,
+            AtomLayoutMSdP,
+            AtomLayoutNdKV,
+            AtomLayoutMdQ,
+            V_in_regs>(params, stream);
+      });
     });
   });
 }

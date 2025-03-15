@@ -54,6 +54,7 @@ def hstu_mha(
     num_targets: Optional[torch.Tensor] = None,
     max_attn_len: int = 0,
     contextual_seq_len: int = 0,
+    min_full_attn_seq_len: int = 0,
     sort_by_length: bool = False,
     kernel: HammerKernel = HammerKernel.PYTORCH,
 ) -> torch.Tensor:
@@ -74,6 +75,9 @@ def hstu_mha(
             torch._assert(v.is_cuda, "v must be CUDA tensor")
             torch._assert(seq_offsets.is_cuda, "seq_offsets must be CUDA tensor")
             torch._assert(dropout_pr < 1e-6, "dropout for triton path not implemented")
+            torch._assert(
+                min_full_attn_seq_len == 0, "min_full_attn_seq_len not implemented"
+            )
         q = switch_to_contiguous_if_needed(q)
         k = switch_to_contiguous_if_needed(k)
         v = switch_to_contiguous_if_needed(v)
@@ -120,6 +124,7 @@ def hstu_mha(
             num_targets=num_targets,
             max_attn_len=max_attn_len,
             contextual_seq_len=contextual_seq_len,
+            min_full_attn_seq_len=min_full_attn_seq_len,
         )
 
 

@@ -77,7 +77,7 @@ struct Flash_fwd_params : public Qkv_params {
   int* __restrict__ num_targets;
 
   // Local window size
-  int max_attn_len, contextual_seq_len;
+  int max_attn_len, contextual_seq_len, min_full_attn_seq_len;
 
   // Pointer to the RNG seed (idx 0) and offset (idx 1).
   uint64_t* rng_state;
@@ -87,6 +87,7 @@ struct Flash_fwd_params : public Qkv_params {
   bool is_e4m3;
   bool is_causal;
   bool is_local;
+  bool has_contexual_mask;
 
   int* __restrict__ tile_count_semaphore;
 

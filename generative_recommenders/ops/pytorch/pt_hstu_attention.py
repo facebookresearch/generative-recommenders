@@ -140,6 +140,7 @@ def pytorch_hstu_mha(
     num_targets: Optional[torch.Tensor] = None,
     max_attn_len: int = 0,
     contextual_seq_len: int = 0,
+    min_full_attn_seq_len: int = 0,
 ) -> torch.Tensor:
     L, H, _ = q.shape
     V = v.shape[2]
@@ -156,7 +157,9 @@ def pytorch_hstu_mha(
         num_targets=num_targets,
         max_attn_len=max_attn_len,
         contextual_seq_len=contextual_seq_len,
+        min_full_attn_seq_len=min_full_attn_seq_len,
     )
+    # raise NotImplementedError(valid_attn_mask[0, :, :].to(torch.int32))
     qk_attn = qk_attn * valid_attn_mask.unsqueeze(1)
     if dropout_pr > 0.0:
         qk_attn = F.dropout(qk_attn, p=dropout_pr, training=training)

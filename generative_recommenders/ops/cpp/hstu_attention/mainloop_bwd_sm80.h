@@ -43,6 +43,7 @@ template <
     class ArchTag_,
     bool Causal,
     bool Local,
+    bool Contexual_mask,
     bool Jagged,
     bool Has_targets,
     bool Deterministic,
@@ -348,6 +349,8 @@ struct CollectiveMainloopBwdSm80 {
     ShapedQaccum const shape_dQaccum;
     StridedQaccum const stride_dQaccum;
     int const max_attn_len;
+    int const min_full_attn_seq_len;
+    int const contextual_seq_len;
     float const max_seq_len_inv;
     float const alpha;
     int const num_batch;
@@ -372,6 +375,8 @@ struct CollectiveMainloopBwdSm80 {
     ShapedQaccum const shape_dQaccum;
     StridedQaccum stride_dQaccum;
     int const max_attn_len;
+    int const min_full_attn_seq_len;
+    int const contextual_seq_len;
     float const max_seq_len_inv;
     float const alpha;
     int const num_batch;
@@ -384,13 +389,29 @@ struct CollectiveMainloopBwdSm80 {
     if constexpr (Deterministic) {
       assert(args.dq_semaphore != nullptr);
     }
-    return {args.ptr_Q,          args.shape_Q,      args.stride_Q,
-            args.ptr_K,          args.shape_K,      args.stride_K,
-            args.ptr_V,          args.stride_V,     args.ptr_dO,
-            args.stride_dO,      args.ptr_dQaccum,  args.shape_dQaccum,
-            args.stride_dQaccum, args.max_attn_len, args.max_seq_len_inv,
-            args.alpha,          args.num_batch,    args.dq_semaphore,
-            args.seq_offsets,    args.num_targets};
+    return {
+        args.ptr_Q,
+        args.shape_Q,
+        args.stride_Q,
+        args.ptr_K,
+        args.shape_K,
+        args.stride_K,
+        args.ptr_V,
+        args.stride_V,
+        args.ptr_dO,
+        args.stride_dO,
+        args.ptr_dQaccum,
+        args.shape_dQaccum,
+        args.stride_dQaccum,
+        args.max_attn_len,
+        args.min_full_attn_seq_len,
+        args.contextual_seq_len,
+        args.max_seq_len_inv,
+        args.alpha,
+        args.num_batch,
+        args.dq_semaphore,
+        args.seq_offsets,
+        args.num_targets};
   }
 
   CUTLASS_DEVICE
@@ -638,6 +659,8 @@ struct CollectiveMainloopBwdSm80 {
         thread_idx,
         seqlen_info.seqlen,
         params.max_attn_len,
+        params.min_full_attn_seq_len,
+        params.contextual_seq_len,
         seqlen_info.uihlen);
 
     {
@@ -1068,6 +1091,7 @@ struct CollectiveMainloopBwdSm80 {
               true /*Seqlenk_mask*/,
               false /*Causal*/,
               false /*Local*/,
+              false /*Contexual_mask*/,
               Has_targets>(tSrS, m_block, n_block);
         };
         for (; m_block < m_block_max; ++m_block) {
@@ -1082,6 +1106,7 @@ struct CollectiveMainloopBwdSm80 {
                 true /*Seqlenk_mask*/,
                 Causal,
                 Local,
+                false /*Contexual_mask*/,
                 Has_targets>(tSrS, m_block, n_block);
           };
           int const m_block_masking_max =
@@ -1107,6 +1132,7 @@ struct CollectiveMainloopBwdSm80 {
               true /*Seqlenk_mask*/,
               Causal && !SeparateMaskingIterations,
               Local && !SeparateMaskingIterations,
+              false /*Contexual_mask*/,
               Has_targets>(tSrS, m_block, n_block);
         };
         CUTLASS_PRAGMA_NO_UNROLL
@@ -1121,6 +1147,7 @@ struct CollectiveMainloopBwdSm80 {
                 true /*Seqlenk_mask*/,
                 false /*Causal_mask*/,
                 Local,
+                false /*Contexual_mask*/,
                 Has_targets>(tSrS, m_block, n_block);
           };
           CUTLASS_PRAGMA_NO_UNROLL
@@ -1142,6 +1169,7 @@ struct CollectiveMainloopBwdSm80 {
             true /*Seqlenk_mask*/,
             Causal,
             Local,
+            false /*Contexual_mask*/,
             false /*Target_mask*/>(tSrS, m_block, n_block);
       };
       int const m_block_masking_max =
@@ -1165,6 +1193,7 @@ struct CollectiveMainloopBwdSm80 {
           true /*Seqlenk_mask*/,
           Causal && !SeparateMaskingIterations,
           Local && !SeparateMaskingIterations,
+          false /*Contexual_mask*/,
           false /*Target_mask*/>(tSrS, m_block, n_block);
     };
     CUTLASS_PRAGMA_NO_UNROLL
@@ -1179,6 +1208,7 @@ struct CollectiveMainloopBwdSm80 {
             true /*Seqlenk_mask*/,
             false /*Causal_mask*/,
             Local,
+            false /*Contexual_mask*/,
             false /*Target_mask*/>(tSrS, m_block, n_block);
       };
       CUTLASS_PRAGMA_NO_UNROLL

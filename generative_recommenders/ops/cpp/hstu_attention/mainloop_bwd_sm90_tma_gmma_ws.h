@@ -52,6 +52,7 @@ template <
     class ArchTag_,
     bool Causal,
     bool Local,
+    bool Contexual_mask,
     bool Jagged,
     bool Has_targets,
     bool Deterministic,
@@ -448,6 +449,8 @@ struct CollectiveMainloopBwdSm90 {
     ShapedQaccum const shape_dQaccum;
     StridedQaccum const stride_dQaccum;
     int const max_attn_len;
+    int const min_full_attn_seq_len;
+    int const contextual_seq_len;
     float const max_seq_len_inv;
     float const alpha;
     int const num_batch;
@@ -467,6 +470,8 @@ struct CollectiveMainloopBwdSm90 {
     TMA_K tma_load_K;
     TMA_V tma_load_V;
     int const max_attn_len;
+    int const min_full_attn_seq_len;
+    int const contextual_seq_len;
     float const max_seq_len_inv;
     float const alpha;
     int const num_batch;
@@ -522,6 +527,8 @@ struct CollectiveMainloopBwdSm90 {
         tma_load_K,
         tma_load_V,
         args.max_attn_len,
+        args.min_full_attn_seq_len,
+        args.contextual_seq_len,
         args.max_seq_len_inv,
         args.alpha,
         args.num_batch,
@@ -543,6 +550,7 @@ struct CollectiveMainloopBwdSm90 {
   CUTLASS_DEVICE
   cute::tuple<int, int> get_m_block_min_max(
       int const max_attn_len,
+      int const contextual_seq_len,
       int const uihlen,
       int const seqlen,
       int const n_block) {
@@ -560,17 +568,111 @@ struct CollectiveMainloopBwdSm90 {
     // uih part
     int m_block_max = cute::ceil_div(seqlen, kBlockM);
     if constexpr (Local) {
-      if (n_block >= cute::ceil_div(0, kBlockN)) {
-        m_block_max = std::min(
-            m_block_max,
-            cute::ceil_div((n_block + 1) * kBlockN + max_attn_len, kBlockM));
+      int local_m_block_max =
+          cute::ceil_div((n_block + 1) * kBlockN + max_attn_len, kBlockM);
+      if constexpr (Contexual_mask) {
+        // row contexual without sink
+        if (n_block * kBlockN < contextual_seq_len) {
+          local_m_block_max = std::max(
+              local_m_block_max,
+              cute::ceil_div(contextual_seq_len + max_attn_len, kBlockM));
+        }
       }
+      m_block_max = std::min(m_block_max, local_m_block_max);
     }
     int m_block_min = 0;
     if constexpr (Causal || Local) {
       m_block_min = std::max(m_block_min, (n_block * kBlockN) / kBlockM);
     }
     return {m_block_min, m_block_max};
+  }
+
+  CUTLASS_DEVICE
+  cute::tuple<int, int> get_full_m_block_min_max(
+      int const uihlen,
+      int const seqlen,
+      int const min_full_attn_seq_len,
+      int const m_block_max,
+      int const n_block) {
+    static constexpr int kBlockM = get<0>(TileShape_MNK{});
+    static constexpr int kBlockN = get<1>(TileShape_MNK{});
+    if constexpr (!Local) {
+      return {0, 0};
+    }
+    if constexpr (Has_targets) {
+      int n_idx_min = n_block * kBlockN;
+      if (n_idx_min >= uihlen) {
+        return {0, 0};
+      }
+    }
+    if constexpr (Local) {
+      int full_m_block_max = cute::ceil_div(seqlen, kBlockM);
+      int full_m_block_min =
+          std::max(m_block_max, (uihlen - min_full_attn_seq_len) / kBlockM);
+      return {full_m_block_min, full_m_block_max};
+    }
+    return {0, 0};
+  }
+
+  CUTLASS_DEVICE
+  int get_contexual_m_block_max(
+      int const uihlen,
+      int const contextual_seq_len,
+      int const m_block_min,
+      int const n_block) {
+    static constexpr int kBlockM = get<0>(TileShape_MNK{});
+    static constexpr int kBlockN = get<1>(TileShape_MNK{});
+    if constexpr (!Contexual_mask) {
+      return 0;
+    }
+    if constexpr (Has_targets) {
+      int n_idx_min = n_block * kBlockN;
+      if (n_idx_min >= uihlen) {
+        return 0;
+      }
+    }
+    if constexpr (Causal || Local) {
+      int contexual_m_block_max =
+          std::min(m_block_min, cute::ceil_div(contextual_seq_len, kBlockM));
+      return contexual_m_block_max;
+    }
+    return 0;
+  }
+
+  CUTLASS_DEVICE
+  int get_next_m_block(
+      int const m_block,
+      int const m_block_min,
+      int const m_block_max,
+      int const contexual_m_block_max,
+      int const full_m_block_min,
+      int const full_m_block_max) {
+    int const out_m_block = m_block + 1;
+    if constexpr (Contexual_mask || Local) {
+      if (out_m_block == m_block_max) {
+        if (contexual_m_block_max > 0) {
+          return 0;
+        }
+        if (full_m_block_max > full_m_block_min) {
+          return full_m_block_min;
+        }
+        return -1;
+      }
+      if (out_m_block == contexual_m_block_max) {
+        if (full_m_block_max > full_m_block_min) {
+          return full_m_block_min;
+        }
+        return -1;
+      }
+      if (out_m_block == full_m_block_max) {
+        return -1;
+      }
+      return out_m_block;
+    }
+    if (out_m_block == m_block_max) {
+      return -1;
+    }
+    return out_m_block;
   }
 
   template <typename SchedulerPrefetch, typename SharedStorage>
@@ -593,8 +695,24 @@ struct CollectiveMainloopBwdSm90 {
         return;
       }
     }
-    auto [m_block_min, m_block_max] = get_m_block_min_max(
-        params.max_attn_len, seqlen_info.uihlen, seqlen_info.seqlen, n_block);
+    auto m_block_min_max = get_m_block_min_max(
+        params.max_attn_len,
+        params.contextual_seq_len,
+        seqlen_info.uihlen,
+        seqlen_info.seqlen,
+        n_block);
+    int const m_block_min = get<0>(m_block_min_max);
+    int const m_block_max = get<1>(m_block_min_max);
+    auto full_m_block_min_max = get_full_m_block_min_max(
+        seqlen_info.uihlen,
+        seqlen_info.seqlen,
+        params.min_full_attn_seq_len,
+        m_block_max,
+        n_block);
+    int const full_m_block_min = get<0>(full_m_block_min_max);
+    int const full_m_block_max = get<1>(full_m_block_min_max);
+    int contexual_m_block_max = get_contexual_m_block_max(
+        seqlen_info.uihlen, params.contextual_seq_len, m_block_min, n_block);
 
     Tensor sQ = make_tensor(
         make_smem_ptr(shared_storage.tensors.mainloop.smem_q.data()),
@@ -687,6 +805,7 @@ struct CollectiveMainloopBwdSm90 {
     }
 
     int m_block = m_block_min;
+    int next_m_block = -1;
     int lane_predicate = cute::elect_one_sync();
 
     if (lane_predicate) {
@@ -704,6 +823,43 @@ struct CollectiveMainloopBwdSm90 {
     // cutlass::arch::NamedBarrier::sync(NumMmaThreads +
     // cutlass::NumThreadsPerWarp,
     // static_cast<uint32_t>(BwdNamedBarriers::KVEmpty) /*id*/);
+
+    auto load_step = [&](int m_block) {
+      // If Q and dO have the same number of stages, we can use the same
+      // pipeline state variable to reduce registers
+      PipelineState_dO smem_pipe_write_do_cur =
+          cute::conditional_return<Q_dO_same_stages>(
+              smem_pipe_write, smem_pipe_write_do);
+      pipeline_do.producer_acquire(smem_pipe_write_do_cur);
+      copy(
+          params.tma_load_dO.with(
+              *pipeline_do.producer_get_barrier(smem_pipe_write_do_cur),
+              mcast_mask_qdo,
+              TMA::CacheHintSm90::EVICT_LAST),
+          tdOgdO(_, m_block),
+          tdOsdO(_, smem_pipe_write_do_cur.index()));
+      if constexpr (!Q_dO_same_stages) {
+        ++smem_pipe_write_do;
+      }
+      ++smem_pipe_write;
+      next_m_block = get_next_m_block(
+          m_block,
+          m_block_min,
+          m_block_max,
+          contexual_m_block_max,
+          full_m_block_min,
+          full_m_block_max);
+      if (next_m_block != -1) {
+        pipeline_q.producer_acquire(smem_pipe_write);
+        copy(
+            params.tma_load_Q.with(
+                *pipeline_q.producer_get_barrier(smem_pipe_write),
+                mcast_mask_qdo,
+                TMA::CacheHintSm90::EVICT_LAST),
+            tQgQ(_, next_m_block),
+            tQsQ(_, smem_pipe_write.index()));
+      }
+    };
 
     if (lane_predicate) {
       // Copy K tile and V tile from GMEM to SMEM.
@@ -727,51 +883,32 @@ struct CollectiveMainloopBwdSm90 {
           tVsV);
 
 #pragma unroll(kHeadDim < 256 ? 2 : 1)
-      for (; m_block < m_block_max - 1; ++m_block) {
-        // If Q and dO have the same number of stages, we can use the same
-        // pipeline state variable to reduce registers
-        PipelineState_dO smem_pipe_write_do_cur =
-            cute::conditional_return<Q_dO_same_stages>(
-                smem_pipe_write, smem_pipe_write_do);
-        pipeline_do.producer_acquire(smem_pipe_write_do_cur);
-        copy(
-            params.tma_load_dO.with(
-                *pipeline_do.producer_get_barrier(smem_pipe_write_do_cur),
-                mcast_mask_qdo,
-                TMA::CacheHintSm90::EVICT_LAST),
-            tdOgdO(_, m_block),
-            tdOsdO(_, smem_pipe_write_do_cur.index()));
-        if constexpr (!Q_dO_same_stages) {
-          ++smem_pipe_write_do;
-        }
-        ++smem_pipe_write;
-        pipeline_q.producer_acquire(smem_pipe_write);
-        copy(
-            params.tma_load_Q.with(
-                *pipeline_q.producer_get_barrier(smem_pipe_write),
-                mcast_mask_qdo,
-                TMA::CacheHintSm90::EVICT_LAST),
-            tQgQ(_, m_block + 1),
-            tQsQ(_, smem_pipe_write.index()));
+      for (; m_block < m_block_max; ++m_block) {
+        load_step(m_block);
       }
     }
     scheduler_prefetch();
-    if (lane_predicate) {
-      PipelineState_dO smem_pipe_write_do_cur =
-          cute::conditional_return<Q_dO_same_stages>(
-              smem_pipe_write, smem_pipe_write_do);
-      pipeline_do.producer_acquire(smem_pipe_write_do_cur);
-      copy(
-          params.tma_load_dO.with(
-              *pipeline_do.producer_get_barrier(smem_pipe_write_do_cur),
-              mcast_mask_qdo,
-              TMA::CacheHintSm90::EVICT_LAST),
-          tdOgdO(_, m_block),
-          tdOsdO(_, smem_pipe_write_do_cur.index()));
-      if constexpr (!Q_dO_same_stages) {
-        ++smem_pipe_write_do;
+    m_block = next_m_block;
+    if constexpr (Contexual_mask) {
+      if (lane_predicate) {
+        if (m_block >= 0) {
+#pragma unroll(kHeadDim < 256 ? 2 : 1)
+          for (; m_block < contexual_m_block_max; ++m_block) {
+            load_step(m_block);
+          }
+        }
       }
-      ++smem_pipe_write;
+    }
+    m_block = next_m_block;
+    if constexpr (Local) {
+      if (lane_predicate) {
+        if (m_block >= 0) {
+#pragma unroll(kHeadDim < 256 ? 2 : 1)
+          for (; m_block < full_m_block_max; ++m_block) {
+            load_step(m_block);
+          }
+        }
+      }
     }
     if constexpr (Q_dO_same_stages) {
       smem_pipe_write_do = smem_pipe_write;
@@ -830,14 +967,30 @@ struct CollectiveMainloopBwdSm90 {
     auto [n_block, bidh, bidb] = block_coord;
     SeqlenInfo_t seqlen_info{
         bidb, get<0>(params.shape_Q), params.seq_offsets, params.num_targets};
-    auto [m_block_min, m_block_max] = get_m_block_min_max(
-        params.max_attn_len, seqlen_info.uihlen, seqlen_info.seqlen, n_block);
-    // It's possible to have m_block_max <= m_block_min. Exit early
-    if constexpr (Causal || Local || Jagged) {
-      if (m_block_max <= m_block_min) {
+    if constexpr (Jagged) {
+      static constexpr int kBlockN = get<1>(TileShape_MNK{});
+      if (n_block * kBlockN >= seqlen_info.seqlen) {
         return;
       }
     }
+    auto m_block_min_max = get_m_block_min_max(
+        params.max_attn_len,
+        params.contextual_seq_len,
+        seqlen_info.uihlen,
+        seqlen_info.seqlen,
+        n_block);
+    int const m_block_min = get<0>(m_block_min_max);
+    int const m_block_max = get<1>(m_block_min_max);
+    auto full_m_block_min_max = get_full_m_block_min_max(
+        seqlen_info.uihlen,
+        seqlen_info.seqlen,
+        params.min_full_attn_seq_len,
+        m_block_max,
+        n_block);
+    int const full_m_block_min = get<0>(full_m_block_min_max);
+    int const full_m_block_max = get<1>(full_m_block_min_max);
+    int contexual_m_block_max = get_contexual_m_block_max(
+        seqlen_info.uihlen, params.contextual_seq_len, m_block_min, n_block);
 
     Tensor sdQ = make_tensor(
         make_smem_ptr(shared_storage.tensors.mainloop.smem_dqacc.data()),
@@ -864,9 +1017,8 @@ struct CollectiveMainloopBwdSm90 {
         !Deterministic ? nullptr : params.dq_semaphore + bidb * num_head + bidh;
     using Barrier = cutlass::GenericBarrier<cutlass::detail::SyncwarpSync>;
     bool const lane_predicate = cute::elect_one_sync();
-    int m_block = m_block_min;
-#pragma unroll 2
-    for (; m_block < m_block_max; ++m_block) {
+
+    auto store_dq_step = [&](int m_block) {
       if constexpr (Deterministic) {
         Barrier::wait_eq(
             lock_ptr,
@@ -907,13 +1059,31 @@ struct CollectiveMainloopBwdSm90 {
             threadIdx.x % cutlass::NumThreadsPerWarp,
             m_block * num_batch * num_head);
       }
+    };
+
+#pragma unroll 2
+    for (int m_block = m_block_min; m_block < m_block_max; ++m_block) {
+      store_dq_step(m_block);
+    }
+    if constexpr (Contexual_mask) {
+#pragma unroll 2
+      for (int m_block = 0; m_block < contexual_m_block_max; ++m_block) {
+        store_dq_step(m_block);
+      }
+    }
+    if constexpr (Local) {
+#pragma unroll 2
+      for (int m_block = full_m_block_min; m_block < full_m_block_max;
+           ++m_block) {
+        store_dq_step(m_block);
+      }
     }
     if constexpr (Local && Deterministic) {
       constexpr int kBlockM = get<0>(TileShape_MNK{});
       int const m_block_global_max =
           cute::ceil_div(seqlen_info.seqlen, kBlockM);
 #pragma unroll 2
-      for (; m_block < m_block_global_max; ++m_block) {
+      for (int m_block = m_block_max; m_block < m_block_global_max; ++m_block) {
         Barrier::arrive_inc(
             lock_ptr,
             threadIdx.x % cutlass::NumThreadsPerWarp,
@@ -969,8 +1139,24 @@ struct CollectiveMainloopBwdSm90 {
         return false;
       }
     }
-    auto [m_block_min, m_block_max] = get_m_block_min_max(
-        params.max_attn_len, seqlen_info.uihlen, seqlen_info.seqlen, n_block);
+    auto m_block_min_max = get_m_block_min_max(
+        params.max_attn_len,
+        params.contextual_seq_len,
+        seqlen_info.uihlen,
+        seqlen_info.seqlen,
+        n_block);
+    int const m_block_min = get<0>(m_block_min_max);
+    int const m_block_max = get<1>(m_block_min_max);
+    auto full_m_block_min_max = get_full_m_block_min_max(
+        seqlen_info.uihlen,
+        seqlen_info.seqlen,
+        params.min_full_attn_seq_len,
+        m_block_max,
+        n_block);
+    int const full_m_block_min = get<0>(full_m_block_min_max);
+    int const full_m_block_max = get<1>(full_m_block_min_max);
+    int contexual_m_block_max = get_contexual_m_block_max(
+        seqlen_info.uihlen, params.contextual_seq_len, m_block_min, n_block);
 
     Tensor sQ = make_tensor(
         make_smem_ptr(shared_storage.tensors.mainloop.smem_q.data()),
@@ -1115,7 +1301,12 @@ struct CollectiveMainloopBwdSm90 {
     // printf("\n"); print(tdQgdQaccum); printf("\n"); }
 
     flash::Mask<kBlockM, kBlockN, TiledMmaSdP, SdP_swapAB> mask(
-        thread_idx, seqlen, params.max_attn_len, seqlen_info.uihlen);
+        thread_idx,
+        seqlen,
+        params.max_attn_len,
+        params.min_full_attn_seq_len,
+        params.contextual_seq_len,
+        seqlen_info.uihlen);
 
     int m_block = m_block_min;
 
@@ -1468,8 +1659,9 @@ struct CollectiveMainloopBwdSm90 {
           mask.template apply<
               true /*Seqlenq_mask*/,
               true /*Seqlenk_mask*/,
-              false, /*Causal*/
-              false, /*Local*/
+              false /*Causal*/,
+              false /*Local*/,
+              false /*Contexual_mask*/,
               Has_targets /*Target_mask*/>(tSrS, m_block, n_block);
         };
         CUTLASS_PRAGMA_NO_UNROLL
@@ -1489,6 +1681,7 @@ struct CollectiveMainloopBwdSm90 {
                 true /*Seqlenk_mask*/,
                 Causal,
                 Local,
+                Contexual_mask,
                 Has_targets /*Target_mask*/>(tSrS, m_block, n_block);
           };
           int const m_block_masking_max =
@@ -1500,23 +1693,42 @@ struct CollectiveMainloopBwdSm90 {
           }
         }
 
-        int const m_block_max_before_local_mask =
-            !Local || !SeparateMaskingIterations
-            ? m_block_max
-            : std::min(
-                  m_block_max,
-                  (n_block * kBlockN + params.max_attn_len) / kBlockM);
         auto mask_fn = [&](auto& tSrS, int m_block) {
           mask.template apply<
               true /*Seqlenq_mask*/,
               true /*Seqlenk_mask*/,
               Causal && !SeparateMaskingIterations,
               Local && !SeparateMaskingIterations,
+              Contexual_mask,
               Has_targets /*Target_mask*/>(tSrS, m_block, n_block);
         };
-        CUTLASS_PRAGMA_NO_UNROLL
-        for (; m_block < m_block_max_before_local_mask; ++m_block) {
-          bwd_step(m_block, mask_fn);
+        if constexpr (SeparateMaskingIterations) {
+          int const m_block_max_before_local_mask =
+              !Local || !SeparateMaskingIterations
+              ? m_block_max
+              : std::min(
+                    m_block_max,
+                    (n_block * kBlockN + params.max_attn_len) / kBlockM);
+          CUTLASS_PRAGMA_NO_UNROLL
+          for (; m_block < m_block_max_before_local_mask; ++m_block) {
+            bwd_step(m_block, mask_fn);
+          }
+        } else {
+          int num_m_block = m_block_max - m_block_min;
+          CUTLASS_PRAGMA_NO_UNROLL
+          for (int i = 0; i < num_m_block + full_m_block_max -
+                   full_m_block_min + contexual_m_block_max;
+               ++i) {
+            if (i < num_m_block) {
+              m_block = m_block_min + i;
+            } else if (i < num_m_block + contexual_m_block_max) {
+              m_block = i - num_m_block;
+            } else {
+              m_block =
+                  i - num_m_block - contexual_m_block_max + full_m_block_min;
+            }
+            bwd_step(m_block, mask_fn);
+          }
         }
 
         if constexpr (Local && SeparateMaskingIterations) {
@@ -1526,10 +1738,43 @@ struct CollectiveMainloopBwdSm90 {
                 true /*Seqlenk_mask*/,
                 false /*Causal_mask*/,
                 Local,
+                Contexual_mask,
                 Has_targets /*Target_mask*/>(tSrS, m_block, n_block);
           };
           CUTLASS_PRAGMA_NO_UNROLL
           for (; m_block < m_block_max; ++m_block) {
+            bwd_step(m_block, mask_fn);
+          }
+        }
+        if constexpr (Contexual_mask && SeparateMaskingIterations) {
+          auto mask_fn = [&](auto& tSrS, int m_block) {
+            mask.template apply<
+                true /*Seqlenq_mask*/,
+                true /*Seqlenk_mask*/,
+                Causal /*Causal_mask*/,
+                Local /*Local_mask*/,
+                Contexual_mask,
+                Has_targets>(tSrS, m_block, n_block);
+          };
+          CUTLASS_PRAGMA_NO_UNROLL
+          for (m_block = 0; m_block < contexual_m_block_max; ++m_block) {
+            bwd_step(m_block, mask_fn);
+          }
+        }
+
+        if constexpr (Local && SeparateMaskingIterations) {
+          auto mask_fn = [&](auto& tSrS, int m_block) {
+            mask.template apply<
+                true /*Seqlenq_mask*/,
+                true /*Seqlenk_mask*/,
+                false /*Causal_mask*/,
+                Local,
+                Contexual_mask,
+                Has_targets>(tSrS, m_block, n_block);
+          };
+          CUTLASS_PRAGMA_NO_UNROLL
+          for (m_block = full_m_block_min; m_block < full_m_block_max;
+               ++m_block) {
             bwd_step(m_block, mask_fn);
           }
         }
@@ -1550,6 +1795,7 @@ struct CollectiveMainloopBwdSm90 {
             true /*Seqlenk_mask*/,
             Causal,
             Local,
+            Contexual_mask,
             false /*Target_mask*/>(tSrS, m_block, n_block);
       };
       static constexpr int kBlockM = get<0>(TileShape_MNK{});
@@ -1561,23 +1807,41 @@ struct CollectiveMainloopBwdSm90 {
       }
     }
 
-    int const m_block_max_before_local_mask =
-        !Local || !SeparateMaskingIterations
-        ? m_block_max
-        : std::min(
-              m_block_max, (n_block * kBlockN + params.max_attn_len) / kBlockM);
-
     auto mask_fn = [&](auto& tSrS, int m_block) {
       mask.template apply<
           true /*Seqlenq_mask*/,
           true /*Seqlenk_mask*/,
           Causal && !SeparateMaskingIterations,
           Local && !SeparateMaskingIterations,
+          Contexual_mask,
           false /*Target_mask*/>(tSrS, m_block, n_block);
     };
-    CUTLASS_PRAGMA_NO_UNROLL
-    for (; m_block < m_block_max_before_local_mask; ++m_block) {
-      bwd_step(m_block, mask_fn);
+    if constexpr (SeparateMaskingIterations) {
+      int const m_block_max_before_local_mask =
+          !Local || !SeparateMaskingIterations
+          ? m_block_max
+          : std::min(
+                m_block_max,
+                (n_block * kBlockN + params.max_attn_len) / kBlockM);
+      CUTLASS_PRAGMA_NO_UNROLL
+      for (; m_block < m_block_max_before_local_mask; ++m_block) {
+        bwd_step(m_block, mask_fn);
+      }
+    } else {
+      int num_m_block = m_block_max - m_block_min;
+      CUTLASS_PRAGMA_NO_UNROLL
+      for (int i = 0; i < num_m_block + full_m_block_max - full_m_block_min +
+               contexual_m_block_max;
+           ++i) {
+        if (i < num_m_block) {
+          m_block = m_block_min + i;
+        } else if (i < num_m_block + contexual_m_block_max) {
+          m_block = i - num_m_block;
+        } else {
+          m_block = i - num_m_block - contexual_m_block_max + full_m_block_min;
+        }
+        bwd_step(m_block, mask_fn);
+      }
     }
 
     if constexpr (Local && SeparateMaskingIterations) {
@@ -1587,10 +1851,42 @@ struct CollectiveMainloopBwdSm90 {
             true /*Seqlenk_mask*/,
             false /*Causal_mask*/,
             Local,
+            Contexual_mask,
             false /*Target_mask*/>(tSrS, m_block, n_block);
       };
       CUTLASS_PRAGMA_NO_UNROLL
       for (; m_block < m_block_max; ++m_block) {
+        bwd_step(m_block, mask_fn);
+      }
+    }
+    if constexpr (Contexual_mask && SeparateMaskingIterations) {
+      auto mask_fn = [&](auto& tSrS, int m_block) {
+        mask.template apply<
+            true /*Seqlenq_mask*/,
+            true /*Seqlenk_mask*/,
+            Causal /*Causal_mask*/,
+            Local /*Local_mask*/,
+            Contexual_mask,
+            false /*Target_mask*/>(tSrS, m_block, n_block);
+      };
+      CUTLASS_PRAGMA_NO_UNROLL
+      for (m_block = 0; m_block < contexual_m_block_max; ++m_block) {
+        bwd_step(m_block, mask_fn);
+      }
+    }
+
+    if constexpr (Local && SeparateMaskingIterations) {
+      auto mask_fn = [&](auto& tSrS, int m_block) {
+        mask.template apply<
+            true /*Seqlenq_mask*/,
+            true /*Seqlenk_mask*/,
+            false /*Causal_mask*/,
+            Local,
+            Contexual_mask,
+            false /*Target_mask*/>(tSrS, m_block, n_block);
+      };
+      CUTLASS_PRAGMA_NO_UNROLL
+      for (m_block = full_m_block_min; m_block < full_m_block_max; ++m_block) {
         bwd_step(m_block, mask_fn);
       }
     }
