@@ -47,6 +47,7 @@ template <
     typename ElementOut,
     bool Causal,
     bool Local,
+    bool Contexual_mask,
     bool Jagged,
     bool Has_targets,
     bool V_colmajor>
@@ -108,6 +109,7 @@ void run_flash_fwd(Flash_fwd_params& params, cudaStream_t stream) {
           cutlass::arch::Sm90,
           Causal,
           Local,
+          Contexual_mask,
           Jagged,
           Has_targets,
           Mma1_is_RS,
@@ -122,6 +124,7 @@ void run_flash_fwd(Flash_fwd_params& params, cudaStream_t stream) {
           cutlass::arch::Sm80,
           Causal,
           Local,
+          Contexual_mask,
           Jagged,
           Has_targets>>;
   using CollectiveEpilogue = flash::CollectiveEpilogueFwd<
@@ -213,6 +216,8 @@ void run_flash_fwd(Flash_fwd_params& params, cudaStream_t stream) {
       1.0f / params.max_seq_len,
       params.alpha,
       params.max_attn_len,
+      params.min_full_attn_seq_len,
+      params.contextual_seq_len,
       params.seq_offsets,
       params.num_targets,
   };
@@ -302,46 +307,49 @@ void run_mha_fwd_(Flash_fwd_params& params, cudaStream_t stream) {
       static constexpr bool V_colmajor = V_colmajor_ && sizeof(T) == 1;
       BOOL_SWITCH(params.num_targets, Has_targets, [&] {
         BOOL_SWITCH(params.seq_offsets, Jagged, [&] {
-          // Only needed here to decide if we should use cluster
-          static constexpr int kBlockM = Arch >= 90
-              ? std::get<0>(tile_size_fwd_sm90(
-                    kHeadDim,
-                    Causal,
-                    Local,
-                    sizeof(T) /*element_size*/,
-                    V_colmajor))
-              : 128;
+          BOOL_SWITCH(params.has_contexual_mask, Contexual_mask, [&] {
+            // Only needed here to decide if we should use cluster
+            static constexpr int kBlockM = Arch >= 90
+                ? std::get<0>(tile_size_fwd_sm90(
+                      kHeadDim,
+                      Causal,
+                      Local,
+                      sizeof(T) /*element_size*/,
+                      V_colmajor))
+                : 128;
 #ifdef HSTU_FLASH_ATTN_DEBUG_INFO
-          std::printf(
-              "[flash_fwd_launch_template] Local: (%d), Jagged: (%d), Has_targets: (%d), Causal: (%d), max_seq_len: (%d), kHeadDim: (%d)\n",
-              Local,
-              Jagged,
-              Has_targets,
-              Causal,
-              params.max_seq_len,
-              kHeadDim);
+            std::printf(
+                "[flash_fwd_launch_template] Local: (%d), Jagged: (%d), Has_targets: (%d), Causal: (%d), max_seq_len: (%d), kHeadDim: (%d)\n",
+                Local,
+                Jagged,
+                Has_targets,
+                Causal,
+                params.max_seq_len,
+                kHeadDim);
 #endif
-          static constexpr bool Enable_cluster = Arch >= 90 &&
-              (sizeof(T) == 2 ? (kHeadDim >= 128) : (kHeadDim == 192)) &&
-              !Causal && !Local && !Jagged;
-          CLUSTER_SWITCH(
-              cutlass::ceil_div(params.max_seq_len, kBlockM) % 2 == 0,
-              Use_cluster,
-              [&] {
-                static constexpr int ClusterM =
-                    Enable_cluster && Use_cluster ? 2 : 1;
-                run_flash_fwd<
-                    Arch,
-                    kHeadDim,
-                    ClusterM,
-                    T,
-                    T_out,
-                    Causal,
-                    Local,
-                    Jagged,
-                    Has_targets,
-                    V_colmajor>(params, stream);
-              });
+            static constexpr bool Enable_cluster = Arch >= 90 &&
+                (sizeof(T) == 2 ? (kHeadDim >= 128) : (kHeadDim == 192)) &&
+                !Causal && !Local && !Jagged;
+            CLUSTER_SWITCH(
+                cutlass::ceil_div(params.max_seq_len, kBlockM) % 2 == 0,
+                Use_cluster,
+                [&] {
+                  static constexpr int ClusterM =
+                      Enable_cluster && Use_cluster ? 2 : 1;
+                  run_flash_fwd<
+                      Arch,
+                      kHeadDim,
+                      ClusterM,
+                      T,
+                      T_out,
+                      Causal,
+                      Local,
+                      Contexual_mask,
+                      Jagged,
+                      Has_targets,
+                      V_colmajor>(params, stream);
+                });
+          });
         });
       });
     });

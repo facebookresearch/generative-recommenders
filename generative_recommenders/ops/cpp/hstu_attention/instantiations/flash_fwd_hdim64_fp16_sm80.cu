@@ -25,8 +25,5 @@
 template void run_mha_fwd_<80, cutlass::half_t, 64>(
     Flash_fwd_params& params,
     cudaStream_t stream);
-template void run_mha_fwd_<86, cutlass::half_t, 64>(
-    Flash_fwd_params& params,
-    cudaStream_t stream);
 #endif
 #endif

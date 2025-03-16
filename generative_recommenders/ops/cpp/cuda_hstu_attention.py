@@ -34,6 +34,7 @@ class HSTUFlashAttentionFunction(torch.autograd.Function):
         causal: bool,
         num_targets: Optional[torch.Tensor],
         max_attn_len: int = 0,
+        min_full_attn_seq_len: int = 0,
         contextual_seq_len: int = 0,
         q_descale: Optional[torch.Tensor] = None,
         k_descale: Optional[torch.Tensor] = None,
@@ -52,6 +53,7 @@ class HSTUFlashAttentionFunction(torch.autograd.Function):
             causal,
             num_targets,
             max_attn_len,
+            min_full_attn_seq_len,
             contextual_seq_len,
             q_descale,
             k_descale,
@@ -74,6 +76,7 @@ class HSTUFlashAttentionFunction(torch.autograd.Function):
         ctx.alpha = alpha
         ctx.causal = causal
         ctx.max_attn_len = max_attn_len
+        ctx.min_full_attn_seq_len = min_full_attn_seq_len
         ctx.contextual_seq_len = contextual_seq_len
         ctx.deterministic = deterministic
         ctx.sm_margin = sm_margin
@@ -96,6 +99,7 @@ class HSTUFlashAttentionFunction(torch.autograd.Function):
         torch.Tensor,
         torch.Tensor,
         torch.Tensor,
+        None,
         None,
         None,
         None,
@@ -149,6 +153,7 @@ class HSTUFlashAttentionFunction(torch.autograd.Function):
             ctx.causal,
             num_targets,
             ctx.max_attn_len,
+            ctx.min_full_attn_seq_len,
             ctx.contextual_seq_len,
             ctx.sort_by_length,
             ctx.deterministic,
@@ -160,6 +165,7 @@ class HSTUFlashAttentionFunction(torch.autograd.Function):
             dq,
             dk,
             dv,
+            None,
             None,
             None,
             None,
@@ -184,6 +190,7 @@ def cuda_hstu_mha(
     causal: bool = False,
     num_targets: Optional[torch.Tensor] = None,
     max_attn_len: int = 0,
+    min_full_attn_seq_len: int = 0,
     contextual_seq_len: int = 0,
     q_descale: Optional[torch.Tensor] = None,
     k_descale: Optional[torch.Tensor] = None,
@@ -206,6 +213,7 @@ def cuda_hstu_mha(
         causal,
         num_targets,
         max_attn_len,
+        min_full_attn_seq_len,
         contextual_seq_len,
         q_descale,
         k_descale,
