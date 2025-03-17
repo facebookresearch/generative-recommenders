@@ -92,6 +92,7 @@ class _HSTUPreprocessAndAttentionFunction(torch.autograd.Function):
             True,  # causal
             num_targets,
             max_attn_len,
+            full_attn_size,
             contextual_seq_len,
             None,  # q_descale
             None,  # k_descale
@@ -233,6 +234,7 @@ class _HSTUPreprocessAndAttentionFunction(torch.autograd.Function):
             True,  # causal
             num_targets,
             ctx.max_attn_len,
+            ctx.full_attn_size,
             ctx.contextual_seq_len,
             ctx.sort_by_length,
             False,  # deterministic
