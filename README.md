@@ -21,7 +21,7 @@ We have created a DLRM model using HSTU and have developed benchmarks for both t
 #### Run model training with 4 GPUs
 
 ```bash
-LOCAL_WORLD_SIZE=4 WORLD_SIZE=4 python3 generative_recommenders/dlrm_v3/trainer/train_ranker.py --dataset debug --mode train
+LOCAL_WORLD_SIZE=4 WORLD_SIZE=4 python3 generative_recommenders/dlrm_v3/train/train_ranker.py --dataset debug --mode train
 ```
 
 #### Run model inference with 4 GPUs
