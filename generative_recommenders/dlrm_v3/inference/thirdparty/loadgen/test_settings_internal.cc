@@ -737,7 +737,7 @@ int TestSettings::FromConfig(const std::string &path, const std::string &model,
     server_max_async_queries = int(val);
 
   // keys that apply to Offline
-  lookupkv(model, "Offline", "target_qps", 0, &offline_expected_qps);
+  lookupkv(model, "Offline", "target_qps", nullptr, &offline_expected_qps);
 
   return 0;
 }
