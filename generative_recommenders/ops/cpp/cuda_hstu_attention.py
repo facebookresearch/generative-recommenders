@@ -16,8 +16,11 @@
 
 from typing import Optional, Tuple
 
-import hstu_flash_attention  # @manual  # pyre-ignore[21]
 import torch
+
+torch.ops.load_library(
+    "//generative_recommenders/ops/cpp/hstu_attention:hstu_flash_attention"
+)
 
 
 class HSTUFlashAttentionFunction(torch.autograd.Function):
@@ -43,7 +46,7 @@ class HSTUFlashAttentionFunction(torch.autograd.Function):
         deterministic: bool = False,
         sm_margin: int = 0,
     ) -> torch.Tensor:
-        out = hstu_flash_attention.forward(
+        out = torch.ops.hstu.hstu_mha_fwd(
             max_seq_len,
             alpha,
             q,
@@ -139,7 +142,7 @@ class HSTUFlashAttentionFunction(torch.autograd.Function):
         dk = torch.empty_like(k)
         dv = torch.empty_like(v)
 
-        dq, dk, dv = hstu_flash_attention.backward(
+        dq, dk, dv = torch.ops.hstu.hstu_mha_bwd(
             ctx.max_seq_len,
             ctx.alpha,
             dout,
