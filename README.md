@@ -1,6 +1,6 @@
 # Generative Recommenders
 
-Repository hosting code for ``Actions Speak Louder than Words: Trillion-Parameter Sequential Transducers for Generative Recommendations`` ([ICML'24](https://dl.acm.org/doi/10.5555/3692070.3694484)) and related code, where we demonstrate that the ubiquitously used classical deep learning recommendation paradigm (DLRMs) can be reformulated as a generative modeling problem (Generative Recommenders or GRs) to overcome known compute scaling bottlenecks, propose efficient algorithms such as HSTU and M-FALCON to accelerate training and inference for large-scale sequential models by 10x-1000x, and demonstrate scaling law for the first-time in deployed, billion-user scale recommendation systems.
+Repository hosting code for ``Actions Speak Louder than Words: Trillion-Parameter Sequential Transducers for Generative Recommendations`` ([ICML'24 paper](https://proceedings.mlr.press/v235/zhai24a.html)) and related code, where we demonstrate that the ubiquitously used classical deep learning recommendation paradigm (DLRMs) can be reformulated as a generative modeling problem (Generative Recommenders or GRs) to overcome known compute scaling bottlenecks, propose efficient algorithms such as HSTU and M-FALCON to accelerate training and inference for large-scale sequential models by 10x-1000x, and demonstrate scaling law for the first-time in deployed, billion-user scale recommendation systems.
 
 ## Getting started
 
@@ -16,25 +16,9 @@ Alternatively, you can manually install PyTorch based on official instructions. 
 pip3 install gin-config pandas fbgemm_gpu torchrec tensorboard
 ```
 
-We have created a DLRM model using HSTU and have developed benchmarks for both training and inference.
+## Experiments
 
-#### Run model training with 4 GPUs
-
-```bash
-LOCAL_WORLD_SIZE=4 WORLD_SIZE=4 python3 generative_recommenders/dlrm_v3/train/train_ranker.py --dataset debug --mode train
-```
-
-#### Run model inference with 4 GPUs
-
-```bash
-git clone --recurse-submodules https://github.com/mlcommons/inference.git mlperf_inference
-cd mlperf_inference/loadgen
-CFLAGS="-std=c++14 -O3" python -m pip install .
-
-LOCAL_WORLD_SIZE=4 WORLD_SIZE=4 python3 generative_recommenders/dlrm_v3/inference/main.py --dataset debug
-```
-
-## Paper experiments
+### Public Experiments
 
 To reproduce the public experiments in our paper (traditional sequential recommender setting, Section 4.1.1) on MovieLens and Amazon Reviews in the paper, please follow these steps:
 
@@ -97,9 +81,9 @@ replaced with sampled softmax losses proposed in [Revisiting Neural Retrieval on
 The ``BERT4Rec`` and ``GRU4Rec`` rows are based on results reported by [Turning Dross Into Gold Loss: is BERT4Rec really better than SASRec?](https://arxiv.org/abs/2309.07602) -
 note that the comparison slightly favors these two, due to them using full negatives whereas the other rows used 128/512 sampled negatives. The ``HSTU`` and ``HSTU-large`` rows are based on [Actions Speak Louder than Words: Trillion-Parameter Sequential Transducers for Generative Recommendations](https://arxiv.org/abs/2402.17152); in particular, HSTU rows utilize identical configurations as SASRec. ``HSTU`` and ``HSTU-large`` results can be reproduced with ``configs/*/hstu-*-final.gin``.
 
+### Synthetic Dataset / MovieLens-3B
 
-#### Use synthetic dataset MovieLens-3B
-We support generating synthetic dataset with fractal expansion introduced in https://arxiv.org/abs/1901.08910. This allows us to expand the current 20 million real-world ratings from ML-20M to 3 billion.
+We support generating synthetic dataset with fractal expansion introduced in https://arxiv.org/abs/1901.08910. This allows us to expand the current 20 million real-world ratings in ML-20M to 3 billion.
 
 To download the pre-generated synthetic dataset:
 
@@ -116,14 +100,32 @@ To generate the synthetic dataset on your own:
 python3 run_fractal_expansion.py --input-csv-file tmp/ml-20m/ratings.csv --write-dataset True --output-prefix tmp/ml-3b/
 ```
 
-## Efficiency experiments
+### Efficiency experiments
 
-``ops/triton`` currently contains triton kernels needed for efficiency experiments. ``ops/cpp`` contains efficient CUDA kernels. In particular, ``ops/cpp/hstu_attention`` contains the attention implementation based on [FlashAttention V3](https://github.com/Dao-AILab/flash-attention) with state-of-the-art efficiency on H100 GPUs.
+``ops/triton`` contains triton kernels needed for efficiency experiments. ``ops/cpp`` contains efficient CUDA kernels. In particular, ``ops/cpp/hstu_attention`` contains the attention implementation based on [FlashAttention V3](https://github.com/Dao-AILab/flash-attention) with state-of-the-art efficiency on H100 GPUs.
 
+## DLRM-v3
+
+We have created a DLRM model using HSTU and have developed benchmarks for both training and inference to faciliate production RecSys use cases.
+
+#### Run model training with 4 GPUs
+
+```bash
+LOCAL_WORLD_SIZE=4 WORLD_SIZE=4 python3 generative_recommenders/dlrm_v3/train/train_ranker.py --dataset debug --mode train
+```
+
+#### Run model inference with 4 GPUs
+
+```bash
+git clone --recurse-submodules https://github.com/mlcommons/inference.git mlperf_inference
+cd mlperf_inference/loadgen
+CFLAGS="-std=c++14 -O3" python -m pip install .
+
+LOCAL_WORLD_SIZE=4 WORLD_SIZE=4 python3 generative_recommenders/dlrm_v3/inference/main.py --dataset debug
+```
 
 ## License
 This codebase is Apache 2.0 licensed, as found in the [LICENSE](LICENSE) file.
-
 
 ## Contributors
 The overall project is made possible thanks to the joint work from many technical contributors (listed in alphabetical order):
