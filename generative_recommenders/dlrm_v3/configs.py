@@ -35,7 +35,7 @@ def get_hstu_configs(dataset: str = "debug") -> DlrmHSTUConfig:
         hstu_embedding_table_dim=256,
         hstu_transducer_embedding_dim=512,
         hstu_group_norm=True,
-        hstu_input_dropout_rate=0.2,
+        hstu_input_dropout_ratio=0.2,
         hstu_linear_dropout_rate=0.1,
         causal_multitask_weights=0.2,
     )

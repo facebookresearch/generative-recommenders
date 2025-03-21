@@ -73,7 +73,7 @@ class DlrmHSTUConfig:
     hstu_embedding_table_dim: int = 192
     hstu_transducer_embedding_dim: int = 0
     hstu_group_norm: bool = False
-    hstu_input_dropout_rate: float = 0.2
+    hstu_input_dropout_ratio: float = 0.2
     hstu_linear_dropout_rate: float = 0.2
     contextual_feature_to_max_length: Dict[str, int] = field(default_factory=dict)
     contextual_feature_to_min_uih_length: Dict[str, int] = field(default_factory=dict)
@@ -220,7 +220,7 @@ class DlrmHSTU(HammerModule):
             stu_module=stu_module,
             input_preprocessor=preprocessor,
             output_postprocessor=postprocessor,
-            input_dropout_ratio=hstu_configs.hstu_input_dropout_rate,
+            input_dropout_ratio=hstu_configs.hstu_input_dropout_ratio,
             positional_encoder=positional_encoder,
             is_inference=self._is_inference,
             return_full_embeddings=False,
