@@ -19,13 +19,13 @@
 from typing import Optional, Tuple
 
 import torch
+from generative_recommenders.ops.triton.triton_addmm import (
+    triton_addmm_bwd,
+    triton_addmm_fwd,
+)
 from generative_recommenders.ops.triton.triton_hstu_attention import (
     triton_hstu_attention_bwd,
     triton_hstu_attention_fwd,
-)
-from generative_recommenders.ops.triton.triton_hstu_linear import (
-    triton_addmm_bwd,
-    triton_addmm_fwd,
 )
 from generative_recommenders.ops.triton.triton_layer_norm import (
     triton_weighted_layer_norm_bwd,

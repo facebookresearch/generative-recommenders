@@ -22,7 +22,7 @@ import hstu_flash_attention  # @manual  # pyre-ignore[21]
 
 import torch
 
-from generative_recommenders.ops.triton.triton_hstu_linear import (
+from generative_recommenders.ops.triton.triton_addmm import (
     triton_addmm_bwd,
     triton_addmm_fwd,
 )

@@ -23,7 +23,7 @@ try:
 except ImportError:
     pass
 from generative_recommenders.common import HammerKernel
-from generative_recommenders.ops.triton.triton_hstu_linear import triton_addmm
+from generative_recommenders.ops.triton.triton_addmm import triton_addmm
 
 
 def addmm(
