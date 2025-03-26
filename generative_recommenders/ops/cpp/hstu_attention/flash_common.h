@@ -123,4 +123,42 @@ std::vector<at::Tensor> hstu_mha_bwd(
     bool sort_by_length,
     bool const deterministic,
     int64_t const sm_margin);
+
+at::Tensor hstu_mha_fwd_dummy(
+    int64_t max_seq_len,
+    double alpha,
+    at::Tensor& q, // (b, s, h, d) or (total_s, h, d)
+    at::Tensor& k, // (b, s, h, d) or (total_s, h, d)
+    at::Tensor& v, // (b, s, h, d) or (total_s, h, d)
+    const std::optional<at::Tensor>& seq_offsets,
+    bool causal,
+    const std::optional<at::Tensor>& num_targets,
+    int64_t max_attn_len,
+    int64_t min_full_attn_seq_len,
+    int64_t contextual_seq_len,
+    const std::optional<at::Tensor>& q_descale, // (b, h_k), not (b, h)
+    const std::optional<at::Tensor>& k_descale, // (b, h_k)
+    const std::optional<at::Tensor>& v_descale, // (b, h_k)
+    const int64_t sm_margin);
+
+std::vector<at::Tensor> hstu_mha_bwd_dummy(
+    int64_t max_seq_len,
+    double alpha,
+    at::Tensor& dout,
+    at::Tensor& q,
+    at::Tensor& k,
+    at::Tensor& v,
+    at::Tensor& dq,
+    at::Tensor& dk,
+    at::Tensor& dv,
+    const std::optional<at::Tensor>& seq_offsets,
+    bool causal,
+    const std::optional<at::Tensor>& num_targets,
+    int64_t max_attn_len,
+    int64_t min_full_attn_seq_len,
+    int64_t contextual_seq_len,
+    bool sort_by_length,
+    bool const deterministic,
+    int64_t const sm_margin);
+
 } // namespace hstu
