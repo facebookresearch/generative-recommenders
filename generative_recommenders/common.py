@@ -241,11 +241,11 @@ def switch_to_contiguous_if_needed(x: torch.Tensor) -> torch.Tensor:
 @torch.fx.wrap
 def prev_power_of_2(x: int) -> int:
     if torch.compiler.is_compiling():
-        # Re-write to make Dynamo happy
-        x_tensor = torch.scalar_tensor(x, dtype=torch.int64)  # type: ignore[arg-type]
-        x_tensor_orig = x_tensor.clone()
-        out = triton.next_power_of_2(x_tensor)  # type: ignore[arg-type]
-        return int(torch.where(torch.lt(x_tensor_orig, out), out // 2, out).item())  # type: ignore[return-value]
+        m = 0
+        while x > 0:
+            m = x
+            x = x & ((~x) + 1) ^ x
+        return m
     else:
         out = triton.next_power_of_2(x)
         return out // 2 if out > x else out
