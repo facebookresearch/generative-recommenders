@@ -82,4 +82,13 @@ TORCH_LIBRARY_IMPL(hstu, CUDA, m) {
       "hstu_mha_bwd",
       torch::dispatch(c10::DispatchKey::CUDA, TORCH_FN(hstu_mha_bwd)));
 }
+
+TORCH_LIBRARY_IMPL(hstu, CPU, m) {
+  m.impl(
+      "hstu_mha_fwd",
+      torch::dispatch(c10::DispatchKey::CPU, TORCH_FN(hstu_mha_fwd_dummy)));
+  m.impl(
+      "hstu_mha_bwd",
+      torch::dispatch(c10::DispatchKey::CPU, TORCH_FN(hstu_mha_bwd_dummy)));
+}
 } // namespace hstu
