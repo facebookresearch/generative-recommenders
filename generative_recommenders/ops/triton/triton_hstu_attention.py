@@ -227,10 +227,11 @@ def _hstu_attn_fwd_one_block(  # noqa: C901
     alpha,
     MAX_SEQ_LEN,
     contextual_seq_len,
-    MAX_ATTN_LEN: tl.constexpr,
+    max_attn_len,
     CAUSAL: tl.constexpr,
     HAS_MULTIPLE_TARGETS: tl.constexpr,
     HAS_CONTEXTUAL_SEQ_LEN: tl.constexpr,
+    HAS_MAX_ATTN_LEN: tl.constexpr,
     ALLOW_TF32: tl.constexpr,
     BLOCK_N: tl.constexpr,
 ):
@@ -270,8 +271,8 @@ def _hstu_attn_fwd_one_block(  # noqa: C901
     if not CAUSAL:
         offs_m_minus_n = tl.where(offs_m_minus_n > 0, offs_m_minus_n, -offs_m_minus_n)
     invalid_mask = invalid_mask or (offs_m_minus_n > 0)
-    if MAX_ATTN_LEN > 0:
-        invalid_mask = invalid_mask and offs_m_minus_n <= MAX_ATTN_LEN
+    if HAS_MAX_ATTN_LEN:
+        invalid_mask = invalid_mask and offs_m_minus_n <= max_attn_len
     if HAS_CONTEXTUAL_SEQ_LEN:
         invalid_mask = invalid_mask or (
             offs_m[:, None] == 0 and offs_n[None, :] < max_ids
@@ -304,6 +305,7 @@ def _hstu_attn_fwd_compute(  # noqa C901
     MAX_SEQ_LEN,
     DeltaSize,
     contextual_seq_len,
+    max_attn_len,
     off_z,
     off_h,
     pid,
@@ -315,8 +317,8 @@ def _hstu_attn_fwd_compute(  # noqa C901
     BLOCK_D_V: tl.constexpr,
     BLOCK_M: tl.constexpr,
     BLOCK_N: tl.constexpr,
-    MAX_ATTN_LEN: tl.constexpr,
     HAS_CONTEXTUAL_SEQ_LEN: tl.constexpr,
+    HAS_MAX_ATTN_LEN: tl.constexpr,
 ):
     seq_start = tl.load(seq_offsets + off_z).to(tl.int64)
     off_h = off_h.to(tl.int64)
@@ -387,11 +389,11 @@ def _hstu_attn_fwd_compute(  # noqa C901
             else:
                 low = 0
                 high = start_m + BLOCK_M
-                if MAX_ATTN_LEN > 0:
+                if HAS_MAX_ATTN_LEN:
                     if start_m > uih_end:
-                        low = uih_end - MAX_ATTN_LEN
+                        low = uih_end - max_attn_len
                     else:
-                        low = start_m - MAX_ATTN_LEN
+                        low = start_m - max_attn_len
                     if HAS_CONTEXTUAL_SEQ_LEN:
                         low = low if low > contextual_seq_len else 0
                     else:
@@ -420,11 +422,12 @@ def _hstu_attn_fwd_compute(  # noqa C901
                 n_targets=n_targets if HAS_MULTIPLE_TARGETS else None,
                 alpha=alpha,
                 MAX_SEQ_LEN=MAX_SEQ_LEN,
-                MAX_ATTN_LEN=MAX_ATTN_LEN,
                 contextual_seq_len=contextual_seq_len,
+                max_attn_len=max_attn_len,
                 CAUSAL=CAUSAL,
                 HAS_MULTIPLE_TARGETS=HAS_MULTIPLE_TARGETS,
                 HAS_CONTEXTUAL_SEQ_LEN=HAS_CONTEXTUAL_SEQ_LEN,
+                HAS_MAX_ATTN_LEN=HAS_MAX_ATTN_LEN,
                 ALLOW_TF32=ALLOW_TF32,
                 BLOCK_N=BLOCK_N,
             )
@@ -454,11 +457,12 @@ def _hstu_attn_fwd_compute(  # noqa C901
                         n_targets=n_targets if HAS_MULTIPLE_TARGETS else None,
                         alpha=alpha,
                         MAX_SEQ_LEN=MAX_SEQ_LEN,
-                        MAX_ATTN_LEN=MAX_ATTN_LEN,
                         contextual_seq_len=contextual_seq_len,
+                        max_attn_len=max_attn_len,
                         CAUSAL=CAUSAL,
                         HAS_MULTIPLE_TARGETS=HAS_MULTIPLE_TARGETS,
                         HAS_CONTEXTUAL_SEQ_LEN=HAS_CONTEXTUAL_SEQ_LEN,
+                        HAS_MAX_ATTN_LEN=HAS_MAX_ATTN_LEN,
                         ALLOW_TF32=ALLOW_TF32,
                         BLOCK_N=BLOCK_N,
                     )
@@ -521,6 +525,7 @@ def _hstu_attn_fwd(  # noqa C901
     DimV,
     DeltaSize,
     contextual_seq_len,
+    max_attn_len,
     CAUSAL: tl.constexpr,
     HAS_MULTIPLE_TARGETS: tl.constexpr,
     IS_DELTA_Q: tl.constexpr,
@@ -529,8 +534,8 @@ def _hstu_attn_fwd(  # noqa C901
     BLOCK_D_V: tl.constexpr,
     BLOCK_M: tl.constexpr,
     BLOCK_N: tl.constexpr,
-    MAX_ATTN_LEN: tl.constexpr,
     HAS_CONTEXTUAL_SEQ_LEN: tl.constexpr,
+    HAS_MAX_ATTN_LEN: tl.constexpr,
     HAS_SORT_BY_LENGTH_INDICES: tl.constexpr,
 ):
     off_hz = tl.program_id(1)
@@ -558,6 +563,7 @@ def _hstu_attn_fwd(  # noqa C901
         MAX_SEQ_LEN=MAX_SEQ_LEN,
         DeltaSize=DeltaSize,
         contextual_seq_len=contextual_seq_len,
+        max_attn_len=max_attn_len,
         off_z=off_z,
         off_h=off_h,
         pid=pid,
@@ -567,8 +573,8 @@ def _hstu_attn_fwd(  # noqa C901
         ALLOW_TF32=ALLOW_TF32,
         BLOCK_D_Q=BLOCK_D_Q,
         BLOCK_D_V=BLOCK_D_V,
-        MAX_ATTN_LEN=MAX_ATTN_LEN,
         HAS_CONTEXTUAL_SEQ_LEN=HAS_CONTEXTUAL_SEQ_LEN,
+        HAS_MAX_ATTN_LEN=HAS_MAX_ATTN_LEN,
         BLOCK_M=BLOCK_M,
         BLOCK_N=BLOCK_N,
     )
@@ -613,6 +619,7 @@ def _hstu_attn_fwd_persistent(  # noqa C901
     DimV,
     DeltaSize,
     contextual_seq_len,
+    max_attn_len,
     CAUSAL: tl.constexpr,
     HAS_MULTIPLE_TARGETS: tl.constexpr,
     IS_DELTA_Q: tl.constexpr,
@@ -621,8 +628,8 @@ def _hstu_attn_fwd_persistent(  # noqa C901
     BLOCK_D_V: tl.constexpr,
     BLOCK_M: tl.constexpr,
     BLOCK_N: tl.constexpr,
-    MAX_ATTN_LEN: tl.constexpr,
     HAS_CONTEXTUAL_SEQ_LEN: tl.constexpr,
+    HAS_MAX_ATTN_LEN: tl.constexpr,
     HAS_SORT_BY_LENGTH_INDICES: tl.constexpr,
 ):
     n_tile_num = tl.cdiv(MAX_SEQ_LEN, BLOCK_M)
@@ -660,6 +667,7 @@ def _hstu_attn_fwd_persistent(  # noqa C901
             MAX_SEQ_LEN=MAX_SEQ_LEN,
             DeltaSize=DeltaSize,
             contextual_seq_len=contextual_seq_len,
+            max_attn_len=max_attn_len,
             off_z=off_z,
             off_h=off_h,
             pid=pid,
@@ -669,8 +677,8 @@ def _hstu_attn_fwd_persistent(  # noqa C901
             ALLOW_TF32=ALLOW_TF32,
             BLOCK_D_Q=BLOCK_D_Q,
             BLOCK_D_V=BLOCK_D_V,
-            MAX_ATTN_LEN=MAX_ATTN_LEN,
             HAS_CONTEXTUAL_SEQ_LEN=HAS_CONTEXTUAL_SEQ_LEN,
+            HAS_MAX_ATTN_LEN=HAS_MAX_ATTN_LEN,
             BLOCK_M=BLOCK_M,
             BLOCK_N=BLOCK_N,
         )
@@ -722,16 +730,17 @@ def _hstu_attn_bwd_one_block(  # noqa C901
     n_targets,
     max_ids,
     contextual_seq_len,
+    max_attn_len,
     LOCK,
     stride_qm,
     stride_dom,
     stride_dqm,
     alpha,
     MAX_SEQ_LEN,
-    MAX_ATTN_LEN: tl.constexpr,
     CAUSAL: tl.constexpr,
     HAS_MULTIPLE_TARGETS: tl.constexpr,
     HAS_CONTEXTUAL_SEQ_LEN: tl.constexpr,
+    HAS_MAX_ATTN_LEN: tl.constexpr,
     ALLOW_TF32: tl.constexpr,
     BLOCK_M: tl.constexpr,
     BLOCK_N: tl.constexpr,
@@ -769,8 +778,8 @@ def _hstu_attn_bwd_one_block(  # noqa C901
             pos_offs_m_minus_n > 0, pos_offs_m_minus_n, -pos_offs_m_minus_n
         )
     invalid_mask_trans = invalid_mask_trans or (pos_offs_m_minus_n > 0)
-    if MAX_ATTN_LEN > 0:
-        invalid_mask_trans = invalid_mask_trans and pos_offs_m_minus_n <= MAX_ATTN_LEN
+    if HAS_MAX_ATTN_LEN:
+        invalid_mask_trans = invalid_mask_trans and pos_offs_m_minus_n <= max_attn_len
     if HAS_CONTEXTUAL_SEQ_LEN:
         invalid_mask_trans = invalid_mask_trans or (
             pos_offs_m[None, :] == 0 and pos_offs_n[:, None] < max_ids
@@ -827,6 +836,7 @@ def _hstu_attn_bwd_one_col_block(  # noqa C901
     seq_len,
     n_targets,
     contextual_seq_len,
+    max_attn_len,
     Q,
     K,
     V,
@@ -844,10 +854,10 @@ def _hstu_attn_bwd_one_col_block(  # noqa C901
     stride_dvn,
     alpha,
     MAX_SEQ_LEN,
-    MAX_ATTN_LEN: tl.constexpr,
     CAUSAL: tl.constexpr,
     HAS_MULTIPLE_TARGETS: tl.constexpr,
     HAS_CONTEXTUAL_SEQ_LEN: tl.constexpr,
+    HAS_MAX_ATTN_LEN: tl.constexpr,
     ALLOW_TF32: tl.constexpr,
     BLOCK_D_Q: tl.constexpr,
     BLOCK_D_V: tl.constexpr,
@@ -860,15 +870,15 @@ def _hstu_attn_bwd_one_col_block(  # noqa C901
     if CAUSAL:
         if HAS_MULTIPLE_TARGETS:
             low = start_n
-            if MAX_ATTN_LEN > 0:
-                high = start_n + MAX_ATTN_LEN + BLOCK_N
+            if HAS_MAX_ATTN_LEN:
+                high = start_n + max_attn_len + BLOCK_N
                 high = high if high + n_targets < seq_len else seq_len
             else:
                 high = seq_len
         else:
             low = start_n
-            if MAX_ATTN_LEN > 0:
-                high = start_n + MAX_ATTN_LEN + BLOCK_N
+            if HAS_MAX_ATTN_LEN:
+                high = start_n + max_attn_len + BLOCK_N
                 high = high if high < seq_len else seq_len
             else:
                 high = seq_len
@@ -939,16 +949,17 @@ def _hstu_attn_bwd_one_col_block(  # noqa C901
                 n_targets=n_targets,
                 max_ids=max_ids,
                 contextual_seq_len=contextual_seq_len,
+                max_attn_len=max_attn_len,
                 LOCK=LOCK,
                 stride_qm=stride_qm,
                 stride_dom=stride_dom,
                 stride_dqm=stride_dqm,
                 alpha=alpha,
                 MAX_SEQ_LEN=MAX_SEQ_LEN,
-                MAX_ATTN_LEN=MAX_ATTN_LEN,
                 CAUSAL=CAUSAL,
                 HAS_MULTIPLE_TARGETS=HAS_MULTIPLE_TARGETS,
                 HAS_CONTEXTUAL_SEQ_LEN=HAS_CONTEXTUAL_SEQ_LEN,
+                HAS_MAX_ATTN_LEN=HAS_MAX_ATTN_LEN,
                 ALLOW_TF32=ALLOW_TF32,
                 BLOCK_M=BLOCK_M,
                 BLOCK_N=BLOCK_N,
@@ -973,16 +984,17 @@ def _hstu_attn_bwd_one_col_block(  # noqa C901
             n_targets=n_targets,
             max_ids=max_ids,
             contextual_seq_len=contextual_seq_len,
+            max_attn_len=max_attn_len,
             LOCK=LOCK,
             stride_qm=stride_qm,
             stride_dom=stride_dom,
             stride_dqm=stride_dqm,
             alpha=alpha,
             MAX_SEQ_LEN=MAX_SEQ_LEN,
-            MAX_ATTN_LEN=MAX_ATTN_LEN,
             CAUSAL=CAUSAL,
             HAS_MULTIPLE_TARGETS=HAS_MULTIPLE_TARGETS,
             HAS_CONTEXTUAL_SEQ_LEN=HAS_CONTEXTUAL_SEQ_LEN,
+            HAS_MAX_ATTN_LEN=HAS_MAX_ATTN_LEN,
             ALLOW_TF32=ALLOW_TF32,
             BLOCK_M=BLOCK_M,
             BLOCK_N=BLOCK_N,
@@ -1241,6 +1253,7 @@ def _hstu_attn_bwd(  # noqa C901
     stride_dvh,
     alpha,
     contextual_seq_len,
+    max_attn_len,
     Z,
     AUTOTUNE_Z,
     H,
@@ -1248,10 +1261,10 @@ def _hstu_attn_bwd(  # noqa C901
     AUTOTUNE_MAX_SEQ_LEN,  # Quantized MAX_SEQ_LEN used as an autotuning key
     DimQ,
     DimV,
-    MAX_ATTN_LEN: tl.constexpr,
     CAUSAL: tl.constexpr,
     HAS_MULTIPLE_TARGETS: tl.constexpr,
     HAS_CONTEXTUAL_SEQ_LEN: tl.constexpr,
+    HAS_MAX_ATTN_LEN: tl.constexpr,
     ALLOW_TF32: tl.constexpr,
     BLOCK_D_Q: tl.constexpr,
     BLOCK_D_V: tl.constexpr,
@@ -1291,6 +1304,7 @@ def _hstu_attn_bwd(  # noqa C901
             seq_len=seq_len,
             n_targets=n_targets,
             contextual_seq_len=contextual_seq_len,
+            max_attn_len=max_attn_len,
             Q=Q,
             K=K,
             V=V,
@@ -1308,10 +1322,10 @@ def _hstu_attn_bwd(  # noqa C901
             stride_dvn=stride_dvn,
             alpha=alpha,
             MAX_SEQ_LEN=MAX_SEQ_LEN,
-            MAX_ATTN_LEN=MAX_ATTN_LEN,
             CAUSAL=CAUSAL,
             HAS_MULTIPLE_TARGETS=HAS_MULTIPLE_TARGETS,
             HAS_CONTEXTUAL_SEQ_LEN=HAS_CONTEXTUAL_SEQ_LEN,
+            HAS_MAX_ATTN_LEN=HAS_MAX_ATTN_LEN,
             ALLOW_TF32=ALLOW_TF32,
             BLOCK_D_Q=BLOCK_D_Q,
             BLOCK_D_V=BLOCK_D_V,
@@ -1327,6 +1341,7 @@ def _hstu_attn_bwd(  # noqa C901
                 seq_len=seq_len,
                 n_targets=n_targets,
                 contextual_seq_len=contextual_seq_len,
+                max_attn_len=max_attn_len,
                 Q=Q,
                 K=K,
                 V=V,
@@ -1344,10 +1359,10 @@ def _hstu_attn_bwd(  # noqa C901
                 stride_dvn=stride_dvn,
                 alpha=alpha,
                 MAX_SEQ_LEN=MAX_SEQ_LEN,
-                MAX_ATTN_LEN=MAX_ATTN_LEN,
                 CAUSAL=CAUSAL,
                 HAS_MULTIPLE_TARGETS=HAS_MULTIPLE_TARGETS,
                 HAS_CONTEXTUAL_SEQ_LEN=HAS_CONTEXTUAL_SEQ_LEN,
+                HAS_MAX_ATTN_LEN=HAS_MAX_ATTN_LEN,
                 ALLOW_TF32=ALLOW_TF32,
                 BLOCK_D_Q=BLOCK_D_Q,
                 BLOCK_D_V=BLOCK_D_V,
@@ -1378,6 +1393,7 @@ def triton_hstu_attention_fwd(
     out = torch.empty_like(v)
     has_multiple_targets = num_targets is not None
     has_contextual_seq_len = contextual_seq_len > 0
+    has_max_attn_len = max_attn_len > 0
     has_sort_by_length_indices = sort_by_length_indices is not None
     if L == 0:
         return out
@@ -1413,14 +1429,15 @@ def triton_hstu_attention_fwd(
         DimV=DimV,
         DeltaSize=0,
         contextual_seq_len=contextual_seq_len,
+        max_attn_len=max_attn_len,
         CAUSAL=causal,
         HAS_MULTIPLE_TARGETS=has_multiple_targets,
         IS_DELTA_Q=False,
         ALLOW_TF32=torch.backends.cuda.matmul.allow_tf32,
         BLOCK_D_Q=DimQ,
         BLOCK_D_V=DimV,
-        MAX_ATTN_LEN=max_attn_len,
         HAS_CONTEXTUAL_SEQ_LEN=has_contextual_seq_len,
+        HAS_MAX_ATTN_LEN=has_max_attn_len,
         HAS_SORT_BY_LENGTH_INDICES=has_sort_by_length_indices,
     )
     return out
@@ -1493,6 +1510,7 @@ def triton_hstu_attention_bwd(
         stride_dvh=dv.stride(1),
         alpha=alpha,
         contextual_seq_len=contextual_seq_len,
+        max_attn_len=max_attn_len,
         Z=Z,
         AUTOTUNE_Z=AUTOTUNE_Z,
         H=H,
@@ -1500,10 +1518,10 @@ def triton_hstu_attention_bwd(
         AUTOTUNE_MAX_SEQ_LEN=autotune_max_seq_len(N),
         DimQ=DimQ,
         DimV=DimV,
-        MAX_ATTN_LEN=max_attn_len,
         CAUSAL=causal,
         HAS_MULTIPLE_TARGETS=num_targets is not None,
         HAS_CONTEXTUAL_SEQ_LEN=contextual_seq_len > 0,
+        HAS_MAX_ATTN_LEN=max_attn_len > 0,
         ALLOW_TF32=torch.backends.cuda.matmul.allow_tf32,
         BLOCK_D_Q=DimQ,
         BLOCK_D_V=DimV,
@@ -1680,6 +1698,7 @@ def triton_cached_hstu_mha(
         Z * H,
     )
     has_contextual_seq_len = contextual_seq_len > 0
+    has_max_attn_len = max_attn_len > 0
     _hstu_attn_fwd[grid](
         Q=delta_q,
         K=k,
@@ -1698,6 +1717,7 @@ def triton_cached_hstu_mha(
         stride_oh=out.stride(1),
         alpha=alpha,
         contextual_seq_len=contextual_seq_len,
+        max_attn_len=max_attn_len,
         Z=Z,
         AUTOTUNE_Z=AUTOTUNE_Z,
         H=H,
@@ -1706,7 +1726,6 @@ def triton_cached_hstu_mha(
         DimQ=DimQ,
         DimV=DimV,
         DeltaSize=DeltaSize,
-        MAX_ATTN_LEN=max_attn_len,
         CAUSAL=True,
         HAS_MULTIPLE_TARGETS=num_targets is not None,
         IS_DELTA_Q=True,
@@ -1714,6 +1733,7 @@ def triton_cached_hstu_mha(
         BLOCK_D_Q=DimQ,
         BLOCK_D_V=DimV,
         HAS_CONTEXTUAL_SEQ_LEN=has_contextual_seq_len,
+        HAS_MAX_ATTN_LEN=has_max_attn_len,
         HAS_SORT_BY_LENGTH_INDICES=False,
     )
     return out
