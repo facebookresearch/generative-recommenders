@@ -18,9 +18,11 @@
 
 from typing import Optional, Tuple
 
-import hstu_flash_attention  # @manual  # pyre-ignore[21]
-
 import torch
+
+torch.ops.load_library(
+    "//generative_recommenders/ops/cpp/hstu_attention:hstu_flash_attention"
+)
 
 from generative_recommenders.ops.triton.triton_addmm import (
     triton_addmm_bwd,
@@ -82,7 +84,7 @@ class _HSTUPreprocessAndAttentionFunction(torch.autograd.Function):
         k = k.view(-1, num_heads, attn_dim)
         v = v.view(-1, num_heads, hidden_dim)
         silu_u = F.silu(u)
-        out = hstu_flash_attention.forward(
+        out = torch.ops.hstu.hstu_mha_fwd(
             max_seq_len,
             alpha,
             q,
@@ -220,7 +222,7 @@ class _HSTUPreprocessAndAttentionFunction(torch.autograd.Function):
         dk = dk.view(-1, ctx.num_heads, ctx.attn_dim)
         dv = dv.view(-1, ctx.num_heads, ctx.hidden_dim)
         # Note: the two operations below update duvqk in place
-        _dq, _dk, _dv = hstu_flash_attention.backward(
+        _dq, _dk, _dv = torch.ops.hstu.hstu_mha_bwd(
             ctx.max_seq_len,
             ctx.alpha,
             dout,
