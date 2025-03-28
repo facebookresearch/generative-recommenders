@@ -261,7 +261,7 @@ def prev_power_of_2(x: int) -> int:
 
 
 STATIC_MAX_SEQ_LENS: List[int] = []
-USE_RUNTIME_MAX_SEQ_LEN: bool = True
+USE_RUNTIME_MAX_SEQ_LEN: bool = False
 
 
 def set_static_max_seq_lens(max_seq_lens: List[int]) -> None:
@@ -281,6 +281,8 @@ def autotune_max_seq_len(runtime_max_seq_len: int) -> int:
     if USE_RUNTIME_MAX_SEQ_LEN:
         return prev_power_of_2(runtime_max_seq_len)
     else:
+        if STATIC_MAX_SEQ_LENS == []:
+            return 1
         for max_len in STATIC_MAX_SEQ_LENS:
             if max_len >= runtime_max_seq_len:
                 return max_len
