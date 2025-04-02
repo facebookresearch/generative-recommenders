@@ -52,9 +52,9 @@ def layer_norm(
 ) -> torch.Tensor:
     if kernel == HammerKernel.TRITON:
         if not is_fx_tracing():
-            torch._assert(x.is_cuda, "x must be CUDA tensor")
-            torch._assert(weight.is_cuda, "weight must be CUDA tensor")
-            torch._assert(bias.is_cuda, "bias must be CUDA tensor")
+            torch._assert(not x.is_cpu, "x must be device tensor")
+            torch._assert(not weight.is_cpu, "weight must be device tensor")
+            torch._assert(not bias.is_cpu, "bias must be device tensor")
         return triton_layer_norm(x, weight, bias, eps)
     elif kernel == HammerKernel.TRITON_CC:
         return triton_cc_swish_layer_norm(
@@ -85,9 +85,9 @@ def swish_layer_norm(
 ) -> torch.Tensor:
     if kernel == HammerKernel.TRITON:
         if not is_fx_tracing():
-            torch._assert(x.is_cuda, "x must be CUDA tensor")
-            torch._assert(weight.is_cuda, "weight must be CUDA tensor")
-            torch._assert(bias.is_cuda, "bias must be CUDA tensor")
+            torch._assert(not x.is_cpu, "x must be device tensor")
+            torch._assert(not weight.is_cpu, "weight must be device tensor")
+            torch._assert(not bias.is_cpu, "bias must be device tensor")
         return triton_swish_layer_norm(x, [x.shape[-1]], weight, bias, eps)
     elif kernel == HammerKernel.TRITON_CC:
         return triton_cc_swish_layer_norm(
