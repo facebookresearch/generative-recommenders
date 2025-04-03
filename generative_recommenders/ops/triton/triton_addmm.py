@@ -24,8 +24,7 @@ import triton
 
 # @manual=//triton:triton
 import triton.language as tl
-from generative_recommenders.common import triton_autotune, triton_cc
-
+from generative_recommenders.common import triton_autotune
 
 ENABLE_FULL_TURNING_SPACE = False
 
@@ -162,21 +161,6 @@ def get_mm_configs() -> List[triton.Config]:
         ]
 
 
-@triton_cc(
-    annotations={
-        "M": "i32",
-        "N": ("i32", 16),
-        "K": ("i32", 16),
-        "stride_xm": ("i32", 16),
-        "stride_xk": ("i32", 1),
-        "stride_wk": ("i32", 16),
-        "stride_wn": ("i32", 1),
-        "stride_ym": ("i32", 16),
-        "stride_yn": ("i32", 1),
-        "stride_zm": ("i32", 16),
-        "stride_zn": ("i32", 1),
-    },
-)
 @triton_autotune(
     configs=get_mm_configs(),
     key=["N", "K"],
@@ -253,7 +237,6 @@ def _addmm_fwd(
     tl.store(z_ptrs, z, mask=z_mask)
 
 
-@torch.fx.wrap
 def triton_addmm_fwd(
     x: torch.Tensor,
     w: torch.Tensor,
@@ -337,6 +320,7 @@ class _AddMmFunction(torch.autograd.Function):
         return triton_addmm_bwd(x, w, dz, ctx.is_y_1d)
 
 
+@torch.fx.wrap
 def triton_addmm(
     input: torch.Tensor,
     mat1: torch.Tensor,
