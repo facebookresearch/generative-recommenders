@@ -36,18 +36,9 @@ except OSError:
     pass
 
 try:
-    from generative_recommenders.fb.triton_cc.utils import triton_cc
     from hammer.ops.triton.utils import triton_autotune
     from hammer.utils import is_dev_mode, set_dev_mode, set_verbose_level
 except ImportError:
-    # pyre-ignore
-    def triton_cc(annotations):
-        # pyre-ignore
-        def decorator(fn):
-            return fn
-
-        return decorator
-
     # pyre-ignore
     def triton_autotune(
         configs: List[triton.Config],
