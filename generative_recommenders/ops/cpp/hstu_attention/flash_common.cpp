@@ -379,6 +379,7 @@ at::Tensor hstu_mha_fwd(
         num_targets_.dtype() == torch::kInt32,
         "num_targets_ must have dtype torch.int32");
   }
+#ifdef HSTU_FLASH_ATTN_DEBUG_INFO
   if (is_jagged && has_multiple_targets) {
     auto uih_lengths = seq_offsets_.slice(0, 1)
                            .sub(seq_offsets_.slice(0, 0, -1))
@@ -391,13 +392,10 @@ at::Tensor hstu_mha_fwd(
             num_targets_.size(0),
         "some uih seqlen is less than contextual_seq_len");
   }
+#endif
   TORCH_CHECK(
       q.size(-1) == k.size(-1) && k.size(-1) == v.size(-1),
       "only attndim == hidden_dim is supported");
-#ifdef FLASHATTENTION_DISABLE_JAGGED
-  TORCH_CHECK(
-      !is_jagged, "This flash attention build does not support jagged.");
-#endif
 
   auto const sizes = q.sizes();
   const int batch_size = !is_jagged ? sizes[0] : seq_offsets_.size(0) - 1;
@@ -703,10 +701,6 @@ std::vector<at::Tensor> hstu_mha_bwd(
         num_targets_.dtype() == torch::kInt32,
         "num_targets_ must have dtype torch.int32");
   }
-#ifdef FLASHATTENTION_DISABLE_JAGGED
-  TORCH_CHECK(
-      !is_jagged, "This flash attention build does not support jagged.");
-#endif
 
   auto const sizes = q.sizes();
   int const batch_size = !is_jagged ? sizes[0] : seq_offsets_.size(0) - 1;
