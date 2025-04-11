@@ -51,7 +51,6 @@ class _HSTUPreprocessAndAttentionFunction(torch.autograd.Function):
         max_seq_len: int,
         seq_offsets: torch.Tensor,
         attn_alpha: float,
-        causal: bool,
         num_targets: Optional[torch.Tensor],
         max_attn_len: int,
         contextual_seq_len: int,
@@ -92,7 +91,6 @@ class _HSTUPreprocessAndAttentionFunction(torch.autograd.Function):
             k=k,
             v=v,
             seq_offsets=seq_offsets,
-            causal=causal,
             num_targets=num_targets,
             max_attn_len=max_attn_len,
             contextual_seq_len=contextual_seq_len,
@@ -120,7 +118,6 @@ class _HSTUPreprocessAndAttentionFunction(torch.autograd.Function):
             saved_tensors.append(sort_by_length_indices)
         ctx.save_for_backward(*saved_tensors)
         ctx.attn_alpha = attn_alpha
-        ctx.causal = causal
         ctx.has_multiple_targets = num_targets is not None
         ctx.max_seq_len = max_seq_len
         ctx.max_attn_len = max_attn_len
@@ -153,7 +150,6 @@ class _HSTUPreprocessAndAttentionFunction(torch.autograd.Function):
         None,
         torch.Tensor,  # d_uvqk_weight
         torch.Tensor,  # d_uvqk_bias
-        None,
         None,
         None,
         None,
@@ -240,7 +236,6 @@ class _HSTUPreprocessAndAttentionFunction(torch.autograd.Function):
             N=ctx.max_seq_len,
             max_attn_len=ctx.max_attn_len,
             alpha=ctx.attn_alpha,
-            causal=ctx.causal,
             contextual_seq_len=ctx.contextual_seq_len,
             sort_by_length_indices=sort_by_length_indices,
         )
@@ -289,7 +284,6 @@ class _HSTUPreprocessAndAttentionFunction(torch.autograd.Function):
             None,
             None,
             None,
-            None,
         )
 
 
@@ -306,7 +300,6 @@ def triton_hstu_preprocess_and_attention(
     max_seq_len: int,
     seq_offsets: torch.Tensor,
     attn_alpha: float,
-    causal: bool,
     num_targets: Optional[torch.Tensor],
     max_attn_len: int = 0,
     contextual_seq_len: int = 0,
@@ -327,7 +320,6 @@ def triton_hstu_preprocess_and_attention(
         max_seq_len,
         seq_offsets,
         attn_alpha,
-        causal,
         num_targets,
         max_attn_len,
         contextual_seq_len,
