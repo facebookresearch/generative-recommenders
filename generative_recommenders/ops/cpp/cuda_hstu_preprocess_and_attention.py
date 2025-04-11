@@ -60,7 +60,6 @@ class _HSTUPreprocessAndAttentionFunction(torch.autograd.Function):
         sort_by_length: bool = False,
         max_attn_len: Optional[int] = None,
         full_attn_size: Optional[int] = None,
-        silu_u: bool = True,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         max_attn_len = max_attn_len or 0
         full_attn_size = full_attn_size or 0
@@ -84,8 +83,7 @@ class _HSTUPreprocessAndAttentionFunction(torch.autograd.Function):
         q = q.view(-1, num_heads, attn_dim)
         k = k.view(-1, num_heads, attn_dim)
         v = v.view(-1, num_heads, hidden_dim)
-        if silu_u:
-            u = F.silu(u)
+        silu_u = F.silu(u)
         out = torch.ops.hstu.hstu_mha_fwd(
             max_seq_len,
             alpha,
@@ -139,14 +137,13 @@ class _HSTUPreprocessAndAttentionFunction(torch.autograd.Function):
         ctx.norm_num_warps = num_warps
         ctx.contextual_seq_len = contextual_seq_len
         ctx.sort_by_length = sort_by_length
-        ctx.silu_u = silu_u
-        return u, out
+        return silu_u, out
 
     @staticmethod
     # pyre-ignore[14]
     def backward(
         ctx,  # pyre-ignore[2]
-        _du: torch.Tensor,
+        dsilu_u: torch.Tensor,
         dout: torch.Tensor,
     ) -> Tuple[
         torch.Tensor,  # d_x
@@ -158,7 +155,6 @@ class _HSTUPreprocessAndAttentionFunction(torch.autograd.Function):
         None,
         torch.Tensor,  # d_uvqk_weight
         torch.Tensor,  # d_uvqk_bias
-        None,
         None,
         None,
         None,
@@ -252,11 +248,7 @@ class _HSTUPreprocessAndAttentionFunction(torch.autograd.Function):
             dk.copy_(_dk)
         if dv.data_ptr() != _dv.data_ptr():
             dv.copy_(_dv)
-        if ctx.silu_u:
-            torch.ops.aten.silu_backward(_du, u, grad_input=du)
-        else:
-            if du.data_ptr() != _du.data_ptr():
-                du.copy_(_du)
+        torch.ops.aten.silu_backward(dsilu_u, u, grad_input=du)
         d_normed_x, d_uvqk_weight, d_uvqk_bias = triton_addmm_bwd(
             x=normed_x,
             w=uvqk_weight,
@@ -297,7 +289,6 @@ class _HSTUPreprocessAndAttentionFunction(torch.autograd.Function):
             None,
             None,
             None,
-            None,
         )
 
 
@@ -322,7 +313,6 @@ def cuda_hstu_preprocess_and_attention(
     sort_by_length: bool = False,
     max_attn_len: Optional[int] = None,
     full_attn_size: Optional[int] = None,
-    silu_u: bool = True,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     return _HSTUPreprocessAndAttentionFunction.apply(
         x,
@@ -345,5 +335,4 @@ def cuda_hstu_preprocess_and_attention(
         sort_by_length,
         max_attn_len,
         full_attn_size,
-        silu_u,
     )

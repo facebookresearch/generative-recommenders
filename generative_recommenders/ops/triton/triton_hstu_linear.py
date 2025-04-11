@@ -32,18 +32,6 @@ from generative_recommenders.common import (
 
 from generative_recommenders.ops.triton.triton_addmm import triton_addmm_fwd
 
-try:
-    # @manual=//triton:triton
-    from triton.language.extra.libdevice import fast_dividef
-except ImportError:
-    try:
-        # @manual=//triton:triton
-        from triton.language.extra.cuda.libdevice import fast_dividef
-    except ImportError:
-        # pyre-ignore: Undefined import [21]
-        # @manual=//triton:triton
-        from triton.language.math import fast_dividef
-
 
 @triton.jit
 def _ln_mul_dropout_fwd(
@@ -61,7 +49,6 @@ def _ln_mul_dropout_fwd(
     stride_x,
     stride_u,
     stride_y,
-    SILU_U: tl.constexpr,
     BLOCK_D: tl.constexpr,
     TRAINING: tl.constexpr,
     CONCAT_UX: tl.constexpr,
@@ -93,9 +80,6 @@ def _ln_mul_dropout_fwd(
     b = tl.load(B + cols, mask=mask).to(tl.float32)
     y = y * w + b
     u = tl.load(U + cols, mask=cols < D, other=0.0).to(tl.float32)
-    if SILU_U:
-        # pyre-fixme[16]
-        u = fast_dividef(u, 1.0 + tl.exp(-u))
     y = y * u
 
     if TRAINING:
@@ -153,7 +137,6 @@ def _ln_mul_dropout_bwd_dx_du(
     seed,
     dropout_ratio,
     N,
-    SILU_U: tl.constexpr,
     BLOCK_D: tl.constexpr,
     TRAINING: tl.constexpr,
     CONCAT_UX: tl.constexpr,
@@ -221,15 +204,10 @@ def _ln_mul_dropout_bwd_dx_du(
         xhat = (x - mean) * rstd
         w = tl.load(W + cols, mask=mask).to(tl.float32)
         b = tl.load(B + cols, mask=mask).to(tl.float32)
-        u = tl.load(U + cols, mask=mask, other=0).to(tl.float32)
         ln = xhat * w + b
         du += dy * ln
-        if SILU_U:
-            # pyre-ignore[16]
-            sig_u = fast_dividef(1.0, 1.0 + tl.exp(-u))
-            du = du * (sig_u + u * sig_u * (1.0 - sig_u))
-            u = u * sig_u
         tl.store(DU + cols, du.to(DU.dtype.element_ty), mask=mask)
+        u = tl.load(U + cols, mask=mask, other=0).to(tl.float32)
         dy = dy * u
         wdy = w * dy
         if COMPUTE_Y:
@@ -345,7 +323,6 @@ def triton_layer_norm_mul_dropout_fwd(
     eps: float,
     dropout_ratio: float,
     training: bool,
-    silu_u: bool = False,
     concat_ux: bool = False,
     seed: Optional[int] = None,
 ) -> Tuple[
@@ -392,7 +369,6 @@ def triton_layer_norm_mul_dropout_fwd(
         x.stride(0),
         u.stride(0),
         y.stride(0),
-        SILU_U=silu_u,
         BLOCK_D=BLOCK_D,
         TRAINING=training,
         CONCAT_UX=concat_ux,
@@ -415,7 +391,6 @@ def triton_layer_norm_mul_dropout_bwd(
     training: bool,
     dropout_ratio: float,
     seed: Optional[int] = None,
-    silu_u: bool = False,
     concat_ux: bool = False,
     compute_y: bool = False,
 ) -> Tuple[
@@ -469,7 +444,6 @@ def triton_layer_norm_mul_dropout_bwd(
         seed,
         dropout_ratio,
         N=N,
-        SILU_U=silu_u,
         BLOCK_D=BLOCK_D,
         TRAINING=training,
         CONCAT_UX=concat_ux,
@@ -584,7 +558,6 @@ def _group_norm_mul_dropout_fwd(
     stride_x,
     stride_u,
     stride_y,
-    SILU_U: tl.constexpr,
     BLOCK_D: tl.constexpr,
     BLOCK_H: tl.constexpr,
     TRAINING: tl.constexpr,
@@ -623,9 +596,6 @@ def _group_norm_mul_dropout_fwd(
     b = tl.load(B + heads, mask=mask_h).to(tl.float32)
     y = y * w[:, None] + b[:, None]
     u = tl.load(U + offsets, mask=mask, other=0.0).to(tl.float32)
-    if SILU_U:
-        # pyre-fixme[16]
-        u = fast_dividef(u, 1.0 + tl.exp(-u))
     y = y * u
 
     if TRAINING:
@@ -684,7 +654,6 @@ def _group_norm_mul_dropout_bwd_dx_du(
     eps,
     seed,
     dropout_ratio,
-    SILU_U: tl.constexpr,
     GROUP_N: tl.constexpr,
     BLOCK_D: tl.constexpr,
     BLOCK_H: tl.constexpr,
@@ -744,15 +713,10 @@ def _group_norm_mul_dropout_bwd_dx_du(
     xhat = (x - mean[:, None]) * rstd[:, None]
     w = tl.load(W + off_heads, mask=mask_h).to(tl.float32)
     b = tl.load(B + off_heads, mask=mask_h).to(tl.float32)
-    u = tl.load(U + offsets, mask=mask, other=0).to(tl.float32)
     ln = xhat * w[:, None] + b[:, None]
     du += dy * ln
-    if SILU_U:
-        # pyre-ignore[16]
-        sig_u = fast_dividef(1.0, 1.0 + tl.exp(-u))
-        du = du * (sig_u + u * sig_u * (1.0 - sig_u))
-        u = u * sig_u
     tl.store(DU + offsets, du.to(DU.dtype.element_ty), mask=mask)
+    u = tl.load(U + offsets, mask=mask, other=0).to(tl.float32)
     dy = dy * u
     wdy = w[:, None] * dy
     if COMPUTE_Y:
@@ -827,7 +791,6 @@ def triton_group_norm_mul_dropout_fwd(
     eps: float,
     dropout_ratio: float,
     training: bool,
-    silu_u: bool = False,
     concat_ux: bool = False,
     num_heads: int = 1,
     linear_dim: int = -1,
@@ -883,7 +846,6 @@ def triton_group_norm_mul_dropout_fwd(
         x.stride(0),
         u.stride(0),
         y.stride(0),
-        SILU_U=silu_u,
         BLOCK_D=BLOCK_D,
         BLOCK_H=BLOCK_H,
         TRAINING=training,
@@ -908,7 +870,6 @@ def triton_group_norm_mul_dropout_bwd(
     training: bool,
     dropout_ratio: float,
     seed: Optional[int] = None,
-    silu_u: bool = False,
     concat_ux: bool = False,
     num_heads: int = 1,
     linear_dim: int = -1,
@@ -973,7 +934,6 @@ def triton_group_norm_mul_dropout_bwd(
         eps,
         seed,
         dropout_ratio,
-        SILU_U=silu_u,
         GROUP_N=GROUP_N,
         BLOCK_D=BLOCK_D,
         BLOCK_H=BLOCK_H,
@@ -1148,7 +1108,6 @@ class HSTUComputeOutputFunction(torch.autograd.Function):
         eps: float,
         dropout_ratio: float,
         training: bool,
-        silu_u: bool = False,
         concat_ux: bool = False,
         group_norm: bool = False,
         num_heads: int = 1,
@@ -1166,7 +1125,6 @@ class HSTUComputeOutputFunction(torch.autograd.Function):
                     eps=eps,
                     dropout_ratio=dropout_ratio,
                     training=training,
-                    silu_u=silu_u,
                     concat_ux=concat_ux,
                     num_heads=num_heads,
                     linear_dim=linear_dim,
@@ -1183,7 +1141,6 @@ class HSTUComputeOutputFunction(torch.autograd.Function):
                 eps=eps,
                 dropout_ratio=dropout_ratio,
                 training=training,
-                silu_u=silu_u,
                 concat_ux=concat_ux,
                 seed=seed,
             )
@@ -1210,7 +1167,6 @@ class HSTUComputeOutputFunction(torch.autograd.Function):
         ctx.linear_dim = linear_dim
         ctx.group_norm = group_norm
         ctx.recompute_y_in_backward = recompute_y_in_backward
-        ctx.silu_u = silu_u
         return out
 
     @staticmethod
@@ -1224,7 +1180,6 @@ class HSTUComputeOutputFunction(torch.autograd.Function):
         torch.Tensor,  # d_norm_weight
         torch.Tensor,  # d_norm_bias
         torch.Tensor,  # d_output_weight
-        None,
         None,
         None,
         None,
@@ -1257,7 +1212,6 @@ class HSTUComputeOutputFunction(torch.autograd.Function):
                     training=ctx.training,
                     dropout_ratio=ctx.dropout_ratio,
                     seed=ctx.seed,
-                    silu_u=ctx.silu_u,
                     concat_ux=ctx.concat_ux,
                     num_heads=ctx.num_heads,
                     linear_dim=ctx.linear_dim,
@@ -1280,7 +1234,6 @@ class HSTUComputeOutputFunction(torch.autograd.Function):
                     training=ctx.training,
                     dropout_ratio=ctx.dropout_ratio,
                     seed=ctx.seed,
-                    silu_u=ctx.silu_u,
                     concat_ux=ctx.concat_ux,
                     compute_y=ctx.recompute_y_in_backward,
                 )
@@ -1295,7 +1248,6 @@ class HSTUComputeOutputFunction(torch.autograd.Function):
             d_norm_weight,
             d_norm_bias,
             d_output_weight,
-            None,
             None,
             None,
             None,
@@ -1354,7 +1306,6 @@ def triton_hstu_compute_output(
     eps: float,
     dropout_ratio: float,
     training: bool,
-    silu_u: bool = False,
     concat_ux: bool = False,
     group_norm: bool = False,
     num_heads: int = 1,
@@ -1372,7 +1323,6 @@ def triton_hstu_compute_output(
         eps,
         dropout_ratio,
         training,
-        silu_u,
         concat_ux,
         group_norm,
         num_heads,
