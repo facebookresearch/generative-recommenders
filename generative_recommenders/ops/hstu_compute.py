@@ -202,6 +202,7 @@ def hstu_preprocess_and_attention(
             uvqk_weight.shape[1] == 2 * num_heads * (hidden_dim + attn_dim),
             "uvqk_weight.shape[1] must equal 2 * num_heads * (hidden_dim + attn_dim)",
         )
+        torch._assert(causal is True, "only causal attention is supported.")
     if kernel == HammerKernel.TRITON and prefill is False:
         u, attn_output = triton_hstu_preprocess_and_attention(
             x=x,
@@ -216,7 +217,6 @@ def hstu_preprocess_and_attention(
             max_seq_len=max_seq_len,
             seq_offsets=seq_offsets,
             attn_alpha=attn_alpha,
-            causal=causal,
             num_targets=num_targets,
             max_attn_len=max_attn_len,
             contextual_seq_len=contextual_seq_len,
