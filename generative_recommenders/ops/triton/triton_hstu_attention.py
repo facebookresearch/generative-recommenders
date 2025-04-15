@@ -31,15 +31,7 @@ from generative_recommenders.common import (
     triton_autotune,
 )
 
-try:
-    from triton.language.extra.libdevice import fast_dividef  # @manual=//triton:triton
-except ImportError:
-    try:
-        # @manual=//triton:triton
-        from triton.language.extra.cuda.libdevice import fast_dividef
-    except ImportError:
-        # pyre-ignore[21]
-        from triton.language.math import fast_dividef  # @manual=//triton:triton
+from triton.language.extra.libdevice import fast_dividef  # @manual=//triton:triton
 
 
 def _get_fw_configs() -> List[triton.Config]:  # noqa: C901
@@ -274,7 +266,6 @@ def _hstu_attn_fwd_one_block(  # noqa: C901
         invalid_mask = invalid_mask or (
             offs_m[:, None] == 0 and offs_n[None, :] < max_ids
         )
-    # pyre-fixme[16]: Module `math` has no attribute `fast_dividef`.
     silu = fast_dividef(qk, 1.0 + tl.exp(-qk)) * (1.0 / MAX_SEQ_LEN)
     silu = tl.where(invalid_mask, silu, 0)
     v = tl.load(V_block_ptr, boundary_check=(0,), padding_option="zero")
@@ -476,7 +467,7 @@ def _hstu_attn_fwd_compute(  # noqa C901
             tl.store(out_ptrs, acc, mask=(offs_m < seq_len)[:, None])
 
 
-@triton.autotune(
+@triton_autotune(
     configs=_get_fw_configs(),
     key=[
         "AUTOTUNE_Z",
@@ -568,7 +559,7 @@ def _hstu_attn_fwd(  # noqa C901
     )
 
 
-@triton.autotune(
+@triton_autotune(
     configs=_get_fw_configs(),
     key=[
         "AUTOTUNE_Z",
@@ -671,33 +662,6 @@ def _hstu_attn_fwd_persistent(  # noqa C901
         tile_idx += num_progs
 
 
-_hstu_attn_fwd = triton_autotune(
-    configs=_get_fw_configs(),
-    key=[
-        "AUTOTUNE_Z",
-        "H",
-        "AUTOTUNE_MAX_SEQ_LEN",
-        "DimQ",
-        "DimV",
-        "DeltaSize",
-        "IS_DELTA_Q",
-    ],
-)(_hstu_attn_fwd.fn)
-
-_hstu_attn_fwd_persistent = triton_autotune(
-    configs=_get_fw_configs(),
-    key=[
-        "AUTOTUNE_Z",
-        "H",
-        "AUTOTUNE_MAX_SEQ_LEN",
-        "DimQ",
-        "DimV",
-        "DeltaSize",
-        "IS_DELTA_Q",
-    ],
-)(_hstu_attn_fwd_persistent.fn)
-
-
 @triton.jit
 def _hstu_attn_bwd_one_block(  # noqa C901
     start_m,
@@ -705,7 +669,6 @@ def _hstu_attn_bwd_one_block(  # noqa C901
     offs_m,
     q_ptrs_trans,
     dq_ptrs_trans,
-    mask_n,
     do_ptrs,
     dk,
     dv,
@@ -713,7 +676,6 @@ def _hstu_attn_bwd_one_block(  # noqa C901
     v,
     pos_offs_n,
     seq_len,
-    n_targets,
     max_ids,
     contextual_seq_len,
     max_attn_len,
@@ -728,7 +690,6 @@ def _hstu_attn_bwd_one_block(  # noqa C901
     HAS_MAX_ATTN_LEN: tl.constexpr,
     ALLOW_TF32: tl.constexpr,
     BLOCK_M: tl.constexpr,
-    BLOCK_N: tl.constexpr,
     ATOMIC_ADD: tl.constexpr,
 ):
     pos_offs_m = offs_m + start_m
@@ -754,7 +715,6 @@ def _hstu_attn_bwd_one_block(  # noqa C901
         other=0.0,
     )
     qk_trans = tl.dot(k, q_trans, allow_tf32=ALLOW_TF32) * alpha
-    # pyre-fixme[16]: Module `math` has no attribute `fast_dividef`.
     sig_trans = fast_dividef(1.0, 1.0 + tl.exp(-qk_trans))
     silu_trans = qk_trans * sig_trans * (1.0 / MAX_SEQ_LEN)
     pos_offs_m_minus_n = pos_offs_m[None, :] - pos_offs_n[:, None]
@@ -914,7 +874,6 @@ def _hstu_attn_bwd_one_col_block(  # noqa C901
                 offs_m=offs_m,
                 q_ptrs_trans=q_ptrs_trans,
                 dq_ptrs_trans=dq_ptrs_trans,
-                mask_n=mask_n,
                 do_ptrs=do_ptrs,
                 dk=dk,
                 dv=dv,
@@ -922,7 +881,6 @@ def _hstu_attn_bwd_one_col_block(  # noqa C901
                 v=v,
                 pos_offs_n=pos_offs_n,
                 seq_len=seq_len,
-                n_targets=n_targets,
                 max_ids=max_ids,
                 contextual_seq_len=contextual_seq_len,
                 max_attn_len=max_attn_len,
@@ -937,7 +895,6 @@ def _hstu_attn_bwd_one_col_block(  # noqa C901
                 HAS_MAX_ATTN_LEN=HAS_MAX_ATTN_LEN,
                 ALLOW_TF32=ALLOW_TF32,
                 BLOCK_M=BLOCK_M,
-                BLOCK_N=BLOCK_N,
                 ATOMIC_ADD=ATOMIC_ADD,
             )
     for start_m in tl.range(low, high, BLOCK_M, loop_unroll_factor=UNROLL):
@@ -948,7 +905,6 @@ def _hstu_attn_bwd_one_col_block(  # noqa C901
             offs_m=offs_m,
             q_ptrs_trans=q_ptrs_trans,
             dq_ptrs_trans=dq_ptrs_trans,
-            mask_n=mask_n,
             do_ptrs=do_ptrs,
             dk=dk,
             dv=dv,
@@ -956,7 +912,6 @@ def _hstu_attn_bwd_one_col_block(  # noqa C901
             v=v,
             pos_offs_n=pos_offs_n,
             seq_len=seq_len,
-            n_targets=n_targets,
             max_ids=max_ids,
             contextual_seq_len=contextual_seq_len,
             max_attn_len=max_attn_len,
@@ -971,7 +926,6 @@ def _hstu_attn_bwd_one_col_block(  # noqa C901
             HAS_MAX_ATTN_LEN=HAS_MAX_ATTN_LEN,
             ALLOW_TF32=ALLOW_TF32,
             BLOCK_M=BLOCK_M,
-            BLOCK_N=BLOCK_N,
             ATOMIC_ADD=ATOMIC_ADD,
         )
     # write-back
