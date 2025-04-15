@@ -757,14 +757,7 @@ std::vector<at::Tensor> hstu_mha_bwd(
   int const v_head_size_rounded = round_up_headdim(v_head_size);
   // Very important that these match the kernel configs
   bool const is_local = max_attn_len > 0;
-  int const kBlockM_sm90 = qk_head_size_rounded <= 64
-      ? 128
-      : (qk_head_size_rounded <= 96
-             ? 64
-             : (qk_head_size_rounded <= 128 ? (causal || is_local ? 64 : 80)
-                                            : 64));
-  int const kBlockM_sm80 = qk_head_size_rounded <= 64 ? 128 : 64;
-  int const kBlockM = arch >= 90 ? kBlockM_sm90 : kBlockM_sm80;
+  int const kBlockM = kBlockM_bwd(arch, qk_head_size_rounded, causal, is_local);
   auto round_multiple = [](int x, int m) { return (x + m - 1) / m * m; };
   int const max_seq_len_q_rounded = round_multiple(max_seq_len, kBlockM);
   int const total_seq_len_q_padded_rounded =

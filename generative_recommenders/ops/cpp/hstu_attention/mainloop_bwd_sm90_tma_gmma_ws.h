@@ -375,7 +375,7 @@ struct CollectiveMainloopBwdSm90 {
   // but for hdim 64 this helps quite a bit to not have to do causal masking for
   // most of the iterations. For hdim 192, separating masking iterations results
   // in register spills.
-  static constexpr bool SeparateMaskingIterations = kHeadDim <= 64;
+  static constexpr bool SeparateMaskingIterations = false;
   static constexpr bool dQacc_use_TMA = kHeadDim < 256;
   // For hdim256, we want to slice the dQ MMA (64 x 256 on 2 WGs) into two (64 x
   // 128 on 2 WGs) so that we can do atomic add on one half before doing the

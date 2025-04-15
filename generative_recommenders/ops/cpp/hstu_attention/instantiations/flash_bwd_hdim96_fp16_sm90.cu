@@ -21,10 +21,7 @@
 #include "flash_bwd_launch_template.h"
 
 #ifndef FLASHATTENTION_DISABLE_HDIM96
-template <>
-void run_mha_bwd_<90, cutlass::half_t, 96>(
+template void run_mha_bwd_<90, cutlass::half_t, 96>(
     Flash_bwd_params& params,
-    cudaStream_t stream) {
-  run_mha_bwd_hdim96<90, cutlass::half_t>(params, stream);
-}
+    cudaStream_t stream);
 #endif

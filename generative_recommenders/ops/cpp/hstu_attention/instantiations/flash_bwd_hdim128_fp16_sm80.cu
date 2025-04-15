@@ -22,11 +22,8 @@
 
 #ifndef FLASHATTENTION_DISABLE_SM8x
 #ifndef FLASHATTENTION_DISABLE_HDIM128
-template <>
-void run_mha_bwd_<80, cutlass::half_t, 128>(
+template void run_mha_bwd_<80, cutlass::half_t, 128>(
     Flash_bwd_params& params,
-    cudaStream_t stream) {
-  run_mha_bwd_hdim128<80, cutlass::half_t>(params, stream);
-}
+    cudaStream_t stream);
 #endif
 #endif

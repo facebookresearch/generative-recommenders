@@ -22,6 +22,112 @@
 
 #include <tuple>
 
+constexpr int kBlockM_bwd(
+    const int arch,
+    const int headdim,
+    const bool causal,
+    const bool is_local) {
+  int const kBlockM_sm90 = headdim <= 64
+      ? 128
+      : (headdim <= 96
+             ? 64
+             : (headdim <= 128 ? (causal || is_local ? 64 : 80) : 64));
+  int const kBlockM_sm80 = headdim <= 64 ? 128 : 64;
+  int const kBlockM = arch >= 90 ? kBlockM_sm90 : kBlockM_sm80;
+  return kBlockM;
+}
+
+constexpr int kBlockN_bwd(const int arch, const int headdim) {
+  int const kBlockN_sm90 = headdim <= 128 ? 128 : (headdim <= 192 ? 96 : 80);
+  int const kBlockN_sm80 = headdim <= 128 ? 128 : (headdim <= 192 ? 80 : 64);
+  int const kBlockN = arch >= 90 ? kBlockN_sm90 : kBlockN_sm80;
+  return kBlockN;
+}
+
+constexpr int NumMmaWarpGroups_bwd(const int arch, const int headdim) {
+  if (headdim <= 128) {
+    return 2;
+  } else if (headdim == 192) {
+    return arch >= 90 ? 3 : 2;
+  } else {
+    return 2;
+  }
+}
+
+constexpr bool V_in_regs_bwd(const int arch, const int headdim) {
+  if (arch >= 90 && headdim == 96) {
+    return true;
+  }
+  return false;
+}
+
+// Stages_dO, Stages_dS_or_QSm80
+constexpr std::tuple<int, int> Stages_bwd(const int arch, const int headdim) {
+  if (headdim <= 128) {
+    return {2, 2};
+  }
+  if (headdim == 192) {
+    if (arch >= 90) {
+      return {1, 1};
+    } else {
+      return {1, 2};
+    }
+  } else {
+    return {1, 1};
+  }
+}
+
+// AtomLayoutMSdP, AtomLayoutNdKV, AtomLayoutMdQ
+constexpr std::tuple<int, int, int> AtomLayout_bwd(
+    const int arch,
+    const int headdim) {
+  if (headdim <= 64) {
+    if (arch >= 90) {
+      return {1, 2, 2};
+    } else {
+      return {4, 4, 4};
+    }
+  } else if (headdim <= 96) {
+    if (arch >= 90) {
+      return {1, 2, 1};
+    } else {
+      return {2, 4, 2};
+    }
+  } else if (headdim <= 128) {
+    if (arch >= 90) {
+      return {1, 2, 1};
+    } else {
+      return {2, 2, 2};
+    }
+  } else {
+    if (arch >= 90) {
+      return {1, 1, 1};
+    } else {
+      return {4, 2, 2};
+    }
+  }
+}
+
+// SdP_swapAB, dKV_swapAB, dQ_swapAB
+constexpr std::tuple<bool, bool, bool> swapAB_bwd(
+    const int arch,
+    const int headdim,
+    const bool causal,
+    const bool local) {
+  if (headdim <= 96) {
+    return {arch >= 90 ? true : false, false, false};
+  } else if (headdim == 128) {
+    bool SdP_swapAB = arch >= 90 ? true : false;
+    bool dKV_swapAB = false;
+    bool dQ_swapAB = arch >= 90 ? ((causal || local) ? false : true) : false;
+    return {SdP_swapAB, dKV_swapAB, dQ_swapAB};
+  } else if (headdim == 192) {
+    return {false, true, false};
+  } else {
+    return {false, arch >= 90 ? true : false, arch >= 90 ? true : false};
+  }
+}
+
 // Return {kBlockM, kBlockN, Mma1_is_RS}
 constexpr std::tuple<int, int, bool> tile_size_fwd_sm90(
     int headdim,

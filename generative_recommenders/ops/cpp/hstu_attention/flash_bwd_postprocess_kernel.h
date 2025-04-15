@@ -281,10 +281,6 @@ class FlashAttnBwdPostprocessConvertdQ {
     CUTE_STATIC_ASSERT_V(size(taccdQrdQaccum) == size(tdQsdQaccum));
     Tensor tdQrdQaccum = s2r_thr_copy_dQaccum.retile_D(taccdQrdQaccum);
     cute::copy(s2r_tiled_copy_dQaccum, tdQsdQaccum, tdQrdQaccum);
-#pragma unroll
-    for (int i = 0; i < size(taccdQrdQaccum); ++i) {
-      taccdQrdQaccum(i) *= 1;
-    }
     // Convert tdQrdQ from fp32 to fp16
     Tensor rdQ = make_tensor_like<Element>(taccdQrdQaccum);
     flash::convert_type_out(taccdQrdQaccum, rdQ);

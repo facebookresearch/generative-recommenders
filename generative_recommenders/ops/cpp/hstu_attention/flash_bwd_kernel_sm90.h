@@ -169,8 +169,6 @@ class FlashAttnBwdSm90 {
         NumMmaWarpGroups * cutlass::NumThreadsPerWarpGroup;
     static constexpr int NumCopyThreads =
         NumLoadWarpGroups * cutlass::NumThreadsPerWarpGroup;
-    static constexpr int kBlockM = get<0>(TileShape_MNK{});
-    static constexpr int kBlockN = get<1>(TileShape_MNK{});
 
     using MainloopPipeline = typename CollectiveMainloop::MainloopPipeline;
     using PipelineParams = typename MainloopPipeline::Params;
