@@ -64,8 +64,14 @@ class ContextualInterleavePreprocessorTest(unittest.TestCase):
 
         content_encoder = ContentEncoder(
             input_embedding_dim=input_embedding_dim,
-            additional_content_feature_names=["a0", "a1"],
-            target_enrich_feature_names=["t0", "t1"],
+            additional_content_features={
+                "a0": input_embedding_dim,
+                "a1": input_embedding_dim,
+            },
+            target_enrich_features={
+                "t0": input_embedding_dim,
+                "t1": input_embedding_dim,
+            },
             is_inference=False,
         ).to(device)
         action_embedding_dim = 32
