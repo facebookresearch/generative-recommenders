@@ -28,12 +28,15 @@ def pytorch_norm_mul_dropout(
     eps: float,
     dropout_ratio: float,
     training: bool,
+    silu_u: bool = False,
     concat_ux: bool = False,
     group_norm: bool = False,
     num_heads: int = 1,
     linear_dim: int = -1,
 ) -> torch.Tensor:
     dtype = x.dtype
+    if silu_u:
+        u = F.silu(u)
     x = x.to(torch.float32)
     u = u.to(torch.float32)
     if group_norm:
@@ -72,6 +75,7 @@ def pytorch_hstu_compute_output(
     eps: float,
     dropout_ratio: float,
     training: bool,
+    silu_u: bool = False,
     concat_ux: bool = False,
     group_norm: bool = False,
     num_heads: int = 1,
@@ -86,6 +90,7 @@ def pytorch_hstu_compute_output(
         eps=eps,
         dropout_ratio=dropout_ratio,
         training=training,
+        silu_u=silu_u,
         concat_ux=concat_ux,
         group_norm=group_norm,
         num_heads=num_heads,
