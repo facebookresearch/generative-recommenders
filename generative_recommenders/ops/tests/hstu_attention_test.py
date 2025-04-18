@@ -51,6 +51,7 @@ def test_attn(
     contextual_seq_len: int = 0,
     atol: Optional[float] = None,
     rtol: Optional[float] = None,
+    enable_tma: bool = False,
 ) -> None:
     set_dev_mode(True)
     torch.backends.cudnn.allow_tf32 = True
@@ -114,6 +115,7 @@ def test_attn(
         max_attn_len=max_attn_len,
         contextual_seq_len=contextual_seq_len,
         kernel=ref_kernel,
+        enable_tma=enable_tma,
     )
     dout = torch.randn_like(ref_out)
     ref_out.backward(dout)
@@ -144,6 +146,7 @@ def test_attn(
         max_attn_len=max_attn_len,
         contextual_seq_len=contextual_seq_len,
         kernel=real_kernel,
+        enable_tma=enable_tma,
     )
 
     torch.testing.assert_close(
@@ -176,6 +179,7 @@ def test_delta_attn(
     contextual_seq_len: int = 0,
     atol: Optional[float] = None,
     rtol: Optional[float] = None,
+    enable_tma: bool = False,
 ) -> None:
     set_dev_mode(True)
     torch.backends.cudnn.allow_tf32 = True
@@ -225,6 +229,7 @@ def test_delta_attn(
         max_attn_len=max_attn_len,
         contextual_seq_len=contextual_seq_len,
         kernel=ref_kernel,
+        enable_tma=enable_tma,
     )
 
     # real implementation
@@ -239,6 +244,7 @@ def test_delta_attn(
         max_attn_len=max_attn_len,
         contextual_seq_len=contextual_seq_len,
         kernel=real_kernel,
+        enable_tma=enable_tma,
     )
     torch.testing.assert_close(
         ref_out,
@@ -281,6 +287,41 @@ class HSTUAttentionTest(unittest.TestCase):
             test_backward=True,
             ref_kernel=HammerKernel.PYTORCH,
             real_kernel=HammerKernel.TRITON,
+        )
+
+    @unittest.skipIf(*gpu_unavailable)
+    # pyre-ignore
+    @given(
+        batch_size=st.integers(4, 8),
+        heads=st.integers(1, 4),
+        max_uih_len=st.sampled_from([20, 100, 128, 256]),
+        max_targets=st.sampled_from([20, 512]),
+        attn_dim=st.sampled_from([16, 32, 64, 128]),
+        hidden_dim=st.sampled_from([16, 32, 64, 128]),
+        causal=st.sampled_from([True]),
+        has_multiple_targets=st.sampled_from([True, False]),
+        dtype=st.sampled_from(
+            [torch.bfloat16, torch.float32]
+            if torch.cuda.get_device_capability(torch.device("cuda"))[0] >= 8
+            else [torch.float32]
+        ),
+        has_max_attn_len=st.sampled_from([True, False]),
+        contextual_seq_len=st.sampled_from([0, 10]),
+    )
+    @settings(
+        verbosity=Verbosity.verbose,
+        max_examples=200,
+        deadline=None,
+    )
+    # pyre-ignore[2]
+    def test_attn_triton_tma(self, *args, **kwargs) -> None:
+        test_attn(
+            *args,
+            **kwargs,
+            test_backward=True,
+            ref_kernel=HammerKernel.PYTORCH,
+            real_kernel=HammerKernel.TRITON,
+            enable_tma=True,
         )
 
     @unittest.skipIf(*gpu_unavailable)
@@ -345,6 +386,40 @@ class HSTUAttentionTest(unittest.TestCase):
             **kwargs,
             ref_kernel=HammerKernel.PYTORCH,
             real_kernel=HammerKernel.TRITON,
+        )
+
+    @unittest.skipIf(*gpu_unavailable)
+    # pyre-ignore
+    @given(
+        batch_size=st.integers(4, 8),
+        heads=st.integers(1, 4),
+        max_uih_len=st.sampled_from([100, 128, 256]),
+        max_targets=st.sampled_from([20, 512]),
+        delta_size=st.sampled_from([20, 512]),
+        attn_dim=st.sampled_from([16, 32, 64, 128]),
+        hidden_dim=st.sampled_from([16, 32, 64, 128]),
+        has_multiple_targets=st.sampled_from([True, False]),
+        dtype=st.sampled_from(
+            [torch.bfloat16, torch.float32]
+            if torch.cuda.get_device_capability(torch.device("cuda"))[0] >= 8
+            else [torch.float32]
+        ),
+        has_max_attn_len=st.sampled_from([False, True]),
+        contextual_seq_len=st.sampled_from([0, 10]),
+    )
+    @settings(
+        verbosity=Verbosity.verbose,
+        max_examples=200,
+        deadline=None,
+    )
+    # pyre-ignore[2]
+    def test_delta_attn_triton_tma(self, *args, **kwargs) -> None:
+        test_delta_attn(
+            *args,
+            **kwargs,
+            ref_kernel=HammerKernel.PYTORCH,
+            real_kernel=HammerKernel.TRITON,
+            enable_tma=True,
         )
 
     @unittest.skipIf(*gpu_unavailable)

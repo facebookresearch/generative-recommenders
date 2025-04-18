@@ -278,6 +278,10 @@ def _hstu_attn_fwd_compute(  # noqa C901
     Q,
     K,
     V,
+    L,
+    H,
+    DimV,
+    workspace_ptr,
     seq_offsets,
     num_targets,
     Out,
@@ -306,12 +310,29 @@ def _hstu_attn_fwd_compute(  # noqa C901
     BLOCK_N: tl.constexpr,
     HAS_CONTEXTUAL_SEQ_LEN: tl.constexpr,
     HAS_MAX_ATTN_LEN: tl.constexpr,
+    ENABLE_TMA_LOAD: tl.constexpr,
+    ENABLE_TMA_STORE: tl.constexpr,
+    TMA_DESC_SIZE: tl.constexpr,
 ):
     seq_start = tl.load(seq_offsets + off_z).to(tl.int64)
     off_h = off_h.to(tl.int64)
     off_z = off_z.to(tl.int64)
     seq_end = tl.load(seq_offsets + off_z + 1)
     seq_len = (seq_end - seq_start).to(tl.int32)
+
+    device_desc_q = None
+    device_desc_k = None
+    device_desc_v = None
+    device_desc_o = None
+    if ENABLE_TMA_LOAD or ENABLE_TMA_STORE:
+        workspace_base = workspace_ptr + TMA_DESC_SIZE * 4 * (
+            tl.program_id(1) + tl.program_id(0) * tl.num_programs(1)
+        )
+        device_desc_q = workspace_base
+        device_desc_k = workspace_base + 1 * TMA_DESC_SIZE
+        device_desc_v = workspace_base + 2 * TMA_DESC_SIZE
+        device_desc_o = workspace_base + 3 * TMA_DESC_SIZE
+
     if IS_DELTA_Q:
         start_m_delta = pid * BLOCK_M
         start_m = (start_m_delta + seq_len - DeltaSize).to(tl.int32)
@@ -450,21 +471,64 @@ def _hstu_attn_fwd_compute(  # noqa C901
                     K_block_ptr = tl.advance(K_block_ptr, (0, BLOCK_N))
                     V_block_ptr = tl.advance(V_block_ptr, (BLOCK_N, 0))
 
-        if IS_DELTA_Q:
-            start_m_delta = pid * BLOCK_M
-            offs_m_delta = start_m_delta + tl.arange(0, BLOCK_M)
-            offs_v_d = tl.arange(0, BLOCK_D_V)
-            off_o = Out + off_z * DeltaSize * stride_om + off_h * stride_oh
-            out_ptrs = off_o + offs_m_delta[:, None] * stride_om + offs_v_d[None, :]
-            tl.store(out_ptrs, acc, mask=(offs_m_delta < DeltaSize)[:, None])
+        if not ENABLE_TMA_STORE:
+            if IS_DELTA_Q:
+                start_m_delta = pid * BLOCK_M
+                offs_m_delta = start_m_delta + tl.arange(0, BLOCK_M)
+                offs_v_d = tl.arange(0, BLOCK_D_V)
+                off_o = Out + off_z * DeltaSize * stride_om + off_h * stride_oh
+                out_ptrs = off_o + offs_m_delta[:, None] * stride_om + offs_v_d[None, :]
+                tl.store(out_ptrs, acc, mask=(offs_m_delta < DeltaSize)[:, None])
+            else:
+                # rematerialize offsets to save registers
+                start_m = pid * BLOCK_M
+                offs_m = start_m + tl.arange(0, BLOCK_M)
+                offs_v_d = tl.arange(0, BLOCK_D_V)
+                off_o = Out + seq_start * stride_om + off_h * stride_oh
+                out_ptrs = off_o + offs_m[:, None] * stride_om + offs_v_d[None, :]
+                tl.store(out_ptrs, acc, mask=(offs_m < seq_len)[:, None])
         else:
-            # rematerialize offsets to save registers
-            start_m = pid * BLOCK_M
-            offs_m = start_m + tl.arange(0, BLOCK_M)
-            offs_v_d = tl.arange(0, BLOCK_D_V)
-            off_o = Out + seq_start * stride_om + off_h * stride_oh
-            out_ptrs = off_o + offs_m[:, None] * stride_om + offs_v_d[None, :]
-            tl.store(out_ptrs, acc, mask=(offs_m < seq_len)[:, None])
+            # Important: must cast to proper dtype. If acc is float32, but
+            # TMA descriptor specifies float16, the program will run
+            # without crashes but produce wrong results.
+            acc = acc.to(Out.dtype.element_ty)
+            if IS_DELTA_Q:
+                tl.extra.cuda.experimental_device_tensormap_create2d(
+                    desc_ptr=device_desc_o,
+                    global_address=Out,
+                    load_size=[BLOCK_M, BLOCK_D_V],
+                    global_size=[
+                        (off_z * DeltaSize + DeltaSize).to(tl.int32),
+                        H * DimV,
+                    ],
+                    element_ty=Out.dtype.element_ty,
+                )
+                tl.extra.cuda.experimental_tensormap_fenceproxy_acquire(device_desc_o)
+                tl._experimental_descriptor_store(
+                    device_desc_o,
+                    acc,
+                    [
+                        (off_z * DeltaSize + pid * BLOCK_M).to(tl.int32),
+                        (off_h * stride_oh).to(tl.int32),
+                    ],
+                )
+            else:
+                tl.extra.cuda.experimental_device_tensormap_create2d(
+                    desc_ptr=device_desc_o,
+                    global_address=Out,
+                    load_size=[BLOCK_M, BLOCK_D_V],
+                    global_size=[seq_end.to(tl.int32), H * DimV],
+                    element_ty=Out.dtype.element_ty,
+                )
+                tl.extra.cuda.experimental_tensormap_fenceproxy_acquire(device_desc_o)
+                tl._experimental_descriptor_store(
+                    device_desc_o,
+                    acc,
+                    [
+                        (seq_start + pid * BLOCK_M).to(tl.int32),
+                        (off_h * stride_oh).to(tl.int32),
+                    ],
+                )
 
 
 @triton_autotune(
@@ -484,6 +548,7 @@ def _hstu_attn_fwd(  # noqa C901
     Q,
     K,
     V,
+    workspace_ptr,
     sort_by_length_indices,
     seq_offsets,
     num_targets,
@@ -499,6 +564,7 @@ def _hstu_attn_fwd(  # noqa C901
     alpha,
     Z,
     AUTOTUNE_Z,
+    L,
     H,
     MAX_SEQ_LEN,
     AUTOTUNE_MAX_SEQ_LEN,  # Quantized MAX_SEQ_LEN used as an autotuning key
@@ -517,6 +583,9 @@ def _hstu_attn_fwd(  # noqa C901
     HAS_CONTEXTUAL_SEQ_LEN: tl.constexpr,
     HAS_MAX_ATTN_LEN: tl.constexpr,
     HAS_SORT_BY_LENGTH_INDICES: tl.constexpr,
+    ENABLE_TMA_LOAD: tl.constexpr,
+    ENABLE_TMA_STORE: tl.constexpr,
+    TMA_DESC_SIZE: tl.constexpr,
 ):
     off_hz = tl.program_id(1)
     off_z = off_hz // H
@@ -528,6 +597,10 @@ def _hstu_attn_fwd(  # noqa C901
         Q=Q,
         K=K,
         V=V,
+        L=L,
+        H=H,
+        DimV=DimV,
+        workspace_ptr=workspace_ptr,
         seq_offsets=seq_offsets,
         num_targets=num_targets,
         Out=Out,
@@ -556,6 +629,9 @@ def _hstu_attn_fwd(  # noqa C901
         HAS_MAX_ATTN_LEN=HAS_MAX_ATTN_LEN,
         BLOCK_M=BLOCK_M,
         BLOCK_N=BLOCK_N,
+        ENABLE_TMA_LOAD=ENABLE_TMA_LOAD,
+        ENABLE_TMA_STORE=ENABLE_TMA_STORE,
+        TMA_DESC_SIZE=TMA_DESC_SIZE,
     )
 
 
@@ -576,6 +652,7 @@ def _hstu_attn_fwd_persistent(  # noqa C901
     Q,
     K,
     V,
+    workspace_ptr,
     sort_by_length_indices,
     seq_offsets,
     num_targets,
@@ -591,6 +668,7 @@ def _hstu_attn_fwd_persistent(  # noqa C901
     alpha,
     Z,
     AUTOTUNE_Z,
+    L,
     H,
     MAX_SEQ_LEN,
     AUTOTUNE_MAX_SEQ_LEN,  # Quantized MAX_SEQ_LEN used as an autotuning key
@@ -609,6 +687,9 @@ def _hstu_attn_fwd_persistent(  # noqa C901
     HAS_CONTEXTUAL_SEQ_LEN: tl.constexpr,
     HAS_MAX_ATTN_LEN: tl.constexpr,
     HAS_SORT_BY_LENGTH_INDICES: tl.constexpr,
+    ENABLE_TMA_LOAD: tl.constexpr,
+    ENABLE_TMA_STORE: tl.constexpr,
+    TMA_DESC_SIZE: tl.constexpr,
 ):
     n_tile_num = tl.cdiv(MAX_SEQ_LEN, BLOCK_M)
     prog_id = tl.program_id(0)
@@ -630,6 +711,10 @@ def _hstu_attn_fwd_persistent(  # noqa C901
             Q=Q,
             K=K,
             V=V,
+            L=L,
+            H=H,
+            DimV=DimV,
+            workspace_ptr=workspace_ptr,
             seq_offsets=seq_offsets,
             num_targets=num_targets,
             Out=Out,
@@ -658,6 +743,9 @@ def _hstu_attn_fwd_persistent(  # noqa C901
             HAS_MAX_ATTN_LEN=HAS_MAX_ATTN_LEN,
             BLOCK_M=BLOCK_M,
             BLOCK_N=BLOCK_N,
+            ENABLE_TMA_LOAD=ENABLE_TMA_LOAD,
+            ENABLE_TMA_STORE=ENABLE_TMA_STORE,
+            TMA_DESC_SIZE=TMA_DESC_SIZE,
         )
         tile_idx += num_progs
 
@@ -1314,6 +1402,7 @@ def triton_hstu_attention_fwd(
     max_attn_len: int,
     contextual_seq_len: int,
     sort_by_length_indices: Optional[torch.Tensor],
+    enable_tma: bool,
 ) -> torch.Tensor:
     Z = seq_offsets.numel() - 1
     AUTOTUNE_Z = prev_power_of_2(Z)
@@ -1327,6 +1416,16 @@ def triton_hstu_attention_fwd(
     if L == 0:
         return out
 
+    TMA_DESC_SIZE = 128
+    workspace = None
+    if enable_tma:
+        MIN_BLOCK_M = 16  # better way than this?
+        workspace = torch.empty(
+            4 * TMA_DESC_SIZE * (triton.cdiv(N, MIN_BLOCK_M) * Z * H),
+            dtype=torch.uint8,
+            device="cuda",
+        )
+
     grid = lambda meta: (  # noqa E731
         triton.cdiv(N, meta["BLOCK_M"]),
         Z * H,
@@ -1336,6 +1435,7 @@ def triton_hstu_attention_fwd(
         Q=q,
         K=k,
         V=v,
+        workspace_ptr=workspace,
         sort_by_length_indices=sort_by_length_indices,
         seq_offsets=seq_offsets,
         num_targets=num_targets,
@@ -1351,6 +1451,7 @@ def triton_hstu_attention_fwd(
         alpha=alpha,
         Z=Z,
         AUTOTUNE_Z=AUTOTUNE_Z,
+        L=L,
         H=H,
         MAX_SEQ_LEN=N,
         AUTOTUNE_MAX_SEQ_LEN=autotune_max_seq_len(N),
@@ -1367,6 +1468,9 @@ def triton_hstu_attention_fwd(
         HAS_CONTEXTUAL_SEQ_LEN=has_contextual_seq_len,
         HAS_MAX_ATTN_LEN=has_max_attn_len,
         HAS_SORT_BY_LENGTH_INDICES=has_sort_by_length_indices,
+        ENABLE_TMA_LOAD=False,
+        ENABLE_TMA_STORE=enable_tma,
+        TMA_DESC_SIZE=TMA_DESC_SIZE,
     )
     return out
 
@@ -1472,6 +1576,7 @@ class _AttentionFunction(torch.autograd.Function):
         max_attn_len: int,
         contextual_seq_len: int,
         sort_by_length: bool,
+        enable_tma: bool,
     ) -> torch.Tensor:
         sort_by_length_indices = None
         if sort_by_length:
@@ -1502,6 +1607,7 @@ class _AttentionFunction(torch.autograd.Function):
             max_attn_len=max_attn_len,
             contextual_seq_len=contextual_seq_len,
             sort_by_length_indices=sort_by_length_indices,
+            enable_tma=enable_tma,
         )
 
     @staticmethod
@@ -1514,6 +1620,7 @@ class _AttentionFunction(torch.autograd.Function):
         torch.Tensor,
         torch.Tensor,
         torch.Tensor,
+        None,
         None,
         None,
         None,
@@ -1563,6 +1670,7 @@ class _AttentionFunction(torch.autograd.Function):
                 None,
                 None,
                 None,
+                None,
             )
 
 
@@ -1578,6 +1686,7 @@ def triton_hstu_mha(
     max_attn_len: int = 0,
     contextual_seq_len: int = 0,
     sort_by_length: bool = False,
+    enable_tma: bool = False,
 ) -> torch.Tensor:
     return _AttentionFunction.apply(
         N,
@@ -1590,6 +1699,7 @@ def triton_hstu_mha(
         max_attn_len,
         contextual_seq_len,
         sort_by_length,
+        enable_tma,
     )
 
 
@@ -1604,6 +1714,7 @@ def triton_cached_hstu_mha(
     num_targets: Optional[torch.Tensor] = None,
     max_attn_len: int = 0,
     contextual_seq_len: int = 0,
+    enable_tma: bool = False,
 ) -> torch.Tensor:
     Z = seq_offsets.size(0) - 1
     AUTOTUNE_Z = prev_power_of_2(Z)
@@ -1611,6 +1722,17 @@ def triton_cached_hstu_mha(
     DeltaSize = L // Z
     _, _, DimV = v.shape
     out = torch.empty((L, H, DimV), dtype=delta_q.dtype, device=delta_q.device)
+
+    TMA_DESC_SIZE = 128
+    workspace = None
+    if enable_tma:
+        MIN_BLOCK_M = 16  # better way than this?
+        workspace = torch.empty(
+            4 * TMA_DESC_SIZE * (triton.cdiv(N, MIN_BLOCK_M) * Z * H),
+            dtype=torch.uint8,
+            device="cuda",
+        )
+
     grid = lambda meta: (  # noqa E731
         triton.cdiv(DeltaSize, meta["BLOCK_M"]),
         Z * H,
@@ -1621,6 +1743,7 @@ def triton_cached_hstu_mha(
         Q=delta_q,
         K=k,
         V=v,
+        workspace_ptr=workspace,
         sort_by_length_indices=None,
         seq_offsets=seq_offsets,
         num_targets=num_targets,
@@ -1638,6 +1761,7 @@ def triton_cached_hstu_mha(
         max_attn_len=max_attn_len,
         Z=Z,
         AUTOTUNE_Z=AUTOTUNE_Z,
+        L=L,
         H=H,
         MAX_SEQ_LEN=N,
         AUTOTUNE_MAX_SEQ_LEN=autotune_max_seq_len(N),
@@ -1652,5 +1776,8 @@ def triton_cached_hstu_mha(
         HAS_CONTEXTUAL_SEQ_LEN=has_contextual_seq_len,
         HAS_MAX_ATTN_LEN=has_max_attn_len,
         HAS_SORT_BY_LENGTH_INDICES=False,
+        ENABLE_TMA_LOAD=False,
+        ENABLE_TMA_STORE=enable_tma,
+        TMA_DESC_SIZE=TMA_DESC_SIZE,
     )
     return out
