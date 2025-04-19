@@ -213,8 +213,15 @@ def _hstu_attn_fwd_one_block(  # noqa: C901
     offs_m,
     offs_n,
     q,
+    K,
+    V,
     K_block_ptr,
     V_block_ptr,
+    device_desc_k,
+    device_desc_v,
+    offset_kh,
+    offset_vh,
+    seq_start,
     n_targets,
     alpha,
     MAX_SEQ_LEN,
@@ -224,12 +231,27 @@ def _hstu_attn_fwd_one_block(  # noqa: C901
     HAS_CONTEXTUAL_SEQ_LEN: tl.constexpr,
     HAS_MAX_ATTN_LEN: tl.constexpr,
     ALLOW_TF32: tl.constexpr,
+    BLOCK_D_Q: tl.constexpr,
+    BLOCK_D_V: tl.constexpr,
     BLOCK_N: tl.constexpr,
+    ENABLE_TMA_LOAD: tl.constexpr,
 ):
     start_n = tl.multiple_of(start_n, BLOCK_N)
     # -- compute qk ----
-    k = tl.load(K_block_ptr, boundary_check=(1,), padding_option="zero")
-    qk = tl.dot(q, k, allow_tf32=ALLOW_TF32) * alpha
+    k = None
+    qk = None
+    if ENABLE_TMA_LOAD:
+        k = tl._experimental_descriptor_load(
+            device_desc_k,
+            [(seq_start + start_n).to(tl.int32), offset_kh.to(tl.int32)],
+            [BLOCK_N, BLOCK_D_Q],
+            K.dtype.element_ty,
+        )
+        # tma can only be loaded in one order, use trans afterwards
+        qk = tl.dot(q, tl.trans(k), allow_tf32=ALLOW_TF32) * alpha
+    else:
+        k = tl.load(K_block_ptr, boundary_check=(1,), padding_option="zero")
+        qk = tl.dot(q, k, allow_tf32=ALLOW_TF32) * alpha
     invalid_mask = offs_m[:, None] == offs_n[None, :]
     max_ids = seq_len
     if HAS_CONTEXTUAL_SEQ_LEN:
@@ -268,7 +290,16 @@ def _hstu_attn_fwd_one_block(  # noqa: C901
         )
     silu = fast_dividef(qk, 1.0 + tl.exp(-qk)) * (1.0 / MAX_SEQ_LEN)
     silu = tl.where(invalid_mask, silu, 0)
-    v = tl.load(V_block_ptr, boundary_check=(0,), padding_option="zero")
+    v = None
+    if ENABLE_TMA_LOAD:
+        v = tl._experimental_descriptor_load(
+            device_desc_v,
+            [(seq_start + start_n).to(tl.int32), offset_vh.to(tl.int32)],
+            [BLOCK_N, BLOCK_D_V],
+            V.dtype.element_ty,
+        )
+    else:
+        v = tl.load(V_block_ptr, boundary_check=(0,), padding_option="zero")
     silu = silu.to(v.dtype)
     return tl.dot(silu, v, allow_tf32=ALLOW_TF32)
 
@@ -278,6 +309,11 @@ def _hstu_attn_fwd_compute(  # noqa C901
     Q,
     K,
     V,
+    L,
+    H,
+    DimQ,
+    DimV,
+    workspace_ptr,
     seq_offsets,
     num_targets,
     Out,
@@ -306,12 +342,56 @@ def _hstu_attn_fwd_compute(  # noqa C901
     BLOCK_N: tl.constexpr,
     HAS_CONTEXTUAL_SEQ_LEN: tl.constexpr,
     HAS_MAX_ATTN_LEN: tl.constexpr,
+    ENABLE_TMA_LOAD: tl.constexpr,
+    ENABLE_TMA_STORE: tl.constexpr,
+    TMA_DESC_SIZE: tl.constexpr,
 ):
     seq_start = tl.load(seq_offsets + off_z).to(tl.int64)
     off_h = off_h.to(tl.int64)
     off_z = off_z.to(tl.int64)
     seq_end = tl.load(seq_offsets + off_z + 1)
     seq_len = (seq_end - seq_start).to(tl.int32)
+
+    device_desc_q = None
+    device_desc_k = None
+    device_desc_v = None
+    device_desc_o = None
+    if ENABLE_TMA_LOAD or ENABLE_TMA_STORE:
+        workspace_base = workspace_ptr + TMA_DESC_SIZE * 4 * (
+            tl.program_id(1) + tl.program_id(0) * tl.num_programs(1)
+        )
+        device_desc_q = workspace_base
+        device_desc_k = workspace_base + 1 * TMA_DESC_SIZE
+        device_desc_v = workspace_base + 2 * TMA_DESC_SIZE
+        device_desc_o = workspace_base + 3 * TMA_DESC_SIZE
+
+        # pyre-ignore [20]
+        tl.extra.cuda.experimental_device_tensormap_create2d(
+            desc_ptr=device_desc_k,
+            global_address=K,
+            load_size=[
+                BLOCK_N,
+                BLOCK_D_Q,
+            ],
+            global_size=[seq_end.to(tl.int32), H * DimQ],
+            element_ty=K.dtype.element_ty,
+        )
+        # pyre-ignore [20]
+        tl.extra.cuda.experimental_device_tensormap_create2d(
+            desc_ptr=device_desc_v,
+            global_address=V,
+            load_size=[
+                BLOCK_N,
+                BLOCK_D_V,
+            ],
+            global_size=[seq_end.to(tl.int32), H * DimV],
+            element_ty=V.dtype.element_ty,
+        )
+        # pyre-ignore [20]
+        tl.extra.cuda.experimental_tensormap_fenceproxy_acquire(device_desc_k)
+        # pyre-ignore [20]
+        tl.extra.cuda.experimental_tensormap_fenceproxy_acquire(device_desc_v)
+
     if IS_DELTA_Q:
         start_m_delta = pid * BLOCK_M
         start_m = (start_m_delta + seq_len - DeltaSize).to(tl.int32)
@@ -327,42 +407,105 @@ def _hstu_attn_fwd_compute(  # noqa C901
         # initialize offsets
         offs_m = start_m + tl.arange(0, BLOCK_M)
         offs_n = tl.arange(0, BLOCK_N)
-        if IS_DELTA_Q:
-            Q_block_ptr = tl.make_block_ptr(
-                base=Q + off_h * stride_qh + off_z * DeltaSize * stride_qm,
-                shape=(DeltaSize, BLOCK_D_Q),
-                strides=(stride_qm, 1),
-                offsets=(start_m_delta, 0),
-                block_shape=(BLOCK_M, BLOCK_D_Q),
+        Q_block_ptr = None
+        K_block_ptr = None
+        V_block_ptr = None
+        if not ENABLE_TMA_LOAD:
+            if IS_DELTA_Q:
+                Q_block_ptr = tl.make_block_ptr(
+                    base=Q + off_h * stride_qh + off_z * DeltaSize * stride_qm,
+                    shape=(DeltaSize, BLOCK_D_Q),
+                    strides=(stride_qm, 1),
+                    offsets=(start_m_delta, 0),
+                    block_shape=(BLOCK_M, BLOCK_D_Q),
+                    order=(1, 0),
+                )
+            else:
+                Q_block_ptr = tl.make_block_ptr(
+                    base=Q + off_h * stride_qh + seq_start * stride_qm,
+                    shape=(seq_len, BLOCK_D_Q),
+                    strides=(stride_qm, 1),
+                    offsets=(start_m, 0),
+                    block_shape=(BLOCK_M, BLOCK_D_Q),
+                    order=(1, 0),
+                )
+            q = tl.load(Q_block_ptr, boundary_check=(0,), padding_option="zero")
+
+            K_block_ptr = tl.make_block_ptr(
+                base=K + off_h * stride_kh + seq_start * stride_kn,
+                shape=(BLOCK_D_Q, seq_len),
+                strides=(1, stride_kn),
+                offsets=(0, 0),
+                block_shape=(BLOCK_D_Q, BLOCK_N),
+                order=(0, 1),
+            )
+            V_block_ptr = tl.make_block_ptr(
+                base=V + off_h * stride_vh + seq_start * stride_vn,
+                shape=(seq_len, BLOCK_D_V),
+                strides=(stride_vn, 1),
+                offsets=(0, 0),
+                block_shape=(BLOCK_N, BLOCK_D_V),
                 order=(1, 0),
             )
         else:
-            Q_block_ptr = tl.make_block_ptr(
-                base=Q + off_h * stride_qh + seq_start * stride_qm,
-                shape=(seq_len, BLOCK_D_Q),
-                strides=(stride_qm, 1),
-                offsets=(start_m, 0),
-                block_shape=(BLOCK_M, BLOCK_D_Q),
-                order=(1, 0),
-            )
-        K_block_ptr = tl.make_block_ptr(
-            base=K + off_h * stride_kh + seq_start * stride_kn,
-            shape=(BLOCK_D_Q, seq_len),
-            strides=(1, stride_kn),
-            offsets=(0, 0),
-            block_shape=(BLOCK_D_Q, BLOCK_N),
-            order=(0, 1),
-        )
-        V_block_ptr = tl.make_block_ptr(
-            base=V + off_h * stride_vh + seq_start * stride_vn,
-            shape=(seq_len, BLOCK_D_V),
-            strides=(stride_vn, 1),
-            offsets=(0, 0),
-            block_shape=(BLOCK_N, BLOCK_D_V),
-            order=(1, 0),
-        )
+            if IS_DELTA_Q:
+                # pyre-ignore [20]
+                tl.extra.cuda.experimental_device_tensormap_create2d(
+                    desc_ptr=device_desc_q,
+                    global_address=Q,
+                    load_size=[
+                        BLOCK_M,
+                        BLOCK_D_Q,
+                    ],
+                    global_size=[
+                        (off_z * DeltaSize + DeltaSize).to(tl.int32),
+                        H * DimQ,
+                    ],
+                    element_ty=Q.dtype.element_ty,
+                )
+                # pyre-ignore [20]
+                tl.extra.cuda.experimental_tensormap_fenceproxy_acquire(device_desc_q)
 
-        q = tl.load(Q_block_ptr, boundary_check=(0,), padding_option="zero")
+                q = tl._experimental_descriptor_load(
+                    device_desc_q,
+                    [
+                        (off_z * DeltaSize + start_m_delta).to(tl.int32),
+                        (off_h * stride_qh).to(tl.int32),
+                    ],
+                    [
+                        BLOCK_M,
+                        BLOCK_D_Q,
+                    ],
+                    Q.dtype.element_ty,
+                )
+            else:
+                # pyre-ignore [20]
+                tl.extra.cuda.experimental_device_tensormap_create2d(
+                    desc_ptr=device_desc_q,
+                    global_address=Q,
+                    load_size=[
+                        BLOCK_M,
+                        BLOCK_D_Q,
+                    ],
+                    global_size=[seq_end.to(tl.int32), H * DimQ],
+                    element_ty=Q.dtype.element_ty,
+                )
+                # pyre-ignore [20]
+                tl.extra.cuda.experimental_tensormap_fenceproxy_acquire(device_desc_q)
+
+                q = tl._experimental_descriptor_load(
+                    device_desc_q,
+                    [
+                        (seq_start + start_m).to(tl.int32),
+                        (off_h * stride_qh).to(tl.int32),
+                    ],
+                    [
+                        BLOCK_M,
+                        BLOCK_D_Q,
+                    ],
+                    Q.dtype.element_ty,
+                )
+
         acc = tl.zeros([BLOCK_M, BLOCK_D_V], dtype=tl.float32)
         if HAS_MULTIPLE_TARGETS:
             uih_end = seq_len - n_targets
@@ -390,8 +533,9 @@ def _hstu_attn_fwd_compute(  # noqa C901
                     high = seq_len - n_targets
 
         if low > 0:
-            K_block_ptr = tl.advance(K_block_ptr, (0, low))
-            V_block_ptr = tl.advance(V_block_ptr, (low, 0))
+            if not ENABLE_TMA_LOAD:
+                K_block_ptr = tl.advance(K_block_ptr, (0, low))
+                V_block_ptr = tl.advance(V_block_ptr, (low, 0))
         end_n = low
         for start_n in range(low, high, BLOCK_N):
             acc += _hstu_attn_fwd_one_block(
@@ -400,8 +544,15 @@ def _hstu_attn_fwd_compute(  # noqa C901
                 offs_m=offs_m,
                 offs_n=offs_n + start_n,
                 q=q,
+                K=K,
+                V=V,
                 K_block_ptr=K_block_ptr,
                 V_block_ptr=V_block_ptr,
+                device_desc_k=device_desc_k,
+                device_desc_v=device_desc_v,
+                offset_kh=off_h * stride_kh,
+                offset_vh=off_h * stride_vh,
+                seq_start=seq_start,
                 n_targets=n_targets if HAS_MULTIPLE_TARGETS else None,
                 alpha=alpha,
                 MAX_SEQ_LEN=MAX_SEQ_LEN,
@@ -411,10 +562,14 @@ def _hstu_attn_fwd_compute(  # noqa C901
                 HAS_CONTEXTUAL_SEQ_LEN=HAS_CONTEXTUAL_SEQ_LEN,
                 HAS_MAX_ATTN_LEN=HAS_MAX_ATTN_LEN,
                 ALLOW_TF32=ALLOW_TF32,
+                BLOCK_D_Q=BLOCK_D_Q,
+                BLOCK_D_V=BLOCK_D_V,
                 BLOCK_N=BLOCK_N,
+                ENABLE_TMA_LOAD=ENABLE_TMA_LOAD,
             )
-            K_block_ptr = tl.advance(K_block_ptr, (0, BLOCK_N))
-            V_block_ptr = tl.advance(V_block_ptr, (BLOCK_N, 0))
+            if not ENABLE_TMA_LOAD:
+                K_block_ptr = tl.advance(K_block_ptr, (0, BLOCK_N))
+                V_block_ptr = tl.advance(V_block_ptr, (BLOCK_N, 0))
             end_n += BLOCK_N
 
         if HAS_MULTIPLE_TARGETS:
@@ -423,8 +578,9 @@ def _hstu_attn_fwd_compute(  # noqa C901
                 low_delta = start_m
                 high_delta = start_m + BLOCK_M
                 offset = (low_delta - end_n).to(tl.int32)
-                K_block_ptr = tl.advance(K_block_ptr, (0, offset))
-                V_block_ptr = tl.advance(V_block_ptr, (offset, 0))
+                if not ENABLE_TMA_LOAD:
+                    K_block_ptr = tl.advance(K_block_ptr, (0, offset))
+                    V_block_ptr = tl.advance(V_block_ptr, (offset, 0))
                 for start_delta in tl.range(
                     low_delta, high_delta, BLOCK_N, num_stages=0
                 ):
@@ -434,8 +590,15 @@ def _hstu_attn_fwd_compute(  # noqa C901
                         offs_m=offs_m,
                         offs_n=offs_n + start_delta,
                         q=q,
+                        K=K,
+                        V=V,
                         K_block_ptr=K_block_ptr,
                         V_block_ptr=V_block_ptr,
+                        device_desc_k=device_desc_k,
+                        device_desc_v=device_desc_v,
+                        offset_kh=off_h * stride_kh,
+                        offset_vh=off_h * stride_vh,
+                        seq_start=seq_start,
                         n_targets=n_targets if HAS_MULTIPLE_TARGETS else None,
                         alpha=alpha,
                         MAX_SEQ_LEN=MAX_SEQ_LEN,
@@ -445,26 +608,76 @@ def _hstu_attn_fwd_compute(  # noqa C901
                         HAS_CONTEXTUAL_SEQ_LEN=HAS_CONTEXTUAL_SEQ_LEN,
                         HAS_MAX_ATTN_LEN=HAS_MAX_ATTN_LEN,
                         ALLOW_TF32=ALLOW_TF32,
+                        BLOCK_D_Q=BLOCK_D_Q,
+                        BLOCK_D_V=BLOCK_D_V,
                         BLOCK_N=BLOCK_N,
+                        ENABLE_TMA_LOAD=ENABLE_TMA_LOAD,
                     )
-                    K_block_ptr = tl.advance(K_block_ptr, (0, BLOCK_N))
-                    V_block_ptr = tl.advance(V_block_ptr, (BLOCK_N, 0))
-
-        if IS_DELTA_Q:
-            start_m_delta = pid * BLOCK_M
-            offs_m_delta = start_m_delta + tl.arange(0, BLOCK_M)
-            offs_v_d = tl.arange(0, BLOCK_D_V)
-            off_o = Out + off_z * DeltaSize * stride_om + off_h * stride_oh
-            out_ptrs = off_o + offs_m_delta[:, None] * stride_om + offs_v_d[None, :]
-            tl.store(out_ptrs, acc, mask=(offs_m_delta < DeltaSize)[:, None])
+                    if not ENABLE_TMA_LOAD:
+                        K_block_ptr = tl.advance(K_block_ptr, (0, BLOCK_N))
+                        V_block_ptr = tl.advance(V_block_ptr, (BLOCK_N, 0))
+        if not ENABLE_TMA_STORE:
+            if IS_DELTA_Q:
+                start_m_delta = pid * BLOCK_M
+                offs_m_delta = start_m_delta + tl.arange(0, BLOCK_M)
+                offs_v_d = tl.arange(0, BLOCK_D_V)
+                off_o = Out + off_z * DeltaSize * stride_om + off_h * stride_oh
+                out_ptrs = off_o + offs_m_delta[:, None] * stride_om + offs_v_d[None, :]
+                tl.store(out_ptrs, acc, mask=(offs_m_delta < DeltaSize)[:, None])
+            else:
+                # rematerialize offsets to save registers
+                start_m = pid * BLOCK_M
+                offs_m = start_m + tl.arange(0, BLOCK_M)
+                offs_v_d = tl.arange(0, BLOCK_D_V)
+                off_o = Out + seq_start * stride_om + off_h * stride_oh
+                out_ptrs = off_o + offs_m[:, None] * stride_om + offs_v_d[None, :]
+                tl.store(out_ptrs, acc, mask=(offs_m < seq_len)[:, None])
         else:
-            # rematerialize offsets to save registers
-            start_m = pid * BLOCK_M
-            offs_m = start_m + tl.arange(0, BLOCK_M)
-            offs_v_d = tl.arange(0, BLOCK_D_V)
-            off_o = Out + seq_start * stride_om + off_h * stride_oh
-            out_ptrs = off_o + offs_m[:, None] * stride_om + offs_v_d[None, :]
-            tl.store(out_ptrs, acc, mask=(offs_m < seq_len)[:, None])
+            # Important: must cast to proper dtype. If acc is float32, but
+            # TMA descriptor specifies float16, the program will run
+            # without crashes but produce wrong results.
+            acc = acc.to(Out.dtype.element_ty)
+            if IS_DELTA_Q:
+                # pyre-ignore [20]
+                tl.extra.cuda.experimental_device_tensormap_create2d(
+                    desc_ptr=device_desc_o,
+                    global_address=Out,
+                    load_size=[BLOCK_M, BLOCK_D_V],
+                    global_size=[
+                        (off_z * DeltaSize + DeltaSize).to(tl.int32),
+                        H * DimV,
+                    ],
+                    element_ty=Out.dtype.element_ty,
+                )
+                # pyre-ignore [20]
+                tl.extra.cuda.experimental_tensormap_fenceproxy_acquire(device_desc_o)
+                tl._experimental_descriptor_store(
+                    device_desc_o,
+                    acc,
+                    [
+                        (off_z * DeltaSize + pid * BLOCK_M).to(tl.int32),
+                        (off_h * stride_oh).to(tl.int32),
+                    ],
+                )
+            else:
+                # pyre-ignore [20]
+                tl.extra.cuda.experimental_device_tensormap_create2d(
+                    desc_ptr=device_desc_o,
+                    global_address=Out,
+                    load_size=[BLOCK_M, BLOCK_D_V],
+                    global_size=[seq_end.to(tl.int32), H * DimV],
+                    element_ty=Out.dtype.element_ty,
+                )
+                # pyre-ignore [20]
+                tl.extra.cuda.experimental_tensormap_fenceproxy_acquire(device_desc_o)
+                tl._experimental_descriptor_store(
+                    device_desc_o,
+                    acc,
+                    [
+                        (seq_start + pid * BLOCK_M).to(tl.int32),
+                        (off_h * stride_oh).to(tl.int32),
+                    ],
+                )
 
 
 @triton_autotune(
@@ -484,6 +697,7 @@ def _hstu_attn_fwd(  # noqa C901
     Q,
     K,
     V,
+    workspace_ptr,
     sort_by_length_indices,
     seq_offsets,
     num_targets,
@@ -499,6 +713,7 @@ def _hstu_attn_fwd(  # noqa C901
     alpha,
     Z,
     AUTOTUNE_Z,
+    L,
     H,
     MAX_SEQ_LEN,
     AUTOTUNE_MAX_SEQ_LEN,  # Quantized MAX_SEQ_LEN used as an autotuning key
@@ -517,6 +732,9 @@ def _hstu_attn_fwd(  # noqa C901
     HAS_CONTEXTUAL_SEQ_LEN: tl.constexpr,
     HAS_MAX_ATTN_LEN: tl.constexpr,
     HAS_SORT_BY_LENGTH_INDICES: tl.constexpr,
+    ENABLE_TMA_LOAD: tl.constexpr,
+    ENABLE_TMA_STORE: tl.constexpr,
+    TMA_DESC_SIZE: tl.constexpr,
 ):
     off_hz = tl.program_id(1)
     off_z = off_hz // H
@@ -528,6 +746,11 @@ def _hstu_attn_fwd(  # noqa C901
         Q=Q,
         K=K,
         V=V,
+        L=L,
+        H=H,
+        DimQ=DimQ,
+        DimV=DimV,
+        workspace_ptr=workspace_ptr,
         seq_offsets=seq_offsets,
         num_targets=num_targets,
         Out=Out,
@@ -556,6 +779,9 @@ def _hstu_attn_fwd(  # noqa C901
         HAS_MAX_ATTN_LEN=HAS_MAX_ATTN_LEN,
         BLOCK_M=BLOCK_M,
         BLOCK_N=BLOCK_N,
+        ENABLE_TMA_LOAD=ENABLE_TMA_LOAD,
+        ENABLE_TMA_STORE=ENABLE_TMA_STORE,
+        TMA_DESC_SIZE=TMA_DESC_SIZE,
     )
 
 
@@ -576,6 +802,7 @@ def _hstu_attn_fwd_persistent(  # noqa C901
     Q,
     K,
     V,
+    workspace_ptr,
     sort_by_length_indices,
     seq_offsets,
     num_targets,
@@ -591,6 +818,7 @@ def _hstu_attn_fwd_persistent(  # noqa C901
     alpha,
     Z,
     AUTOTUNE_Z,
+    L,
     H,
     MAX_SEQ_LEN,
     AUTOTUNE_MAX_SEQ_LEN,  # Quantized MAX_SEQ_LEN used as an autotuning key
@@ -609,6 +837,9 @@ def _hstu_attn_fwd_persistent(  # noqa C901
     HAS_CONTEXTUAL_SEQ_LEN: tl.constexpr,
     HAS_MAX_ATTN_LEN: tl.constexpr,
     HAS_SORT_BY_LENGTH_INDICES: tl.constexpr,
+    ENABLE_TMA_LOAD: tl.constexpr,
+    ENABLE_TMA_STORE: tl.constexpr,
+    TMA_DESC_SIZE: tl.constexpr,
 ):
     n_tile_num = tl.cdiv(MAX_SEQ_LEN, BLOCK_M)
     prog_id = tl.program_id(0)
@@ -630,6 +861,11 @@ def _hstu_attn_fwd_persistent(  # noqa C901
             Q=Q,
             K=K,
             V=V,
+            L=L,
+            H=H,
+            DimQ=DimQ,
+            DimV=DimV,
+            workspace_ptr=workspace_ptr,
             seq_offsets=seq_offsets,
             num_targets=num_targets,
             Out=Out,
@@ -658,6 +894,9 @@ def _hstu_attn_fwd_persistent(  # noqa C901
             HAS_MAX_ATTN_LEN=HAS_MAX_ATTN_LEN,
             BLOCK_M=BLOCK_M,
             BLOCK_N=BLOCK_N,
+            ENABLE_TMA_LOAD=ENABLE_TMA_LOAD,
+            ENABLE_TMA_STORE=ENABLE_TMA_STORE,
+            TMA_DESC_SIZE=TMA_DESC_SIZE,
         )
         tile_idx += num_progs
 
@@ -1314,6 +1553,7 @@ def triton_hstu_attention_fwd(
     max_attn_len: int,
     contextual_seq_len: int,
     sort_by_length_indices: Optional[torch.Tensor],
+    enable_tma: bool,
 ) -> torch.Tensor:
     Z = seq_offsets.numel() - 1
     AUTOTUNE_Z = prev_power_of_2(Z)
@@ -1327,6 +1567,16 @@ def triton_hstu_attention_fwd(
     if L == 0:
         return out
 
+    TMA_DESC_SIZE = 128
+    workspace = None
+    if enable_tma:
+        MIN_BLOCK_M = 16
+        workspace = torch.empty(
+            4 * TMA_DESC_SIZE * (triton.cdiv(N, MIN_BLOCK_M) * Z * H),
+            dtype=torch.uint8,
+            device="cuda",
+        )
+
     grid = lambda meta: (  # noqa E731
         triton.cdiv(N, meta["BLOCK_M"]),
         Z * H,
@@ -1336,6 +1586,7 @@ def triton_hstu_attention_fwd(
         Q=q,
         K=k,
         V=v,
+        workspace_ptr=workspace,
         sort_by_length_indices=sort_by_length_indices,
         seq_offsets=seq_offsets,
         num_targets=num_targets,
@@ -1351,6 +1602,7 @@ def triton_hstu_attention_fwd(
         alpha=alpha,
         Z=Z,
         AUTOTUNE_Z=AUTOTUNE_Z,
+        L=L,
         H=H,
         MAX_SEQ_LEN=N,
         AUTOTUNE_MAX_SEQ_LEN=autotune_max_seq_len(N),
@@ -1367,6 +1619,9 @@ def triton_hstu_attention_fwd(
         HAS_CONTEXTUAL_SEQ_LEN=has_contextual_seq_len,
         HAS_MAX_ATTN_LEN=has_max_attn_len,
         HAS_SORT_BY_LENGTH_INDICES=has_sort_by_length_indices,
+        ENABLE_TMA_LOAD=enable_tma,
+        ENABLE_TMA_STORE=enable_tma,
+        TMA_DESC_SIZE=TMA_DESC_SIZE,
     )
     return out
 
@@ -1472,6 +1727,7 @@ class _AttentionFunction(torch.autograd.Function):
         max_attn_len: int,
         contextual_seq_len: int,
         sort_by_length: bool,
+        enable_tma: bool,
     ) -> torch.Tensor:
         sort_by_length_indices = None
         if sort_by_length:
@@ -1502,6 +1758,7 @@ class _AttentionFunction(torch.autograd.Function):
             max_attn_len=max_attn_len,
             contextual_seq_len=contextual_seq_len,
             sort_by_length_indices=sort_by_length_indices,
+            enable_tma=enable_tma,
         )
 
     @staticmethod
@@ -1514,6 +1771,7 @@ class _AttentionFunction(torch.autograd.Function):
         torch.Tensor,
         torch.Tensor,
         torch.Tensor,
+        None,
         None,
         None,
         None,
@@ -1563,6 +1821,7 @@ class _AttentionFunction(torch.autograd.Function):
                 None,
                 None,
                 None,
+                None,
             )
 
 
@@ -1578,6 +1837,7 @@ def triton_hstu_mha(
     max_attn_len: int = 0,
     contextual_seq_len: int = 0,
     sort_by_length: bool = False,
+    enable_tma: bool = False,
 ) -> torch.Tensor:
     return _AttentionFunction.apply(
         N,
@@ -1590,6 +1850,7 @@ def triton_hstu_mha(
         max_attn_len,
         contextual_seq_len,
         sort_by_length,
+        enable_tma,
     )
 
 
@@ -1604,6 +1865,7 @@ def triton_cached_hstu_mha(
     num_targets: Optional[torch.Tensor] = None,
     max_attn_len: int = 0,
     contextual_seq_len: int = 0,
+    enable_tma: bool = False,
 ) -> torch.Tensor:
     Z = seq_offsets.size(0) - 1
     AUTOTUNE_Z = prev_power_of_2(Z)
@@ -1611,6 +1873,17 @@ def triton_cached_hstu_mha(
     DeltaSize = L // Z
     _, _, DimV = v.shape
     out = torch.empty((L, H, DimV), dtype=delta_q.dtype, device=delta_q.device)
+
+    TMA_DESC_SIZE = 128
+    workspace = None
+    if enable_tma:
+        MIN_BLOCK_M = 16
+        workspace = torch.empty(
+            4 * TMA_DESC_SIZE * (triton.cdiv(N, MIN_BLOCK_M) * Z * H),
+            dtype=torch.uint8,
+            device="cuda",
+        )
+
     grid = lambda meta: (  # noqa E731
         triton.cdiv(DeltaSize, meta["BLOCK_M"]),
         Z * H,
@@ -1621,6 +1894,7 @@ def triton_cached_hstu_mha(
         Q=delta_q,
         K=k,
         V=v,
+        workspace_ptr=workspace,
         sort_by_length_indices=None,
         seq_offsets=seq_offsets,
         num_targets=num_targets,
@@ -1638,6 +1912,7 @@ def triton_cached_hstu_mha(
         max_attn_len=max_attn_len,
         Z=Z,
         AUTOTUNE_Z=AUTOTUNE_Z,
+        L=L,
         H=H,
         MAX_SEQ_LEN=N,
         AUTOTUNE_MAX_SEQ_LEN=autotune_max_seq_len(N),
@@ -1652,5 +1927,8 @@ def triton_cached_hstu_mha(
         HAS_CONTEXTUAL_SEQ_LEN=has_contextual_seq_len,
         HAS_MAX_ATTN_LEN=has_max_attn_len,
         HAS_SORT_BY_LENGTH_INDICES=False,
+        ENABLE_TMA_LOAD=enable_tma,
+        ENABLE_TMA_STORE=enable_tma,
+        TMA_DESC_SIZE=TMA_DESC_SIZE,
     )
     return out
