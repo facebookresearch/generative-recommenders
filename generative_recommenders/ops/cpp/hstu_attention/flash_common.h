@@ -161,4 +161,20 @@ std::vector<at::Tensor> hstu_mha_bwd_dummy(
     bool const deterministic,
     int64_t const sm_margin);
 
+at::Tensor hstu_mha_fwd_meta(
+    const c10::SymInt max_seq_len,
+    double alpha,
+    at::Tensor& q, // (b, s, h, d) or (total_s, h, d)
+    at::Tensor& k, // (b, s, h, d) or (total_s, h, d)
+    at::Tensor& v, // (b, s, h, d) or (total_s, h, d)
+    const std::optional<at::Tensor>& seq_offsets,
+    bool causal,
+    const std::optional<at::Tensor>& num_targets,
+    int64_t max_attn_len,
+    int64_t min_full_attn_seq_len,
+    int64_t contextual_seq_len,
+    const std::optional<at::Tensor>& q_descale, // (b, h_k), not (b, h)
+    const std::optional<at::Tensor>& k_descale, // (b, h_k)
+    const std::optional<at::Tensor>& v_descale, // (b, h_k)
+    const int64_t sm_margin);
 } // namespace hstu
