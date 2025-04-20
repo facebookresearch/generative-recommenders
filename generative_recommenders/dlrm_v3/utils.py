@@ -266,6 +266,5 @@ def get_dataset(name: str, new_path_prefix: str = "", max_seq_len: int = 2048):
                 "seq_logs_file": os.path.join(
                     new_path_prefix, "data/KuaiRand-1K/data/processed_seqs.csv"
                 ),
-                "max_seq_len": max_seq_len,
             },
         )
