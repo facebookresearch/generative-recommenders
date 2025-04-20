@@ -34,7 +34,7 @@ namespace hstu {
 TORCH_LIBRARY_FRAGMENT(hstu, m) {
   m.def(
       "hstu_mha_fwd("
-      "int max_seq_len, "
+      "SymInt max_seq_len, "
       "float alpha, "
       "Tensor q, "
       "Tensor k, "
@@ -75,20 +75,15 @@ TORCH_LIBRARY_FRAGMENT(hstu, m) {
 }
 
 TORCH_LIBRARY_IMPL(hstu, CUDA, m) {
-  m.impl(
-      "hstu_mha_fwd",
-      torch::dispatch(c10::DispatchKey::CUDA, TORCH_FN(hstu_mha_fwd)));
-  m.impl(
-      "hstu_mha_bwd",
-      torch::dispatch(c10::DispatchKey::CUDA, TORCH_FN(hstu_mha_bwd)));
+  m.impl("hstu_mha_fwd", hstu_mha_fwd);
+  m.impl("hstu_mha_bwd", hstu_mha_bwd);
 }
 
 TORCH_LIBRARY_IMPL(hstu, CPU, m) {
-  m.impl(
-      "hstu_mha_fwd",
-      torch::dispatch(c10::DispatchKey::CPU, TORCH_FN(hstu_mha_fwd_dummy)));
-  m.impl(
-      "hstu_mha_bwd",
-      torch::dispatch(c10::DispatchKey::CPU, TORCH_FN(hstu_mha_bwd_dummy)));
+  m.impl("hstu_mha_fwd", hstu_mha_fwd_dummy);
+  m.impl("hstu_mha_bwd", hstu_mha_bwd_dummy);
+}
+TORCH_LIBRARY_IMPL(hstu, Meta, m) {
+  m.impl("hstu_mha_fwd", hstu_mha_fwd_meta);
 }
 } // namespace hstu
