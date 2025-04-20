@@ -222,9 +222,9 @@ class ContextualPreprocessor(InputPreprocessor):
                 dtype=seq_embeddings.dtype,
             )
             contextual_embeddings = torch.baddbmm(
-                self._batched_contextual_linear_bias.to(
-                    contextual_input_embeddings.dtype
-                ),
+                self._batched_contextual_linear_bias.view(
+                    -1, 1, self._output_embedding_dim
+                ).to(contextual_input_embeddings.dtype),
                 contextual_input_embeddings.view(
                     -1, self._max_contextual_seq_len, self._input_embedding_dim
                 ).transpose(0, 1),
