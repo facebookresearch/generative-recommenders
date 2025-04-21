@@ -22,6 +22,8 @@ Implementation adapted from the scripts used to generate MovieLens-1B
 
 # Generate a 3B dataset (takes around 50 minutes):
 # python run_fractal_expansion.py --input-csv-file tmp/ml-20m/ratings.csv --write-dataset True --output-prefix tmp/ml-3b/
+# Generate a 13B dataset with customized sparse ratio:
+# python run_fractal_expansion.py --input-csv-file tmp/ml-20m/ratings.csv --write-dataset True --output-prefix tmp/ml-13b/ --num-row-multiplier 16 --num-col-multiplier 16384 --element-sample-rate 0.2 --block-sample-rate 0.05
 
 import csv
 import logging
@@ -56,7 +58,7 @@ class SparseMatrixMetadata:
 
 
 def _dropout_sparse_coo_matrix(
-    sparse_matrix, rate, min_dropout_rate=0.05, max_dropout_rate=0.99
+    sparse_matrix, rate, min_dropout_rate=0.005, max_dropout_rate=0.999
 ):
     assert min_dropout_rate <= max_dropout_rate
     sampling_rate = 1.0 - rate
@@ -84,7 +86,7 @@ def _dropout_sparse_coo_matrix(
 
 
 def shuffle_sparse_matrix(
-    sparse_matrix, dropout_rate=0.0, min_dropout_rate=0.05, max_dropout_rate=0.99
+    sparse_matrix, dropout_rate=0.0, min_dropout_rate=0.005, max_dropout_rate=0.999
 ):
     """
     Shuffle sparse matrix encoded as a SciPy csr matrix.
@@ -121,19 +123,19 @@ def graph_reduce(usv, num_rows, num_cols):
     return np.matmul(u_random_proj_orth, np.matmul(np.diag(s[:k]), v_random_proj_orth))
 
 
-def rescale(matrix, rescale_w_abs=False):
+def rescale(matrix, rescale_w_abs=False, element_sample_rate=1.0):
     """Rescale all values of the matrix into [0, 1]."""
     if rescale_w_abs:
         abs_matrix = np.abs(matrix.copy())
-        return abs_matrix / abs_matrix.max()
+        out = abs_matrix / abs_matrix.max()
     else:
         out = (matrix - matrix.min()) / (matrix.max() - matrix.min())
         assert out.min() >= 0 and out.max() <= 1
-        return out
+    return out * element_sample_rate
 
 
 def _compute_row_block(
-    i, left_matrix, right_matrix, indices_out_path, remove_empty_rows
+    i, left_matrix, right_matrix, block_sample_rate, indices_out_path, remove_empty_rows
 ):
     """Compute row block of expansion for row i of the left_matrix."""
 
@@ -143,11 +145,15 @@ def _compute_row_block(
     num_interactions = 0
 
     for j in range(left_matrix.shape[1]):
-        dropout_rate = 1.0 - left_matrix[i, j]
-        kron_block = shuffle_sparse_matrix(right_matrix, dropout_rate).tocsr()
-        num_interactions += kron_block.nnz
-        kron_blocks.append(kron_block)
-        logger.info(f"Kronecker block ({i}, {j}) processed.")
+        if np.random.random() <= block_sample_rate:
+            dropout_rate = 1.0 - left_matrix[i, j]
+            kron_block = shuffle_sparse_matrix(right_matrix, dropout_rate).tocsr()
+            num_interactions += kron_block.nnz
+            kron_blocks.append(kron_block)
+            logger.info(f"Kronecker block ({i}, {j}) processed.")
+        else:
+            kron_blocks.append(sparse.csr_matrix(right_matrix.shape))
+            logger.info(f"Kronecker block ({i}, {j}) skipped.")
 
     rows_to_write = sparse.hstack(kron_blocks).tocsr()
     logger.info("Writing dataset row by row.")
@@ -189,6 +195,7 @@ def _compute_row_block(
 def build_randomized_kronecker(
     left_matrix,
     right_matrix,
+    block_sample_rate,
     indices_out_path,
     metadata_out_path=None,
     remove_empty_rows=True,
@@ -207,7 +214,12 @@ def build_randomized_kronecker(
         writer = csv.writer(file)
         for i in tqdm(range(left_matrix.shape[0])):
             (shard_num_removed_rows, shard_metadata) = _compute_row_block(
-                i, left_matrix, right_matrix, indices_out_path, remove_empty_rows
+                i,
+                left_matrix,
+                right_matrix,
+                block_sample_rate,
+                indices_out_path,
+                remove_empty_rows,
             )
             writer.writerow([i, shard_metadata.num_rows])
             file.flush()
@@ -344,6 +356,8 @@ def expand_dataset(
     reduced_num_rows,
     reduced_num_cols,
     rescale_w_abs,
+    element_sample_rate,
+    block_sample_rate,
     visualize,
     write_dataset,
     output_prefix,
@@ -362,12 +376,16 @@ def expand_dataset(
     (_, s_reduce, _) = linalg.svds(
         norm_reduced_matrix, k=k - 1, maxiter=None, return_singular_vectors=True
     )
-    reduced_matrix = rescale(reduced_matrix, rescale_w_abs=rescale_w_abs)
+    reduced_matrix = rescale(
+        reduced_matrix,
+        rescale_w_abs=rescale_w_abs,
+        element_sample_rate=element_sample_rate,
+    )
     logger.info(f"largest singular value of the reduced matrix is {s_reduce[-1]}")
     logger.info(
         f"Sampling rate mean is {reduced_matrix.mean()}, var is {reduced_matrix.var()}, min is {reduced_matrix.min()}, max is {reduced_matrix.max()}"
     )
-    samples = reduced_matrix.sum() * ratings_matrix.nnz
+    samples = reduced_matrix.sum() * ratings_matrix.nnz * block_sample_rate
     logger.info(
         f"Expected number of synthetic samples: {samples}, sparsity is {samples / (num_users * num_items * reduced_num_rows * reduced_num_cols)}, average seqlen is {samples / (num_users * reduced_num_rows)}"
     )
@@ -392,6 +410,7 @@ def expand_dataset(
         build_randomized_kronecker(
             left_matrix=reduced_matrix,
             right_matrix=ratings_matrix.tocoo(),
+            block_sample_rate=block_sample_rate,
             indices_out_path=output_file,
             metadata_out_path=output_file_metadata,
         )
@@ -424,6 +443,16 @@ def expand_dataset(
     default=32,
 )
 @click.option(
+    "--element-sample-rate",
+    type=float,
+    default=1.0,
+)
+@click.option(
+    "--block-sample-rate",
+    type=float,
+    default=1.0,
+)
+@click.option(
     "--visualize",
     type=bool,
     default=False,
@@ -439,6 +468,8 @@ def main(
     output_prefix: str,
     num_row_multiplier: int,
     num_col_multiplier: int,
+    element_sample_rate: float,
+    block_sample_rate: float,
     visualize: bool,
     write_dataset: bool,
 ):
@@ -477,6 +508,8 @@ def main(
         reduced_num_rows=num_row_multiplier,
         reduced_num_cols=num_col_multiplier,
         rescale_w_abs=False,
+        element_sample_rate=element_sample_rate,
+        block_sample_rate=block_sample_rate,
         visualize=visualize,
         write_dataset=write_dataset,
         output_prefix=output_prefix,
