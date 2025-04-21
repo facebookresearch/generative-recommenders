@@ -105,7 +105,7 @@ def _get_supervision_labels_and_weights(
     supervision_weights: Dict[str, torch.Tensor] = {}
     for task in task_configs:
         if task.task_type == MultitaskTaskType.REGRESSION:
-            supervision_labels[task.task_name] = watchtime_sequence
+            supervision_labels[task.task_name] = watchtime_sequence.to(torch.float32)
         elif task.task_type == MultitaskTaskType.BINARY_CLASSIFICATION:
             supervision_labels[task.task_name] = (
                 torch.bitwise_and(supervision_bitmasks, task.task_weight) > 0

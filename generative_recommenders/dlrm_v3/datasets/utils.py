@@ -22,6 +22,8 @@ def separate_uih_candidates(
     candidates_max_seq_len: int,
 ) -> Tuple[List[int], List[int]]:
     if isinstance(x, str):
+        if x[0] != "[" and x[-1] != "]":
+            x = "[" + x + "]"
         y = json.loads(x)
     else:
         y = x

@@ -136,7 +136,12 @@ class DLRMv3MovieLensDataset(DLRMv3RandomDataset):
         candidates_kjt_lengths = max_num_candidates * torch.ones(
             len(self._candidates_keys)
         )
-        candidates_kjt_values = movie_history_candidates
+        candidates_kjt_values = (
+            movie_history_candidates
+            + [dummy_query_time] * max_num_candidates  # item_query_time
+            + [1] * max_num_candidates  # item_dummy_weights
+            + [1] * max_num_candidates  # item_dummy_watchtime
+        )
         candidates_features_kjt = KeyedJaggedTensor(
             keys=self._candidates_keys,
             lengths=torch.tensor(candidates_kjt_lengths).long(),

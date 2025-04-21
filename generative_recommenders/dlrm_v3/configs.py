@@ -40,14 +40,22 @@ def get_hstu_configs(dataset: str = "debug") -> DlrmHSTUConfig:
         causal_multitask_weights=0.2,
     )
     if "movielens" in dataset:
-        hstu_config.user_embedding_feature_names = [
-            "movie_id",
-            "user_id",
-            "sex",
-            "age_group",
-            "occupation",
-            "zip_code",
-        ]
+        assert dataset in ["movielens-1m", "movielens-20m"]
+        hstu_config.user_embedding_feature_names = (
+            [
+                "movie_id",
+                "user_id",
+                "sex",
+                "age_group",
+                "occupation",
+                "zip_code",
+            ]
+            if dataset == "movielens-1m"
+            else [
+                "movie_id",
+                "user_id",
+            ]
+        )
         hstu_config.item_embedding_feature_names = [
             "item_movie_id",
         ]
@@ -55,38 +63,61 @@ def get_hstu_configs(dataset: str = "debug") -> DlrmHSTUConfig:
         hstu_config.uih_action_time_feature_name = "action_timestamp"
         hstu_config.candidates_weight_feature_name = "item_dummy_weights"
         hstu_config.candidates_watchtime_feature_name = "item_dummy_watchtime"
-        hstu_config.contextual_feature_to_max_length = {
-            "user_id": 1,
-            "sex": 1,
-            "age_group": 1,
-            "occupation": 1,
-            "zip_code": 1,
-        }
-        hstu_config.contextual_feature_to_min_uih_length = {
-            "user_id": 20,
-            "sex": 20,
-            "age_group": 20,
-            "occupation": 20,
-            "zip_code": 20,
-        }
+        hstu_config.contextual_feature_to_max_length = (
+            {
+                "user_id": 1,
+                "sex": 1,
+                "age_group": 1,
+                "occupation": 1,
+                "zip_code": 1,
+            }
+            if dataset == "movielens-1m"
+            else {
+                "user_id": 1,
+            }
+        )
+        hstu_config.contextual_feature_to_min_uih_length = (
+            {
+                "user_id": 20,
+                "sex": 20,
+                "age_group": 20,
+                "occupation": 20,
+                "zip_code": 20,
+            }
+            if dataset == "movielens-1m"
+            else {
+                "user_id": 20,
+            }
+        )
         hstu_config.merge_uih_candidate_feature_mapping = [
             ("movie_id", "item_movie_id"),
             ("action_timestamp", "item_query_time"),
             ("dummy_weights", "item_dummy_weights"),
             ("dummy_watch_time", "item_dummy_watchtime"),
         ]
-        hstu_config.hstu_uih_feature_names = [
-            "user_id",
-            "sex",
-            "age_group",
-            "occupation",
-            "zip_code",
-            "movie_id",
-            "movie_rating",
-            "action_timestamp",
-            "dummy_weights",
-            "dummy_watch_time",
-        ]
+        hstu_config.hstu_uih_feature_names = (
+            [
+                "user_id",
+                "sex",
+                "age_group",
+                "occupation",
+                "zip_code",
+                "movie_id",
+                "movie_rating",
+                "action_timestamp",
+                "dummy_weights",
+                "dummy_watch_time",
+            ]
+            if dataset == "movielens-1m"
+            else [
+                "user_id",
+                "movie_id",
+                "movie_rating",
+                "action_timestamp",
+                "dummy_weights",
+                "dummy_watch_time",
+            ]
+        )
         hstu_config.hstu_candidate_feature_names = [
             "item_movie_id",
             "item_query_time",
@@ -199,6 +230,7 @@ def get_hstu_configs(dataset: str = "debug") -> DlrmHSTUConfig:
             "uih_post_id",
             "uih_owner_id",
             "viewer_id",
+            "dummy_contexual",
         ]
         hstu_config.item_embedding_feature_names = [
             "item_post_id",
@@ -210,9 +242,11 @@ def get_hstu_configs(dataset: str = "debug") -> DlrmHSTUConfig:
         hstu_config.candidates_watchtime_feature_name = "item_target_watchtime"
         hstu_config.contextual_feature_to_max_length = {
             "viewer_id": 1,
+            "dummy_contexual": 1,
         }
         hstu_config.contextual_feature_to_min_uih_length = {
             "viewer_id": 128,
+            "dummy_contexual": 128,
         }
         hstu_config.merge_uih_candidate_feature_mapping = [
             ("uih_post_id", "item_post_id"),
@@ -232,6 +266,7 @@ def get_hstu_configs(dataset: str = "debug") -> DlrmHSTUConfig:
             "uih_surface_type",
             "uih_video_length",
             "viewer_id",
+            "dummy_contexual",
         ]
         hstu_config.hstu_candidate_feature_names = [
             "item_post_id",
@@ -254,50 +289,70 @@ def get_hstu_configs(dataset: str = "debug") -> DlrmHSTUConfig:
 
 def get_embedding_table_config(dataset: str = "debug") -> Dict[str, EmbeddingConfig]:
     if "movielens" in dataset:
-        return {
-            "movie_id": EmbeddingConfig(
-                num_embeddings=HASH_SIZE,
-                embedding_dim=HSTU_EMBEDDING_DIM,
-                name="movie_id",
-                data_type=DataType.FP16,
-                feature_names=["movie_id", "item_movie_id"],
-            ),
-            "user_id": EmbeddingConfig(
-                num_embeddings=HASH_SIZE,
-                embedding_dim=HSTU_EMBEDDING_DIM,
-                name="user_id",
-                data_type=DataType.FP16,
-                feature_names=["user_id"],
-            ),
-            "sex": EmbeddingConfig(
-                num_embeddings=HASH_SIZE,
-                embedding_dim=HSTU_EMBEDDING_DIM,
-                name="sex",
-                data_type=DataType.FP16,
-                feature_names=["sex"],
-            ),
-            "age_group": EmbeddingConfig(
-                num_embeddings=HASH_SIZE,
-                embedding_dim=HSTU_EMBEDDING_DIM,
-                name="age_group",
-                data_type=DataType.FP16,
-                feature_names=["age_group"],
-            ),
-            "occupation": EmbeddingConfig(
-                num_embeddings=HASH_SIZE,
-                embedding_dim=HSTU_EMBEDDING_DIM,
-                name="occupation",
-                data_type=DataType.FP16,
-                feature_names=["occupation"],
-            ),
-            "zip_code": EmbeddingConfig(
-                num_embeddings=HASH_SIZE,
-                embedding_dim=HSTU_EMBEDDING_DIM,
-                name="zip_code",
-                data_type=DataType.FP16,
-                feature_names=["zip_code"],
-            ),
-        }
+        assert dataset in ["movielens-1m", "movielens-20m"]
+        return (
+            {
+                "movie_id": EmbeddingConfig(
+                    num_embeddings=HASH_SIZE,
+                    embedding_dim=HSTU_EMBEDDING_DIM,
+                    name="movie_id",
+                    data_type=DataType.FP16,
+                    feature_names=["movie_id", "item_movie_id"],
+                ),
+                "user_id": EmbeddingConfig(
+                    num_embeddings=HASH_SIZE,
+                    embedding_dim=HSTU_EMBEDDING_DIM,
+                    name="user_id",
+                    data_type=DataType.FP16,
+                    feature_names=["user_id"],
+                ),
+                "sex": EmbeddingConfig(
+                    num_embeddings=HASH_SIZE,
+                    embedding_dim=HSTU_EMBEDDING_DIM,
+                    name="sex",
+                    data_type=DataType.FP16,
+                    feature_names=["sex"],
+                ),
+                "age_group": EmbeddingConfig(
+                    num_embeddings=HASH_SIZE,
+                    embedding_dim=HSTU_EMBEDDING_DIM,
+                    name="age_group",
+                    data_type=DataType.FP16,
+                    feature_names=["age_group"],
+                ),
+                "occupation": EmbeddingConfig(
+                    num_embeddings=HASH_SIZE,
+                    embedding_dim=HSTU_EMBEDDING_DIM,
+                    name="occupation",
+                    data_type=DataType.FP16,
+                    feature_names=["occupation"],
+                ),
+                "zip_code": EmbeddingConfig(
+                    num_embeddings=HASH_SIZE,
+                    embedding_dim=HSTU_EMBEDDING_DIM,
+                    name="zip_code",
+                    data_type=DataType.FP16,
+                    feature_names=["zip_code"],
+                ),
+            }
+            if dataset == "movielens-1m"
+            else {
+                "movie_id": EmbeddingConfig(
+                    num_embeddings=HASH_SIZE,
+                    embedding_dim=HSTU_EMBEDDING_DIM,
+                    name="movie_id",
+                    data_type=DataType.FP16,
+                    feature_names=["movie_id", "item_movie_id"],
+                ),
+                "user_id": EmbeddingConfig(
+                    num_embeddings=HASH_SIZE,
+                    embedding_dim=HSTU_EMBEDDING_DIM,
+                    name="user_id",
+                    data_type=DataType.FP16,
+                    feature_names=["user_id"],
+                ),
+            }
+        )
     elif "kuairand" in dataset:
         return {
             "video_id": EmbeddingConfig(
@@ -370,5 +425,12 @@ def get_embedding_table_config(dataset: str = "debug") -> Dict[str, EmbeddingCon
                 name="viewer_id",
                 data_type=DataType.FP16,
                 feature_names=["viewer_id"],
+            ),
+            "dummy_contexual": EmbeddingConfig(
+                num_embeddings=HASH_SIZE,
+                embedding_dim=HSTU_EMBEDDING_DIM,
+                name="dummy_contexual",
+                data_type=DataType.FP16,
+                feature_names=["dummy_contexual"],
             ),
         }
