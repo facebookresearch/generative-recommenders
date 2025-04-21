@@ -192,17 +192,24 @@ def _weighted_layer_norm_bwd_dx(
 
     cols = tl.arange(0, BLOCK_D)
     mask = cols < D
-
     row = pid
+    acc_dw = tl.zeros(
+        [
+            BLOCK_D,
+        ],
+        dtype=tl.float32,
+    )
+    acc_db = tl.zeros(
+        [
+            BLOCK_D,
+        ],
+        dtype=tl.float32,
+    )
 
     for idx in range(rows_per_tile):
         x_ptrs = X + row.to(tl.int64) * stride_x
         dy_ptrs = DY + row.to(tl.int64) * stride_dy
         dx_ptrs = DX + row.to(tl.int64) * stride_dx
-        dw_ptrs = DW + pid.to(tl.int64) * D
-        dw_ptrs += cols
-        db_ptrs = DB + pid.to(tl.int64) * D
-        db_ptrs += cols
 
         # Load data to SRAM
         x = tl.load(x_ptrs + cols, mask=mask, other=0).to(tl.float32)
@@ -243,13 +250,16 @@ def _weighted_layer_norm_bwd_dx(
         else:
             partial_dw = dy * xhat
             partial_db = dy
-        # First store doesn't accumulate
-        if idx > 0:
-            partial_dw += tl.load(dw_ptrs, mask=mask)
-            partial_db += tl.load(db_ptrs, mask=mask)
-        tl.store(dw_ptrs, partial_dw, mask=mask)
-        tl.store(db_ptrs, partial_db, mask=mask)
+        # Accumulate partial sums in shared memory
+        acc_dw += partial_dw
+        acc_db += partial_db
         row += tile_num
+
+    # Store accumulated sums back to global memory
+    dw_ptrs = DW + pid.to(tl.int64) * D + cols
+    db_ptrs = DB + pid.to(tl.int64) * D + cols
+    tl.store(dw_ptrs, acc_dw, mask=mask)
+    tl.store(db_ptrs, acc_db, mask=mask)
 
 
 def _get_bwd_dwdb_configs() -> List[triton.Config]:
