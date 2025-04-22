@@ -40,7 +40,7 @@ def get_hstu_configs(dataset: str = "debug") -> DlrmHSTUConfig:
         causal_multitask_weights=0.2,
     )
     if "movielens" in dataset:
-        assert dataset in ["movielens-1m", "movielens-20m"]
+        assert dataset in ["movielens-1m", "movielens-20m", "movielens-13b"]
         hstu_config.user_embedding_feature_names = (
             [
                 "movie_id",
@@ -289,7 +289,7 @@ def get_hstu_configs(dataset: str = "debug") -> DlrmHSTUConfig:
 
 def get_embedding_table_config(dataset: str = "debug") -> Dict[str, EmbeddingConfig]:
     if "movielens" in dataset:
-        assert dataset in ["movielens-1m", "movielens-20m"]
+        assert dataset in ["movielens-1m", "movielens-20m", "movielens-13b"]
         return (
             {
                 "movie_id": EmbeddingConfig(
