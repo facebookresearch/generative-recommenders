@@ -235,10 +235,10 @@ class MetricsLogger:
 SUPPORTED_DATASETS = ["debug", "movielens-1m", "movielens-20m", "kuairand-1k"]
 
 
-def get_dataset(name: str, new_path_prefix: str = "", max_seq_len: int = 2048):
+def get_dataset(name: str, new_path_prefix: str = ""):
     assert name in SUPPORTED_DATASETS, f"dataset {name} not supported"
     if name == "debug":
-        return DLRMv3RandomDataset, {"max_seq_len": max_seq_len}
+        return DLRMv3RandomDataset, {}
     if name == "movielens-1m":
         return (
             DLRMv3MovieLensDataset,
@@ -246,7 +246,6 @@ def get_dataset(name: str, new_path_prefix: str = "", max_seq_len: int = 2048):
                 "ratings_file": os.path.join(
                     new_path_prefix, "data/ml-1m/sasrec_format.csv"
                 ),
-                "max_seq_len": max_seq_len,
             },
         )
     if name == "movielens-20m":
@@ -256,7 +255,6 @@ def get_dataset(name: str, new_path_prefix: str = "", max_seq_len: int = 2048):
                 "ratings_file": os.path.join(
                     new_path_prefix, "data/ml-20m/sasrec_format.csv"
                 ),
-                "max_seq_len": max_seq_len,
             },
         )
     if name == "kuairand-1k":

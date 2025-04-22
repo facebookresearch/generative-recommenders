@@ -66,7 +66,6 @@ def _main_func(
     # parse all arguments
     gin.parse_config_file(gin_file)
 
-    # dataset = make_dataset
     model, model_configs, embedding_table_configs = make_model()
     model, optimizer = make_optimizer_and_shard(model=model, device=device)
     load_dmp_checkpoint(model, optimizer)
