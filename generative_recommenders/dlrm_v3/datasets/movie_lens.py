@@ -14,7 +14,7 @@
 
 # pyre-unsafe
 import time
-from typing import List
+from typing import List, Optional
 
 import pandas as pd
 import torch
@@ -38,16 +38,23 @@ class DLRMv3MovieLensDataset(DLRMv3RandomDataset):
         **kwargs,
     ):
         super().__init__(hstu_config=hstu_config, is_inference=is_inference)
-        self.ratings_frame: pd.DataFrame = pd.read_csv(
-            ratings_file,
-            delimiter=",",
-        )
+        self.ratings_frame: Optional[pd.DataFrame] = None
+        if ratings_file != "":
+            self.ratings_frame = pd.read_csv(
+                ratings_file,
+                delimiter=",",
+            )
 
     def get_item_count(self):
+        assert self.ratings_frame is not None
         return len(self.ratings_frame)
 
     def unload_query_samples(self, sample_list):
         self.items_in_memory = {}
+
+    def iloc(self, idx):
+        assert self.ratings_frame is not None
+        return self.ratings_frame.iloc[idx]
 
     def load_query_samples(self, sample_list):
         max_num_candidates = (
@@ -57,13 +64,20 @@ class DLRMv3MovieLensDataset(DLRMv3RandomDataset):
         )
         self.items_in_memory = {}
         for idx in sample_list:
-            data = self.ratings_frame.iloc[idx]
+            data = self.iloc(idx)
             if len(data.sequence_item_ids) <= max_num_candidates:
                 continue
             sample = self.load_item(data, max_num_candidates)
             self.items_in_memory[idx] = sample
 
         self.last_loaded = time.time()
+
+    def get_timestamp_uih(self, data, max_num_candidates, size):
+        movie_timestamps_uih, _ = separate_uih_candidates(
+            data.sequence_timestamps,
+            candidates_max_seq_len=max_num_candidates,
+        )
+        return movie_timestamps_uih
 
     def load_item(self, data, max_num_candidates):
         movie_history_uih, movie_history_candidates = separate_uih_candidates(
@@ -74,9 +88,10 @@ class DLRMv3MovieLensDataset(DLRMv3RandomDataset):
             data.sequence_ratings,
             candidates_max_seq_len=max_num_candidates,
         )
-        movie_timestamps_uih, _ = separate_uih_candidates(
-            data.sequence_timestamps,
-            candidates_max_seq_len=max_num_candidates,
+        movie_timestamps_uih = self.get_timestamp_uih(
+            data=data,
+            max_num_candidates=max_num_candidates,
+            size=len(movie_history_uih),
         )
 
         assert len(movie_history_uih) == len(

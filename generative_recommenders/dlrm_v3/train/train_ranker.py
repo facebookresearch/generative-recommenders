@@ -45,6 +45,7 @@ SUPPORTED_CONFIGS = {
     "kuairand-1k": "kuairand_1k.gin",
     "movielens-1m": "movielens_1m.gin",
     "movielens-20m": "movielens_20m.gin",
+    "movielens-13b": "movielens_13b.gin",
 }
 
 
