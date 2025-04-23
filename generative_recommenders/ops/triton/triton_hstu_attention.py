@@ -33,6 +33,11 @@ from generative_recommenders.common import (
 
 from triton.language.extra.libdevice import fast_dividef  # @manual=//triton:triton
 
+try:
+    from generative_recommenders.ops.triton.fb.triton_attention_utils import acc_dq
+except ImportError:
+    from generative_recommenders.ops.triton.triton_attention_utils import acc_dq
+
 
 def _get_fw_configs() -> List[triton.Config]:  # noqa: C901
     configs = []
@@ -745,29 +750,20 @@ def _hstu_attn_bwd_one_block(  # noqa C901
 
     # Note: the factor `alpha` is delayed until the end of the function to reduce the cost
     dk += tl.dot(dqk_trans, tl.trans(q_trans), allow_tf32=ALLOW_TF32)
-    if ATOMIC_ADD:
-        lock_id = start_m // BLOCK_M
-        stride_lock = tl.cdiv(MAX_SEQ_LEN, BLOCK_M)
-        lock = LOCK + tl.program_id(0) * stride_lock + lock_id
-        tl.debug_barrier()  # add a barrier to force sync
-        while tl.atomic_cas(lock, 0, 1) == 1:
-            pass
-    dq_trans = tl.load(
-        dq_ptrs_trans + start_m * stride_dqm,
-        mask=mask_m[None, :],
-        other=0.0,
-        eviction_policy="evict_last",
+    acc_dq(
+        dq_ptrs_trans=dq_ptrs_trans,
+        start_m=start_m,
+        stride_dqm=stride_dqm,
+        k=k,
+        dqk_trans=dqk_trans,
+        alpha=alpha,
+        mask_m=mask_m,
+        MAX_SEQ_LEN=MAX_SEQ_LEN,
+        LOCK=LOCK,
+        BLOCK_M=BLOCK_M,
+        ATOMIC_ADD=ATOMIC_ADD,
+        ALLOW_TF32=ALLOW_TF32,
     )
-    dq_trans += tl.dot(tl.trans(k), dqk_trans, allow_tf32=ALLOW_TF32) * alpha
-    dq_trans = dq_trans.to(k.dtype)
-    tl.store(
-        dq_ptrs_trans + start_m * stride_dqm,
-        dq_trans,
-        mask=mask_m[None, :],
-        eviction_policy="evict_last",
-    )
-    if ATOMIC_ADD:
-        tl.atomic_xchg(lock, 0)  # pyre-ignore [61]
     return dk, dv
 
 
@@ -806,7 +802,6 @@ def _hstu_attn_bwd_one_col_block(  # noqa C901
     UNROLL: tl.constexpr,
     ATOMIC_ADD: tl.constexpr,
 ):
-    # Work on the subsequence dv[start_n, start_n + BLOCK_N, :]
     if HAS_MULTIPLE_TARGETS:
         low = start_n
         if HAS_MAX_ATTN_LEN:
