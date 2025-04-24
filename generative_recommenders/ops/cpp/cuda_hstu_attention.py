@@ -14,173 +14,13 @@
 
 # pyre-strict
 
-from typing import Optional, Tuple
+from typing import Optional
 
 import torch
 
 torch.ops.load_library(
     "//generative_recommenders/ops/cpp/hstu_attention:hstu_flash_attention"
 )
-
-
-class HSTUFlashAttentionFunction(torch.autograd.Function):
-    @staticmethod
-    # pyre-ignore[14]
-    def forward(
-        ctx,  # pyre-ignore[2]
-        max_seq_len: int,
-        alpha: float,
-        q: torch.Tensor,
-        k: torch.Tensor,
-        v: torch.Tensor,
-        seq_offsets: Optional[torch.Tensor],
-        causal: bool,
-        num_targets: Optional[torch.Tensor],
-        max_attn_len: int = 0,
-        min_full_attn_seq_len: int = 0,
-        contextual_seq_len: int = 0,
-        q_descale: Optional[torch.Tensor] = None,
-        k_descale: Optional[torch.Tensor] = None,
-        v_descale: Optional[torch.Tensor] = None,
-        sort_by_length: bool = False,
-        deterministic: bool = False,
-        sm_margin: int = 0,
-    ) -> torch.Tensor:
-        out = torch.ops.hstu.hstu_mha_fwd(
-            max_seq_len,
-            alpha,
-            q,
-            k,
-            v,
-            seq_offsets,
-            causal,
-            num_targets,
-            max_attn_len,
-            min_full_attn_seq_len,
-            contextual_seq_len,
-            q_descale,
-            k_descale,
-            v_descale,
-            sm_margin,
-        )
-        saved_tensors = [q, k, v]
-        if seq_offsets is not None:
-            saved_tensors.append(seq_offsets)
-        if num_targets is not None:
-            saved_tensors.append(num_targets)
-        if q_descale is not None:
-            saved_tensors.append(q_descale)
-        if k_descale is not None:
-            saved_tensors.append(k_descale)
-        if v_descale is not None:
-            saved_tensors.append(v_descale)
-        ctx.save_for_backward(*saved_tensors)
-        ctx.max_seq_len = max_seq_len
-        ctx.alpha = alpha
-        ctx.causal = causal
-        ctx.max_attn_len = max_attn_len
-        ctx.min_full_attn_seq_len = min_full_attn_seq_len
-        ctx.contextual_seq_len = contextual_seq_len
-        ctx.deterministic = deterministic
-        ctx.sm_margin = sm_margin
-        ctx.has_seq_offsets = seq_offsets is not None
-        ctx.has_num_targets = num_targets is not None
-        ctx.has_q_descale = q_descale is not None
-        ctx.has_k_descale = k_descale is not None
-        ctx.has_v_descale = v_descale is not None
-        ctx.sort_by_length = sort_by_length
-        return out
-
-    @staticmethod
-    # pyre-ignore[14]
-    def backward(
-        ctx,  # pyre-ignore[2]
-        dout: torch.Tensor,
-    ) -> Tuple[
-        None,
-        None,
-        torch.Tensor,
-        torch.Tensor,
-        torch.Tensor,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-    ]:
-        idx = 3
-        seq_offsets: Optional[torch.Tensor] = None
-        num_targets: Optional[torch.Tensor] = None
-        q_descale: Optional[torch.Tensor] = None
-        k_descale: Optional[torch.Tensor] = None
-        v_descale: Optional[torch.Tensor] = None
-        q, k, v = ctx.saved_tensors[:idx]
-        if ctx.has_seq_offsets:
-            seq_offsets = ctx.saved_tensors[idx]
-            idx += 1
-        if ctx.has_num_targets:
-            num_targets = ctx.saved_tensors[idx]
-            idx += 1
-        if ctx.has_q_descale:
-            q_descale = ctx.saved_tensors[idx]
-            idx += 1
-        if ctx.has_k_descale:
-            k_descale = ctx.saved_tensors[idx]
-            idx += 1
-        if ctx.has_v_descale:
-            v_descale = ctx.saved_tensors[idx]
-            idx += 1
-
-        dq = torch.empty_like(q)
-        dk = torch.empty_like(k)
-        dv = torch.empty_like(v)
-
-        dq, dk, dv = torch.ops.hstu.hstu_mha_bwd(
-            ctx.max_seq_len,
-            ctx.alpha,
-            dout,
-            q,
-            k,
-            v,
-            dq,
-            dk,
-            dv,
-            seq_offsets,
-            ctx.causal,
-            num_targets,
-            ctx.max_attn_len,
-            ctx.min_full_attn_seq_len,
-            ctx.contextual_seq_len,
-            ctx.sort_by_length,
-            ctx.deterministic,
-            ctx.sm_margin,
-        )
-        return (
-            None,
-            None,
-            dq,
-            dk,
-            dv,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-        )
 
 
 def cuda_hstu_mha(
@@ -206,7 +46,7 @@ def cuda_hstu_mha(
     Arguments:
         q, k, v: (batch_size, seqlen, nheads, headdim) or (total_seqlen, nheads, headdim)
     """
-    return HSTUFlashAttentionFunction.apply(
+    return torch.ops.hstu.hstu_mha(
         max_seq_len,
         alpha,
         q,
