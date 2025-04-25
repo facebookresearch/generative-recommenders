@@ -117,7 +117,7 @@ class HammerModule(torch.nn.Module, abc.ABC):
         self,
         is_inference: bool,
         training_dytpe: torch.dtype = torch.float32,
-        use_triton_cc: bool = False,
+        use_triton_cc: bool = _use_triton_cc,
         hammer_kernel: Optional[HammerKernel] = None,
     ) -> None:
         super().__init__()
