@@ -28,7 +28,7 @@ constexpr int kBlockM_bwd(
     const bool causal,
     const bool is_local) {
   int const kBlockM_sm90 = headdim <= 64
-      ? 128
+      ? 64
       : (headdim <= 96
              ? 64
              : (headdim <= 128 ? (causal || is_local ? 64 : 80) : 64));
@@ -83,7 +83,7 @@ constexpr std::tuple<int, int, int> AtomLayout_bwd(
     const int headdim) {
   if (headdim <= 64) {
     if (arch >= 90) {
-      return {1, 2, 2};
+      return {1, 2, 1};
     } else {
       return {4, 4, 4};
     }
