@@ -46,12 +46,6 @@ at::Tensor expand_1d_jagged_to_dense_cuda(
     const at::Tensor& offsets,
     const int64_t max_len);
 
-at::Tensor batched_complete_cumsum_cpu(const at::Tensor& values);
-
-at::Tensor batched_complete_cumsum_cuda(const at::Tensor& values);
-
-at::Tensor batched_complete_cumsum_meta(const at::Tensor& values);
-
 at::Tensor complete_cumsum_cpu(const at::Tensor& values);
 
 at::Tensor complete_cumsum_cuda(const at::Tensor& values);
@@ -100,7 +94,6 @@ std::tuple<at::Tensor, at::Tensor> sort_kv_pairs_cuda(
 TORCH_LIBRARY_FRAGMENT(hstu, m) {
   m.def(
       "expand_1d_jagged_to_dense(Tensor values, Tensor offsets, SymInt max_len) -> Tensor");
-  m.def("batched_complete_cumsum(Tensor values) -> Tensor");
   m.def(
       "concat_1d_jagged_jagged(Tensor lengths_left, Tensor values_left, Tensor lengths_right, Tensor values_right) -> Tensor");
   m.def("complete_cumsum(Tensor values) -> Tensor");
@@ -110,14 +103,12 @@ TORCH_LIBRARY_FRAGMENT(hstu, m) {
 
 TORCH_LIBRARY_IMPL(hstu, CPU, m) {
   m.impl("expand_1d_jagged_to_dense", hstu::expand_1d_jagged_to_dense_cpu);
-  m.impl("batched_complete_cumsum", hstu::batched_complete_cumsum_cpu);
   m.impl("concat_1d_jagged_jagged", hstu::concat_1d_jagged_jagged_cpu);
   m.impl("complete_cumsum", hstu::complete_cumsum_cpu);
 }
 
 TORCH_LIBRARY_IMPL(hstu, CUDA, m) {
   m.impl("expand_1d_jagged_to_dense", hstu::expand_1d_jagged_to_dense_cuda);
-  m.impl("batched_complete_cumsum", hstu::batched_complete_cumsum_cuda);
   m.impl("concat_1d_jagged_jagged", hstu::concat_1d_jagged_jagged_cuda);
   m.impl("complete_cumsum", hstu::complete_cumsum_cuda);
   m.impl(
@@ -128,7 +119,6 @@ TORCH_LIBRARY_IMPL(hstu, CUDA, m) {
 
 TORCH_LIBRARY_IMPL(hstu, Meta, m) {
   m.impl("expand_1d_jagged_to_dense", hstu::expand_1d_jagged_to_dense_meta);
-  m.impl("batched_complete_cumsum", hstu::batched_complete_cumsum_meta);
   m.impl("concat_1d_jagged_jagged", hstu::concat_1d_jagged_jagged_meta);
   m.impl("complete_cumsum", hstu::complete_cumsum_meta);
   m.impl(
@@ -140,9 +130,6 @@ TORCH_LIBRARY_IMPL(hstu, Meta, m) {
 TORCH_LIBRARY_IMPL(hstu, Autograd, m) {
   m.impl(
       "expand_1d_jagged_to_dense",
-      torch::autograd::autogradNotImplementedFallback());
-  m.impl(
-      "batched_complete_cumsum",
       torch::autograd::autogradNotImplementedFallback());
   m.impl("complete_cumsum", torch::autograd::autogradNotImplementedFallback());
 }
