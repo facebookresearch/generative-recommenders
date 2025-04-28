@@ -170,13 +170,33 @@ struct CollectiveMainloopBwdSm90 {
           decltype(cute::GMMA::ss_op_selector < Element, Element, ElementAccum, TileShapeAtomdKV, !dKV_swapAB ? PdSt_Major : GMMA::Major::MN, !dKV_swapAB ? GMMA::Major::MN : PdSt_Major > ())>{},
       AtomLayoutdKV{}));
 
+  static constexpr bool dQacc_use_TMA = kHeadDim < 256;
+  // For hdim256, we want to slice the dQ MMA (64 x 256 on 2 WGs) into two (64 x
+  // 128 on 2 WGs) so that we can do atomic add on one half before doing the
+  // other half of the MMA, to reduce register pressure.
+  static constexpr bool Slice_dQKV_Mma = kHeadDim == 256 && !dQacc_use_TMA &&
+      dQ_swapAB && AtomLayoutMdQ == 1 && NumMmaWarpGroups == 2;
+  static_assert(
+      !(Deterministic && Slice_dQKV_Mma),
+      "Deterministic mode not supported with Slice_dQKV_Mma");
+
+  static constexpr int TileShapeAtomdQ_BlockM = kBlockM / AtomLayoutMdQ;
+  static constexpr int TileShapeAtomdQ_HeadDim =
+      (Slice_dQKV_Mma ? kHeadDim / 2 : kHeadDim) /
+      (NumMmaWarpGroups / AtomLayoutMdQ);
+  static_assert(
+      !dQ_swapAB ? TileShapeAtomdQ_BlockM == 64 : TileShapeAtomdQ_HeadDim == 64,
+      "Tile_M must be 64.");
   using TileShapeAtomdQ = std::conditional_t<
       !dQ_swapAB,
       Shape<
-          Int<kBlockM>,
-          Int<kHeadDim / (NumMmaWarpGroups / AtomLayoutMdQ)>,
+          Int<TileShapeAtomdQ_BlockM>,
+          Int<TileShapeAtomdQ_HeadDim>,
           Int<kBlockN>>,
-      Shape<Int<kHeadDim>, Int<kBlockM / AtomLayoutMdQ>, Int<kBlockN>>>;
+      Shape<
+          Int<TileShapeAtomdQ_HeadDim>,
+          Int<TileShapeAtomdQ_BlockM>,
+          Int<kBlockN>>>;
   using AtomLayoutdQ = std::conditional_t<
       !dQ_swapAB,
       Layout<
@@ -376,15 +396,6 @@ struct CollectiveMainloopBwdSm90 {
   // most of the iterations. For hdim 192, separating masking iterations results
   // in register spills.
   static constexpr bool SeparateMaskingIterations = false;
-  static constexpr bool dQacc_use_TMA = kHeadDim < 256;
-  // For hdim256, we want to slice the dQ MMA (64 x 256 on 2 WGs) into two (64 x
-  // 128 on 2 WGs) so that we can do atomic add on one half before doing the
-  // other half of the MMA, to reduce register pressure.
-  static constexpr bool Slice_dQKV_Mma = kHeadDim == 256 && !dQacc_use_TMA &&
-      dQ_swapAB && AtomLayoutMdQ == 1 && NumMmaWarpGroups == 2;
-  static_assert(
-      !(Deterministic && Slice_dQKV_Mma),
-      "Deterministic mode not supported with Slice_dQKV_Mma");
 
   static constexpr size_t SmemAlignmentP =
       cutlass::detail::alignment_for_swizzle(SmemLayoutPdS{});
