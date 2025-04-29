@@ -264,7 +264,7 @@ class _JaggedDenseBmmFunction(torch.autograd.Function):
             seq_offsets=seq_offsets,
             Jagged=jagged,
             Dense=dense,
-            Bias=None,
+            Bias=0,
             Out=bmm_out,
             AUTOTUNE_MAX_SEQ_LEN=autotune_max_seq_len(max_seq_len),
             N=K,
