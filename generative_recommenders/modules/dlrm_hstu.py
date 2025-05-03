@@ -164,8 +164,10 @@ class DlrmHSTU(HammerModule):
             num_position_buckets=8192,
             num_time_buckets=2048,
             embedding_dim=hstu_configs.hstu_transducer_embedding_dim,
+            contextual_seq_len=sum(
+                dict(hstu_configs.contextual_feature_to_max_length).values()
+            ),
             is_inference=self._is_inference,
-            use_time_encoding=True,
         )
 
         if hstu_configs.enable_postprocessor:

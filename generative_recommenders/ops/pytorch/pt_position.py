@@ -36,30 +36,6 @@ def torch_arange(end: int, device: torch.device) -> torch.Tensor:
     return torch.arange(end, device=device)
 
 
-def pytorch_add_position_embeddings(
-    jagged: torch.Tensor,
-    jagged_offsets: torch.Tensor,
-    high_inds: torch.Tensor,
-    max_seq_len: int,
-    dense: torch.Tensor,
-    scale: float = 1.0,
-) -> torch.Tensor:
-    jagged = jagged * scale
-    B = high_inds.size(0)
-    col_indices = torch_arange(max_seq_len, device=high_inds.device).expand(
-        B, max_seq_len
-    )
-    col_indices = torch.clamp(col_indices, max=high_inds.view(-1, 1))
-    dense_values = torch.index_select(dense, 0, col_indices.reshape(-1)).view(
-        B, max_seq_len, -1
-    )
-    return torch.ops.fbgemm.jagged_dense_elementwise_add_jagged_output(
-        jagged,
-        [jagged_offsets],
-        dense_values,
-    )[0]
-
-
 @torch.fx.wrap
 def _get_col_indices(
     max_seq_len: int,
@@ -119,7 +95,7 @@ def pytorch_add_timestamp_positional_embeddings(
     )
     B, _ = pos_inds.shape
     # timestamp encoding
-    num_time_buckets = 2048
+    num_time_buckets = ts_embeddings.size(1) - 1
     time_bucket_increments = 60.0
     time_bucket_divisor = 1.0
     time_delta = 0
