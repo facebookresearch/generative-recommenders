@@ -20,7 +20,6 @@ from typing import Optional
 
 import torch
 from generative_recommenders.ops.pytorch.pt_position import (
-    pytorch_add_position_embeddings,
     pytorch_add_timestamp_positional_embeddings,
 )
 
@@ -32,70 +31,8 @@ except ImportError:
     pass
 from generative_recommenders.common import HammerKernel
 from generative_recommenders.ops.triton.triton_position import (
-    triton_add_position_embeddings,
     triton_add_timestamp_positional_embeddings,
 )
-from torch.fx._symbolic_trace import is_fx_tracing
-
-
-@torch.fx.wrap
-def _get_high_inds(
-    high_inds: torch.Tensor,
-    position_embeddings_weight: torch.Tensor,
-    num_targets: Optional[torch.Tensor],
-    interleave_targets: bool,
-) -> torch.Tensor:
-    max_pos_ind = position_embeddings_weight.size(0)
-    if num_targets is not None:
-        if interleave_targets:
-            high_inds = high_inds - num_targets * 2
-        else:
-            high_inds = high_inds - num_targets
-    high_inds = torch.clamp(high_inds, max=max_pos_ind - 1)
-    return high_inds
-
-
-def add_positional_embeddings(
-    alpha: float,
-    max_seq_len: int,
-    position_embeddings_weight: torch.Tensor,
-    seq_offsets: torch.Tensor,
-    seq_lengths: torch.Tensor,
-    seq_embeddings: torch.Tensor,
-    num_targets: Optional[torch.Tensor],
-    interleave_targets: bool,
-    kernel: HammerKernel = HammerKernel.PYTORCH,
-) -> torch.Tensor:
-    high_inds = _get_high_inds(
-        seq_lengths, position_embeddings_weight, num_targets, interleave_targets
-    )
-    if not is_fx_tracing():
-        _, D = seq_embeddings.shape
-        torch._assert(
-            seq_offsets.size(0) - 1 == high_inds.size(0),
-            "wrong jagged_offsets shape[0]",
-        )
-        _, D2 = position_embeddings_weight.shape
-        torch._assert(D2 == D, "wrong dense shape[1]")
-
-    if kernel == HammerKernel.TRITON:
-        return triton_add_position_embeddings(
-            jagged=seq_embeddings,
-            jagged_offsets=seq_offsets,
-            high_inds=high_inds,
-            max_seq_len=max_seq_len,
-            dense=position_embeddings_weight,
-            scale=alpha,
-        )
-    else:
-        return pytorch_add_position_embeddings(
-            jagged=seq_embeddings,
-            jagged_offsets=seq_offsets,
-            high_inds=high_inds,
-            max_seq_len=max_seq_len,
-            dense=position_embeddings_weight,
-            scale=alpha,
-        )
 
 
 def add_timestamp_positional_embeddings(

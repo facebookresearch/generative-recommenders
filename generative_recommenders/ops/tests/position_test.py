@@ -32,126 +32,6 @@ class PositionEmbeddingsTest(unittest.TestCase):
     @unittest.skipIf(*gpu_unavailable)
     # pyre-ignore
     @given(
-        batch_size=st.integers(4, 8),
-        max_uih_len=st.integers(50, 500),
-        max_targets=st.sampled_from([10, 20]),
-        D=st.integers(20, 200),
-        alpha=st.sampled_from([0.5, 1.0]),
-        dtype=st.sampled_from([torch.float32]),
-        interleave_targets=st.sampled_from([True, False]),
-    )
-    @settings(
-        verbosity=Verbosity.verbose,
-        max_examples=20,
-        deadline=None,
-    )
-    # pyre-ignore[2]
-    def test_add_positional_embeddings_triton(self, *args, **kwargs) -> None:
-        self._test_add_position_embeddings(
-            *args,
-            **kwargs,
-            test_backward=True,
-            ref_kernel=HammerKernel.PYTORCH,
-            real_kernel=HammerKernel.TRITON,
-        )
-
-    def _test_add_position_embeddings(
-        self,
-        batch_size: int,
-        max_uih_len: int,
-        max_targets: int,
-        D: int,
-        alpha: float,
-        dtype: torch.dtype,
-        interleave_targets: bool,
-        ref_kernel: HammerKernel,
-        real_kernel: HammerKernel,
-        test_backward: bool,
-    ) -> None:
-        set_dev_mode(True)
-        from generative_recommenders.ops.position import add_positional_embeddings
-
-        num_targets = torch.randint(
-            max_targets + 1, size=(batch_size,), device=torch.device("cuda")
-        )
-        lengths = torch.randint(
-            max_targets * 2,
-            max_uih_len + 1,
-            size=(batch_size,),
-            device=torch.device("cuda"),
-        )
-        seq_offsets = torch.zeros(
-            (batch_size + 1,), dtype=torch.int64, device=torch.device("cuda")
-        )
-        seq_offsets[1:] = torch.cumsum(lengths, dim=0)
-        max_seq_len = max_uih_len + max_targets
-
-        position_embeddings_weight = (
-            torch.empty(
-                (max_seq_len, D), dtype=torch.float32, device=torch.device("cuda")
-            )
-            .uniform_(-1.0, 1.0)
-            .requires_grad_()
-        )
-        seq_embeddings = (
-            torch.empty(
-                (int(seq_offsets[-1].item()), D),
-                dtype=dtype,
-                device=torch.device("cuda"),
-            )
-            .uniform_(-0.1, 0.1)
-            .requires_grad_()
-        )
-
-        # ref implementation
-        ref_out = add_positional_embeddings(
-            alpha=alpha,
-            max_seq_len=max_seq_len,
-            position_embeddings_weight=position_embeddings_weight,
-            seq_offsets=seq_offsets,
-            seq_lengths=lengths,
-            seq_embeddings=seq_embeddings,
-            num_targets=num_targets,
-            interleave_targets=interleave_targets,
-            kernel=ref_kernel,
-        )
-
-        dout = torch.randn_like(ref_out) * 0.01
-        ref_out.backward(dout)
-        # pyre-ignore
-        ref_d_seq_embeddings, seq_embeddings.grad = seq_embeddings.grad.clone(), None
-        ref_d_pos_emb_weight, position_embeddings_weight.grad = (
-            position_embeddings_weight.grad.clone(),
-            None,
-        )
-
-        # real implementation
-        seq_embeddings = seq_embeddings.detach().clone().requires_grad_()
-        position_embeddings_weight = (
-            position_embeddings_weight.detach().clone().requires_grad_()
-        )
-        real_out = add_positional_embeddings(
-            alpha=alpha,
-            max_seq_len=max_seq_len,
-            position_embeddings_weight=position_embeddings_weight,
-            seq_offsets=seq_offsets,
-            seq_lengths=lengths,
-            seq_embeddings=seq_embeddings,
-            num_targets=num_targets,
-            interleave_targets=interleave_targets,
-            kernel=real_kernel,
-        )
-        torch.testing.assert_close(ref_out, real_out)
-        if test_backward:
-            real_out.backward(dout)
-            real_d_seq_embeddings = seq_embeddings.grad.clone()
-            real_d_pos_emb_weight = position_embeddings_weight.grad.clone()
-            torch.testing.assert_close(ref_d_seq_embeddings, real_d_seq_embeddings)
-            torch.testing.assert_close(ref_d_pos_emb_weight, real_d_pos_emb_weight)
-
-    @unittest.skipIf(*gpu_unavailable)
-    # pyre-ignore
-    @given(
         alpha=st.sampled_from([0.5]),
         max_uih_len=st.integers(50, 500),
         max_contextual_seq_len=st.sampled_from([10]),
@@ -259,8 +139,11 @@ class PositionEmbeddingsTest(unittest.TestCase):
             .uniform_(-1.0, 1.0)
             .requires_grad_()
         )
+        num_time_buckets = 1000
         timestamp_embeddings_weight = (
-            torch.empty((2048, D), dtype=torch.float32, device=torch.device("cuda"))
+            torch.empty(
+                (num_time_buckets, D), dtype=torch.float32, device=torch.device("cuda")
+            )
             .uniform_(-1.0, 1.0)
             .requires_grad_()
         )
