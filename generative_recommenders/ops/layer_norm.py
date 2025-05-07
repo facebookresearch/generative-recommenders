@@ -119,18 +119,18 @@ class LayerNorm(HammerModule):
         super().__init__(is_inference=is_inference)
         self._normalized_shape: List[int] = [dim]
         self._eps = eps
-        self._weight = torch.nn.Parameter(
+        self.weight = torch.nn.Parameter(
             torch.ones(self._normalized_shape),
         )
-        self._bias = torch.nn.Parameter(
+        self.bias = torch.nn.Parameter(
             torch.zeros(self._normalized_shape),
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return layer_norm(
             x=x,
-            weight=self._weight,
-            bias=self._bias,
+            weight=self.weight,
+            bias=self.bias,
             eps=self._eps,
             kernel=self.hammer_kernel(),
         )
@@ -145,17 +145,17 @@ class RMSNorm(HammerModule):
     ) -> None:
         super().__init__(is_inference=is_inference)
         self._eps = eps
-        self._weight = torch.nn.Parameter(torch.ones(dim))
+        self.weight = torch.nn.Parameter(torch.ones(dim))
 
     def _norm(self, x: torch.Tensor) -> torch.Tensor:
         return x * torch.rsqrt(x.pow(2).mean(-1, keepdim=True) + self._eps)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         if self.hammer_kernel() == HammerKernel.TRITON:
-            return triton_rms_norm(x, self._weight, self._eps)
+            return triton_rms_norm(x, self.weight, self._eps)
         else:
             output = self._norm(x.float()).type_as(x)
-            return output * self._weight
+            return output * self.weight
 
 
 class SwishLayerNorm(HammerModule):
@@ -167,8 +167,8 @@ class SwishLayerNorm(HammerModule):
     ) -> None:
         super().__init__(is_inference=is_inference)
         self._normalized_shape: List[int] = [dim]
-        self._weight = torch.nn.Parameter(torch.ones(self._normalized_shape))
-        self._bias = torch.nn.Parameter(torch.zeros(self._normalized_shape))
+        self.weight = torch.nn.Parameter(torch.ones(self._normalized_shape))
+        self.bias = torch.nn.Parameter(torch.zeros(self._normalized_shape))
         self._eps = eps
 
     def forward(
@@ -177,8 +177,8 @@ class SwishLayerNorm(HammerModule):
     ) -> torch.Tensor:
         return swish_layer_norm(
             x=x,
-            weight=self._weight,
-            bias=self._bias,
+            weight=self.weight,
+            bias=self.bias,
             eps=self._eps,
             kernel=self.hammer_kernel(),
         )

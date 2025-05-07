@@ -64,7 +64,7 @@ class ActionEncoder(HammerModule):
             ),
         )
         self._target_action_embedding_table: torch.nn.Parameter = torch.nn.Parameter(
-            torch.empty((self._num_action_types, action_embedding_dim)).normal_(
+            torch.empty((1, self._num_action_types * action_embedding_dim)).normal_(
                 mean=0, std=0.1
             ),
         )
@@ -109,9 +109,7 @@ class ActionEncoder(HammerModule):
             mask >= (seq_lengths - num_targets).unsqueeze(1),
             mask < seq_lengths.unsqueeze(1),
         )
-        padded_action_embeddings[mask] = self._target_action_embedding_table.view(
-            1, -1
-        ).tile(
+        padded_action_embeddings[mask] = self._target_action_embedding_table.tile(
             int(torch.sum(num_targets).item()),
             1,
         )

@@ -20,11 +20,7 @@ from math import sqrt
 from typing import Callable, Dict, Optional, Tuple
 
 import torch
-from generative_recommenders.common import (
-    fx_infer_max_len,
-    fx_unwrap_optional_tensor,
-    HammerKernel,
-)
+from generative_recommenders.common import fx_infer_max_len, fx_unwrap_optional_tensor
 from generative_recommenders.modules.action_encoder import ActionEncoder
 from generative_recommenders.modules.content_encoder import ContentEncoder
 from generative_recommenders.modules.contextualize_mlps import (
