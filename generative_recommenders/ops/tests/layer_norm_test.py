@@ -206,16 +206,16 @@ class LayerNormTest(unittest.TestCase):
             return
         # pyre-ignore[16]
         ref_dx, x.grad = x.grad.detach().clone(), None
-        ref_dw = ref_layer._weight.grad.detach().clone()
-        ref_db = ref_layer._bias.grad.detach().clone()
+        ref_dw = ref_layer.weight.grad.detach().clone()
+        ref_db = ref_layer.bias.grad.detach().clone()
         # opt
         x = x.detach().clone().requires_grad_()
         opt_out = opt_layer(x)
         dout = dout.detach().clone()
         opt_out.backward(dout)
         opt_dx, x.grad = x.grad.detach().clone(), None
-        opt_dw = opt_layer._weight.grad.detach().clone()
-        opt_db = opt_layer._bias.grad.detach().clone()
+        opt_dw = opt_layer.weight.grad.detach().clone()
+        opt_db = opt_layer.bias.grad.detach().clone()
         torch.testing.assert_close(ref_out, opt_out)
         torch.testing.assert_close(
             ref_dx,

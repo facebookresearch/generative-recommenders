@@ -80,6 +80,17 @@ class HSTUTransducer(HammerModule):
         self._return_full_embeddings: bool = return_full_embeddings
         self._listwise_training: bool = listwise and self.is_train
 
+        for name, m in self.named_modules():
+            if "_stu_module" in name:
+                continue
+            elif isinstance(m, torch.nn.Linear):
+                torch.nn.init.xavier_normal_(m.weight)
+            elif isinstance(m, torch.nn.LayerNorm):
+                if m.weight.dim() >= 2:
+                    torch.nn.init.xavier_normal_(m.weight)
+                if m.bias is not None and m.bias.dim() >= 2:
+                    torch.nn.init.xavier_normal_(m.bias)
+
     def _preprocess(
         self,
         max_seq_len: int,

@@ -45,7 +45,7 @@ class ContentEncoder(HammerModule):
             torch.nn.ParameterDict(
                 {
                     name: torch.nn.Parameter(
-                        torch.empty((dim,)).normal_(mean=0, std=0.1),
+                        torch.empty((1, 1, dim)).normal_(mean=0, std=0.1),
                     )
                     for name, dim in self._target_enrich_features.items()
                 }
@@ -68,20 +68,17 @@ class ContentEncoder(HammerModule):
         seq_payloads: Dict[str, torch.Tensor],
         num_targets: torch.Tensor,
     ) -> torch.Tensor:
-        content_embeddings_list: List[torch.Tensor] = []
-
+        content_embeddings_list: List[torch.Tensor] = [seq_embeddings]
         if len(self._additional_content_features) > 0:
-            content_embeddings_list = [seq_embeddings] + [
+            content_embeddings_list = content_embeddings_list + [
                 (seq_payloads[x].to(seq_embeddings.dtype))
                 for x in self._additional_content_features.keys()
             ]
 
         for name, param in self._target_enrich_dummy_embeddings.items():
-            padded_enrich_embeddings = (
-                param.view(1, 1, -1)
-                .repeat(seq_lengths.size(0), max_seq_len, 1)
-                .to(seq_embeddings.dtype)
-            )
+            padded_enrich_embeddings = param.repeat(
+                seq_lengths.size(0), max_seq_len, 1
+            ).to(seq_embeddings.dtype)
             mask = torch.arange(max_seq_len, device=seq_offsets.device).view(
                 1, max_seq_len
             )
