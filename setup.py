@@ -31,6 +31,6 @@ setup(
     ],
     long_description=open("README.md").read(),
     long_description_content_type="text/markdown",
-    url="https://github.com/facebookresearch/generative-recommenders",
+    url="https://github.com/meta-recsys/generative-recommenders",
     license="Apache-2.0",
 )

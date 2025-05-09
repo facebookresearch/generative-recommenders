@@ -1,4 +1,4 @@
-# Contributing to facebookresearch/generative-recommenders
+# Contributing to meta-recsys/generative-recommenders
 We want to make contributing to this project as easy and transparent as
 possible.
 
@@ -30,11 +30,11 @@ Meta has a [bounty program](https://bugbounty.meta.com/) for the safe
 disclosure of security bugs. In those cases, please go through the process
 outlined on that page and do not file a public issue.
 
-## Coding Style  
+## Coding Style
 * 2 spaces for indentation rather than tabs
 * 80 character line length
 * ...
 
 ## License
-By contributing to facebookresearch/generative-recommenders, you agree that your contributions will be licensed
+By contributing to meta-recsys/generative-recommenders, you agree that your contributions will be licensed
 under the LICENSE file in the root directory of this source tree.
