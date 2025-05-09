@@ -38,7 +38,8 @@ class InputPreprocessor(HammerModule):
     @abc.abstractmethod
     def forward(
         self,
-        max_seq_len: int,
+        max_uih_len: int,
+        max_targets: int,
         seq_lengths: torch.Tensor,
         seq_timestamps: torch.Tensor,
         seq_embeddings: torch.Tensor,
@@ -180,7 +181,8 @@ class ContextualPreprocessor(InputPreprocessor):
 
     def forward(  # noqa C901
         self,
-        max_seq_len: int,
+        max_uih_len: int,
+        max_targets: int,
         seq_lengths: torch.Tensor,
         seq_timestamps: torch.Tensor,
         seq_embeddings: torch.Tensor,
@@ -196,6 +198,7 @@ class ContextualPreprocessor(InputPreprocessor):
         Dict[str, torch.Tensor],
     ]:
         output_seq_embeddings = self._content_embedding_mlp(seq_embeddings)
+        max_seq_len = max_uih_len + max_targets
         if self._action_weights is not None:
             action_embeddings = self._action_encoder(
                 max_seq_len=max_seq_len,

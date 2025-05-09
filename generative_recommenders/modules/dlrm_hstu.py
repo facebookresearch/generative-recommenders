@@ -276,19 +276,21 @@ class DlrmHSTU(HammerModule):
 
     def _user_forward(
         self,
-        payload_features: Dict[str, torch.Tensor],
+        max_uih_len: int,
+        max_candidates: int,
         seq_embeddings: Dict[str, SequenceEmbedding],
+        payload_features: Dict[str, torch.Tensor],
         num_candidates: torch.Tensor,
     ) -> torch.Tensor:
         source_lengths = seq_embeddings[
             self._hstu_configs.uih_post_id_feature_name
         ].lengths
-        runtime_max_seq_len = fx_infer_max_len(source_lengths)
         source_timestamps = payload_features[
             self._hstu_configs.uih_action_time_feature_name
         ]
         candidates_user_embeddings, _ = self._hstu_transducer(
-            max_seq_len=runtime_max_seq_len,
+            max_uih_len=max_uih_len,
+            max_targets=max_candidates,
             seq_embeddings=seq_embeddings[
                 self._hstu_configs.uih_post_id_feature_name
             ].embedding,
@@ -464,8 +466,10 @@ class DlrmHSTU(HammerModule):
             )
         with record_function("## user_forward ##"):
             candidates_user_embeddings = self._user_forward(
-                payload_features,
-                seq_embeddings,
+                max_uih_len=max_uih_len,
+                max_candidates=max_num_candidates,
+                seq_embeddings=seq_embeddings,
+                payload_features=payload_features,
                 num_candidates=num_candidates,
             )
         with record_function("## multitask_module ##"):

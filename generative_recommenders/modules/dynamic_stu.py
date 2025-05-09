@@ -267,6 +267,7 @@ class L2STU(DynamicSTU):
             minus_l2_offsets=minus_l2_offsets,
             l2_offsets=l2_offsets,
             contextual_seq_len=self._contextual_seq_len,
+            kernel=self.hammer_kernel(),
         )
         self._saved_tensors = (
             minus_l2_offsets,

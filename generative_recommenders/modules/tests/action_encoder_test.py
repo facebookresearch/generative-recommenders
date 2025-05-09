@@ -47,11 +47,8 @@ class ActionEncoderTest(unittest.TestCase):
             [1, 2, 3, 4],
             [1, 2],
             [2],
-            [3],
-            [1, 2],
-            [3],
         ]
-        watchtimes = [40, 20, 110, 31, 26, 55, 33, 71, 66]
+        watchtimes = [40, 20, 110, 31, 26, 55]
         for i, wt in enumerate(watchtimes):
             for j, w in enumerate(watchtime_to_action_thresholds_and_weights):
                 if wt > w[0]:
@@ -72,15 +69,19 @@ class ActionEncoderTest(unittest.TestCase):
         seq_lengths = [6, 3]
         seq_offsets = [0, 6, 9]
         num_targets = [2, 1]
+        uih_offsets = [0, 4, 6]
+        target_offsets = [0, 2, 3]
+        seq_embeddings = torch.rand(9, 128, device=device)
         action_embeddings = encoder(
-            max_seq_len=max(seq_lengths),
-            seq_lengths=torch.tensor(seq_lengths, device=device),
-            seq_offsets=torch.tensor(seq_offsets, device=device),
+            max_uih_len=4,
+            max_targets=2,
+            uih_offsets=torch.tensor(uih_offsets, device=device),
+            target_offsets=torch.tensor(target_offsets, device=device),
+            seq_embeddings=seq_embeddings,
             seq_payloads={
                 "watchtimes": torch.tensor(watchtimes, device=device),
                 "actions": torch.tensor(actions, device=device),
             },
-            num_targets=torch.tensor(num_targets, device=device),
         )
         self.assertEqual(
             action_embeddings.shape, (9, action_embedding_dim * num_action_types)
@@ -88,16 +89,19 @@ class ActionEncoderTest(unittest.TestCase):
         for b in range(len(seq_lengths)):
             b_start = seq_offsets[b]
             b_end = seq_offsets[b + 1]
+            u_start = uih_offsets[b]
             for j in range(b_start, b_end):
                 embedding = action_embeddings[j].view(num_action_types, -1)
                 for atype in range(num_action_types):
                     if b_end - j <= num_targets[b]:
                         torch.testing.assert_allclose(
                             embedding[atype],
-                            encoder._target_action_embedding_table[atype],
+                            encoder._target_action_embedding_table.view(
+                                num_action_types, -1
+                            )[atype],
                         )
                     else:
-                        if atype in enabled_actions[j]:
+                        if atype in enabled_actions[j - b_start + u_start]:
                             torch.testing.assert_allclose(
                                 embedding[atype],
                                 encoder._action_embedding_table[atype],

@@ -93,7 +93,8 @@ class HSTUTransducer(HammerModule):
 
     def _preprocess(
         self,
-        max_seq_len: int,
+        max_uih_len: int,
+        max_targets: int,
         seq_lengths: torch.Tensor,
         seq_timestamps: torch.Tensor,
         seq_embeddings: torch.Tensor,
@@ -120,7 +121,8 @@ class HSTUTransducer(HammerModule):
                 output_num_targets,
                 output_seq_payloads,
             ) = self._input_preprocessor(
-                max_seq_len=max_seq_len,
+                max_uih_len=max_uih_len,
+                max_targets=max_targets,
                 seq_lengths=seq_lengths,
                 seq_timestamps=seq_timestamps,
                 seq_embeddings=seq_embeddings,
@@ -204,6 +206,7 @@ class HSTUTransducer(HammerModule):
                 max_seq_len=max_seq_len,
                 offsets_left=uih_offsets,
                 offsets_right=candidates_offsets,
+                kernel=self.hammer_kernel(),
             )
             interleave_targets: bool = self._input_preprocessor.interleave_targets()
             if interleave_targets:
@@ -216,6 +219,7 @@ class HSTUTransducer(HammerModule):
                     max_seq_len=max_seq_len,
                     offsets_left=uih_offsets,
                     offsets_right=candidates_offsets,
+                    kernel=self.hammer_kernel(),
                 )
                 candidate_timestamps = candidate_timestamps.squeeze(-1)
                 if interleave_targets:
@@ -233,7 +237,8 @@ class HSTUTransducer(HammerModule):
 
     def forward(
         self,
-        max_seq_len: int,
+        max_uih_len: int,
+        max_targets: int,
         seq_lengths: torch.Tensor,
         seq_embeddings: torch.Tensor,
         seq_timestamps: torch.Tensor,
@@ -256,7 +261,8 @@ class HSTUTransducer(HammerModule):
             num_targets,
             seq_payloads,
         ) = self._preprocess(
-            max_seq_len=max_seq_len,
+            max_uih_len=max_uih_len,
+            max_targets=max_targets,
             seq_lengths=seq_lengths,
             seq_timestamps=seq_timestamps,
             seq_embeddings=seq_embeddings,

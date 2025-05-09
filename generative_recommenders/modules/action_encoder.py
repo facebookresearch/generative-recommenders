@@ -20,11 +20,8 @@ from typing import Dict, List, Optional, Tuple
 
 import torch
 
-from generative_recommenders.common import (
-    dense_to_jagged,
-    HammerModule,
-    jagged_to_padded_dense,
-)
+from generative_recommenders.common import HammerModule
+from generative_recommenders.ops.jagged_tensors import concat_2D_jagged
 
 
 class ActionEncoder(HammerModule):
@@ -75,11 +72,12 @@ class ActionEncoder(HammerModule):
 
     def forward(
         self,
-        max_seq_len: int,
-        seq_lengths: torch.Tensor,
-        seq_offsets: torch.Tensor,
+        max_uih_len: int,
+        max_targets: int,
+        uih_offsets: torch.Tensor,
+        target_offsets: torch.Tensor,
+        seq_embeddings: torch.Tensor,
         seq_payloads: Dict[str, torch.Tensor],
-        num_targets: torch.Tensor,
     ) -> torch.Tensor:
         seq_actions = seq_payloads[self._action_feature_name]
         if len(self._watchtime_to_action_thresholds_and_weights) > 0:
@@ -97,24 +95,17 @@ class ActionEncoder(HammerModule):
         action_embeddings = (
             exploded_actions.unsqueeze(-1) * self._action_embedding_table.unsqueeze(0)
         ).view(-1, self._num_action_types * self._action_embedding_dim)
-
-        padded_action_embeddings = jagged_to_padded_dense(
-            values=action_embeddings,
-            offsets=[seq_offsets],
-            max_lengths=[max_seq_len],
-            padding_value=0.0,
-        )
-        mask = torch.arange(max_seq_len, device=seq_offsets.device).view(1, max_seq_len)
-        mask = torch.logical_and(
-            mask >= (seq_lengths - num_targets).unsqueeze(1),
-            mask < seq_lengths.unsqueeze(1),
-        )
-        padded_action_embeddings[mask] = self._target_action_embedding_table.tile(
-            int(torch.sum(num_targets).item()),
-            1,
-        )
-        action_embeddings = dense_to_jagged(
-            dense=padded_action_embeddings,
-            x_offsets=[seq_offsets],
+        total_targets: int = seq_embeddings.size(0) - action_embeddings.size(0)
+        action_embeddings = concat_2D_jagged(
+            values_left=action_embeddings,
+            values_right=self._target_action_embedding_table.tile(
+                total_targets,
+                1,
+            ),
+            max_len_left=max_uih_len,
+            max_len_right=max_targets,
+            offsets_left=uih_offsets,
+            offsets_right=target_offsets,
+            kernel=self.hammer_kernel(),
         )
         return action_embeddings
