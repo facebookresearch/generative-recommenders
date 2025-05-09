@@ -206,6 +206,11 @@ class ContextualPreprocessor(InputPreprocessor):
                 seq_offsets=torch.ops.fbgemm.asynchronous_complete_cumsum(seq_lengths),
                 num_targets=num_targets,
                 seq_payloads=seq_payloads,
+                max_seq_len=max_seq_len,
+                seq_offsets=torch.ops.fbgemm.asynchronous_complete_cumsum(
+                    seq_lengths
+                ),
+                num_targets=num_targets,
             )
             output_seq_embeddings = output_seq_embeddings + self._action_embedding_mlp(
                 action_embeddings

@@ -45,6 +45,7 @@ class DLRMv3KuaiRandDataset(DLRMv3RandomDataset):
         embedding_config: Dict[str, Any],
         seq_logs_file: str,
         is_inference: bool,
+        **kwargs,
     ) -> None:
         super().__init__(hstu_config=hstu_config, is_inference=is_inference)
         self.seq_logs_frame: pd.DataFrame = pd.read_csv(seq_logs_file, delimiter=",")
