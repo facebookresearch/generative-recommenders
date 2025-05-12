@@ -1196,6 +1196,23 @@ def _get_bw_configs() -> List[triton.Config]:
                                             pre_hook=_bwd_pre_hook,
                                         )
                                     )
+        configs.append(
+            # This config performs well with bufferops enabled.
+            triton.Config(
+                {
+                    "BLOCK_M": 32,
+                    "BLOCK_N": 128,
+                    "matrix_instr_nonkdim": 16,
+                    "waves_per_eu": 0,
+                    "SEQUENCE_PARALLEL": False,
+                    "kpack": 2,
+                    "UNROLL": 1,
+                },
+                num_stages=1,
+                num_warps=4,
+                pre_hook=_bwd_pre_hook,
+            )
+        )
         return configs
 
     configs = [
@@ -1434,7 +1451,24 @@ def _hstu_attn_bwd(  # noqa C901
     BLOCK_N: tl.constexpr,
     UNROLL: tl.constexpr,
     HAS_SORT_BY_LENGTH_INDICES: tl.constexpr,
+    ENABLE_BUFFER_OPS_ASSUMES: tl.constexpr,
 ):
+    if ENABLE_BUFFER_OPS_ASSUMES:
+        tl.assume(stride_qm >= 0)
+        tl.assume(stride_qh >= 0)
+        tl.assume(stride_kn >= 0)
+        tl.assume(stride_kh >= 0)
+        tl.assume(stride_vn >= 0)
+        tl.assume(stride_vh >= 0)
+        tl.assume(stride_dom >= 0)
+        tl.assume(stride_doh >= 0)
+        tl.assume(stride_dqm >= 0)
+        tl.assume(stride_dqh >= 0)
+        tl.assume(stride_dkn >= 0)
+        tl.assume(stride_dkh >= 0)
+        tl.assume(stride_dvn >= 0)
+        tl.assume(stride_dvh >= 0)
+        tl.assume(H > 0)
     off_hz = tl.program_id(0)
     off_z = off_hz // H
     if HAS_SORT_BY_LENGTH_INDICES:
@@ -1653,6 +1687,8 @@ def triton_hstu_attention_bwd(
         device=q.device,
     )
     AUTOTUNE_Z = prev_power_of_2(Z)
+    # Only enable buffer ops on AMD to be conservative.
+    enable_buffer_ops_assumes = torch.version.hip is not None
     _hstu_attn_bwd[grid](
         Q=q,
         K=k,
@@ -1696,6 +1732,7 @@ def triton_hstu_attention_bwd(
         BLOCK_D_Q=DimQ,
         BLOCK_D_V=DimV,
         HAS_SORT_BY_LENGTH_INDICES=sort_by_length_indices is not None,
+        ENABLE_BUFFER_OPS_ASSUMES=enable_buffer_ops_assumes,
     )
 
     return dq, dk, dv
