@@ -236,7 +236,7 @@ def make_optimizer_and_shard(
     all_optimizers = []
     all_params = {}
     non_fused_sparse_params = {}
-    for k, v in in_backward_optimizer_filter(module.named_parameters()):
+    for k, v in in_backward_optimizer_filter(model.named_parameters()):
         if v.requires_grad:
             if isinstance(v, ShardedTensor):
                 non_fused_sparse_params[k] = v
@@ -389,7 +389,7 @@ def eval_loop(
     model = model.eval()
     batch_idx: int = 0
     profiler = Profiler(rank, active=10) if output_trace else None
-
+    metric_logger.reset()
     for sample in dataloader:
         sample.to(device)
         (
@@ -404,9 +404,9 @@ def eval_loop(
             sample.candidates_features_kjt,
         )
         metric_logger.update(
-            predictions=mt_target_preds.t(),
-            labels=mt_target_labels.t(),
-            weights=mt_target_weights.t(),
+            predictions=mt_target_preds,
+            labels=mt_target_labels,
+            weights=mt_target_weights,
         )
         batch_idx += 1
         if output_trace:

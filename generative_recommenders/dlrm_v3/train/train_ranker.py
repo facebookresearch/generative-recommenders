@@ -36,6 +36,7 @@ from generative_recommenders.dlrm_v3.train.utils import (
 from generative_recommenders.dlrm_v3.utils import MetricsLogger
 from torch import multiprocessing as mp
 from torchrec.test_utils import get_free_port
+import sys
 
 logger: logging.Logger = logging.getLogger(__name__)
 
@@ -77,7 +78,7 @@ def _main_func(
     metrics = MetricsLogger(
         multitask_configs=model_configs.multitask_configs,
         batch_size=train_dataloader.batch_size,
-        window_size=1000,
+        window_size=1000 if mode == "train" else sys.maxsize,
         device=device,
         rank=rank,
     )
