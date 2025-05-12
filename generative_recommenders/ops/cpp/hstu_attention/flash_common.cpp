@@ -422,17 +422,10 @@ at::Tensor hstu_mha_fwd(
       qk_head_size <= max_headdim && v_head_size <= max_headdim,
       "FlashAttention forward only supports head dimension at most " +
           std::to_string(max_headdim));
+  TORCH_CHECK(max_attn_len >= 0, "max_attn_len must be at least 0");
   TORCH_CHECK(
-      max_attn_len < max_seq_len - 1 && max_attn_len >= 0,
-      "max_attn_len must be between 0 and " + std::to_string(max_seq_len - 2));
-  TORCH_CHECK(
-      min_full_attn_seq_len <= max_seq_len && min_full_attn_seq_len >= 0,
-      "min_full_attn_seq_len must be between 0 and " +
-          std::to_string(max_seq_len));
-  TORCH_CHECK(
-      contextual_seq_len <= max_seq_len - 1 && contextual_seq_len >= 0,
-      "contextual_seq_len must be between 0 and " +
-          std::to_string(max_seq_len - 1));
+      min_full_attn_seq_len >= 0, "min_full_attn_seq_len must be at least 0");
+  TORCH_CHECK(contextual_seq_len >= 0, "contextual_seq_len must be at least 0");
   if (max_attn_len > 0) {
     TORCH_CHECK(
         min_full_attn_seq_len > 0,
@@ -743,17 +736,10 @@ std::vector<at::Tensor> hstu_mha_bwd(
       qk_head_size <= max_headdim && v_head_size <= max_headdim,
       "FlashAttention backward only supports head dimension at most " +
           std::to_string(max_headdim));
+  TORCH_CHECK(max_attn_len >= 0, "max_attn_len must be at least 0");
   TORCH_CHECK(
-      max_attn_len < max_seq_len - 1 && max_attn_len >= 0,
-      "max_attn_len must be between 0 and " + std::to_string(max_seq_len - 2));
-  TORCH_CHECK(
-      min_full_attn_seq_len <= max_seq_len && min_full_attn_seq_len >= 0,
-      "min_full_attn_seq_len must be between 0 and " +
-          std::to_string(max_seq_len));
-  TORCH_CHECK(
-      contextual_seq_len <= max_seq_len - 1 && contextual_seq_len >= 0,
-      "contextual_seq_len must be between 0 and " +
-          std::to_string(max_seq_len - 1));
+      min_full_attn_seq_len >= 0, "min_full_attn_seq_len must be at least 0");
+  TORCH_CHECK(contextual_seq_len >= 0, "contextual_seq_len must be at least 0");
   if (!is_jagged) {
     CHECK_SHAPE(q, batch_size, max_seq_len, num_heads, qk_head_size);
     CHECK_SHAPE(k, batch_size, max_seq_len, num_heads, qk_head_size);
