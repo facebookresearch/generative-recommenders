@@ -62,10 +62,10 @@ at::Tensor expand_1d_jagged_to_dense_cuda(
   TORCH_INTERNAL_ASSERT(offsets.device().type() == at::DeviceType::CUDA);
   TORCH_CHECK(values.numel() < std::numeric_limits<int32_t>::max());
   TORCH_CHECK(values.get_device() == offsets.get_device());
-  TORCH_CHECK(max_len > 0);
+  TORCH_CHECK(max_len >= 0);
   auto B = offsets.size(0) - 1;
   auto output = at::empty({B, max_len}, values.options());
-  if (values.numel() == 0) {
+  if (values.numel() == 0 || max_len == 0) {
     return output;
   }
   uint32_t nthreads_per_block = max_len > 64 ? 64 : max_len;
