@@ -58,10 +58,10 @@ at::Tensor expand_1d_jagged_to_dense_cpu(
   TORCH_INTERNAL_ASSERT(values.device().type() == at::DeviceType::CPU);
   TORCH_INTERNAL_ASSERT(offsets.device().type() == at::DeviceType::CPU);
   TORCH_CHECK(values.numel() < std::numeric_limits<int32_t>::max());
-  TORCH_CHECK(max_len > 0);
+  TORCH_CHECK(max_len >= 0);
   auto B = offsets.size(0) - 1;
   auto output = at::empty({B, max_len}, values.options());
-  if (values.numel() == 0) {
+  if (values.numel() == 0 || max_len == 0) {
     return output;
   }
   AT_DISPATCH_ALL_TYPES_AND2(
