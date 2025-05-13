@@ -144,6 +144,7 @@ def _construct_full_kv(
     B = kv_caching_offsets.shape[0] - 1
     delta_size = L // B
     full_k = concat_2D_jagged(
+        max_seq_len=max_kv_caching_len + delta_size,
         values_left=k_cache,
         values_right=delta_k,
         max_len_left=max_kv_caching_len,
@@ -152,6 +153,7 @@ def _construct_full_kv(
         offsets_right=None,
     )
     full_v = concat_2D_jagged(
+        max_seq_len=max_kv_caching_len + delta_size,
         values_left=v_cache,
         values_right=delta_v,
         max_len_left=max_kv_caching_len,

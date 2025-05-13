@@ -279,6 +279,7 @@ class JaggedTensorsTest(unittest.TestCase):
         )
 
         ref_values = concat_2D_jagged(
+            max_seq_len=max_len_a + max_len_b,
             values_left=values_a,
             values_right=values_b,
             max_len_left=max_len_a,
@@ -301,6 +302,7 @@ class JaggedTensorsTest(unittest.TestCase):
         values_b = values_b.detach().clone().requires_grad_()
         dout = dout.detach().clone()
         real_values = concat_2D_jagged(
+            max_seq_len=max_len_a + max_len_b,
             values_left=values_a,
             values_right=values_b,
             max_len_left=max_len_a,
@@ -375,41 +377,39 @@ class JaggedTensorsTest(unittest.TestCase):
             .uniform_(-1.0, 1.0)
             .requires_grad_()
         )
-        minus_l2_lengths = x_lengths - max_l2_len - num_targets - contextual_seq_len
-        minus_l2_lengths = torch.clamp(minus_l2_lengths, min=0)
-        minus_l2_offsets = torch.ops.fbgemm.asynchronous_complete_cumsum(
-            minus_l2_lengths
-        )
-        l2_offsets = x_offsets - minus_l2_offsets
-        ref_minus_l2_x, ref_l2_x = hstu_split_l2_embeddings(
+        prefix_lengths = x_lengths - max_l2_len - num_targets - contextual_seq_len
+        prefix_lengths = torch.clamp(prefix_lengths, min=0)
+        prefix_offsets = torch.ops.fbgemm.asynchronous_complete_cumsum(prefix_lengths)
+        l2_offsets = x_offsets - prefix_offsets
+        ref_prefix_x, ref_l2_x = hstu_split_l2_embeddings(
             max_seq_len=max_seq_len,
             x=x,
-            minus_l2_offsets=minus_l2_offsets,
+            prefix_offsets=prefix_offsets,
             l2_offsets=l2_offsets,
             contextual_seq_len=contextual_seq_len,
             kernel=HammerKernel.PYTORCH,
         )
-        d_minus_l2_x = torch.randn_like(ref_minus_l2_x)
+        d_prefix_x = torch.randn_like(ref_prefix_x)
         d_l2_x = torch.randn_like(ref_l2_x)
-        ref_minus_l2_x.backward(d_minus_l2_x, retain_graph=True)
+        ref_prefix_x.backward(d_prefix_x, retain_graph=True)
         ref_l2_x.backward(d_l2_x)
         assert x.grad is not None
         ref_d_x, x.grad = x.grad.clone(), None
         x = x.detach().clone().requires_grad_()
-        real_minus_l2_x, real_l2_x = hstu_split_l2_embeddings(
+        real_prefix_x, real_l2_x = hstu_split_l2_embeddings(
             max_seq_len=max_seq_len,
             x=x,
-            minus_l2_offsets=minus_l2_offsets,
+            prefix_offsets=prefix_offsets,
             l2_offsets=l2_offsets,
             contextual_seq_len=contextual_seq_len,
             kernel=HammerKernel.TRITON,
         )
-        print(ref_minus_l2_x.shape, real_minus_l2_x.shape)
-        torch.testing.assert_close(ref_minus_l2_x, real_minus_l2_x)
+        print(ref_prefix_x.shape, real_prefix_x.shape)
+        torch.testing.assert_close(ref_prefix_x, real_prefix_x)
         torch.testing.assert_close(ref_l2_x, real_l2_x)
-        d_minus_l2_x = d_minus_l2_x.detach().clone()
+        d_prefix_x = d_prefix_x.detach().clone()
         d_l2_x = d_l2_x.detach().clone()
-        real_minus_l2_x.backward(d_minus_l2_x, retain_graph=True)
+        real_prefix_x.backward(d_prefix_x, retain_graph=True)
         real_l2_x.backward(d_l2_x)
         real_d_x = x.grad.clone()
         torch.testing.assert_close(ref_d_x, real_d_x)
@@ -417,7 +417,7 @@ class JaggedTensorsTest(unittest.TestCase):
     # pyre-ignore
     @given(
         batch_size=st.integers(1, 1),
-        max_minus_l2_len=st.integers(10, 10),
+        max_prefix_len=st.integers(10, 10),
         max_l2_len=st.integers(5, 5),
         contextual_seq_len=st.sampled_from([3]),
         max_targets=st.sampled_from([2]),
@@ -436,7 +436,7 @@ class JaggedTensorsTest(unittest.TestCase):
     def test_hstu_concat_l2_embeddings(
         self,
         batch_size: int,
-        max_minus_l2_len: int,
+        max_prefix_len: int,
         max_l2_len: int,
         contextual_seq_len: int,
         max_targets: int,
@@ -471,26 +471,26 @@ class JaggedTensorsTest(unittest.TestCase):
             .uniform_(-1.0, 1.0)
             .requires_grad_()
         )
-        minus_l2_lengths = torch.randint(
+        prefix_lengths = torch.randint(
             0,
-            max_minus_l2_len + 1,
+            max_prefix_len + 1,
             size=(batch_size,),
             device=torch.device("cuda"),
         )
-        minus_l2_lengths = torch.randint(
+        prefix_lengths = torch.randint(
             0,
-            max_minus_l2_len + 1,
+            max_prefix_len + 1,
             size=(batch_size,),
             device=torch.device("cuda"),
         )
-        minus_l2_offsets = torch.zeros(
+        prefix_offsets = torch.zeros(
             (batch_size + 1,), dtype=torch.int64, device=torch.device("cuda")
         )
-        minus_l2_offsets[1:] = torch.cumsum(minus_l2_lengths, dim=0)
-        total_minus_l2_len = int(minus_l2_offsets[-1].item())
-        minus_l2_x = (
+        prefix_offsets[1:] = torch.cumsum(prefix_lengths, dim=0)
+        total_prefix_len = int(prefix_offsets[-1].item())
+        prefix_x = (
             torch.empty(
-                (total_minus_l2_len, D),
+                (total_prefix_len, D),
                 dtype=dtype,
                 device=torch.device("cuda"),
             )
@@ -498,9 +498,9 @@ class JaggedTensorsTest(unittest.TestCase):
             .requires_grad_()
         )
         ref_x = hstu_concat_l2_embeddings(
-            max_minus_l2_len=max_minus_l2_len,
-            minus_l2_x=minus_l2_x,
-            minus_l2_offsets=minus_l2_offsets,
+            max_prefix_len=max_prefix_len,
+            prefix_x=prefix_x,
+            prefix_offsets=prefix_offsets,
             max_l2_len=max_l2_len,
             l2_x=l2_x,
             l2_offsets=l2_offsets,
@@ -510,17 +510,17 @@ class JaggedTensorsTest(unittest.TestCase):
         dout = torch.randn_like(ref_x)
         ref_x.backward(dout)
 
-        assert minus_l2_x.grad is not None
-        ref_d_minus_l2_x, minus_l2_x.grad = minus_l2_x.grad.clone(), None
+        assert prefix_x.grad is not None
+        ref_d_prefix_x, prefix_x.grad = prefix_x.grad.clone(), None
         assert l2_x.grad is not None
         ref_d_l2_x, l2_x.grad = l2_x.grad.clone(), None
 
-        minus_l2_x = minus_l2_x.detach().clone().requires_grad_()
+        prefix_x = prefix_x.detach().clone().requires_grad_()
         l2_x = l2_x.detach().clone().requires_grad_()
         real_x = hstu_concat_l2_embeddings(
-            max_minus_l2_len=max_minus_l2_len,
-            minus_l2_x=minus_l2_x,
-            minus_l2_offsets=minus_l2_offsets,
+            max_prefix_len=max_prefix_len,
+            prefix_x=prefix_x,
+            prefix_offsets=prefix_offsets,
             max_l2_len=max_l2_len,
             l2_x=l2_x,
             l2_offsets=l2_offsets,
@@ -530,9 +530,9 @@ class JaggedTensorsTest(unittest.TestCase):
         torch.testing.assert_close(ref_x, real_x)
         dout = dout.detach().clone()
         real_x.backward(dout)
-        real_d_minus_l2_x = minus_l2_x.grad.clone()
+        real_d_prefix_x = prefix_x.grad.clone()
         real_d_l2_x = l2_x.grad.clone()
-        torch.testing.assert_close(ref_d_minus_l2_x, real_d_minus_l2_x)
+        torch.testing.assert_close(ref_d_prefix_x, real_d_prefix_x)
         torch.testing.assert_close(ref_d_l2_x, real_d_l2_x)
 
     @unittest.skipIf(*gpu_unavailable)

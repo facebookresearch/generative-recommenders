@@ -230,7 +230,7 @@ class L2STU(DynamicSTU):
             Tuple[torch.Tensor, torch.Tensor, torch.Tensor]
         ] = None
         self._runtime_max_l2_len: int = 0
-        self._runtime_minus_l2_len: int = 0
+        self._runtime_prefix_len: int = 0
 
     def _preprocess(
         self,
@@ -250,28 +250,26 @@ class L2STU(DynamicSTU):
         int,
         Optional[torch.Tensor],
     ]:
-        minus_l2_lengths = (
+        prefix_lengths = (
             x_lengths - self._max_l2_len - num_targets - self._contextual_seq_len
         )
-        minus_l2_lengths = torch.clamp(minus_l2_lengths, min=0)
-        minus_l2_offsets = torch.ops.fbgemm.asynchronous_complete_cumsum(
-            minus_l2_lengths
-        )
-        l2_lengths = x_lengths - minus_l2_lengths
-        l2_offsets = x_offsets - minus_l2_offsets
-        self._runtime_max_l2_len = fx_infer_max_len(l2_lengths)
-        self._runtime_minus_l2_len = fx_infer_max_len(minus_l2_lengths)
-        minus_l2_x, l2_x = hstu_split_l2_embeddings(
+        prefix_lengths = torch.clamp(prefix_lengths, min=0)
+        prefix_offsets = torch.ops.fbgemm.asynchronous_complete_cumsum(prefix_lengths)
+        l2_lengths = x_lengths - prefix_lengths
+        l2_offsets = x_offsets - prefix_offsets
+        self._runtime_max_l2_len: int = fx_infer_max_len(l2_lengths)
+        self._runtime_prefix_len: int = fx_infer_max_len(prefix_lengths)
+        prefix_x, l2_x = hstu_split_l2_embeddings(
             max_seq_len=max_seq_len,
             x=x,
-            minus_l2_offsets=minus_l2_offsets,
+            prefix_offsets=prefix_offsets,
             l2_offsets=l2_offsets,
             contextual_seq_len=self._contextual_seq_len,
             kernel=self.hammer_kernel(),
         )
         self._saved_tensors = (
-            minus_l2_offsets,
-            minus_l2_x,
+            prefix_offsets,
+            prefix_x,
             l2_offsets,
         )
         return (
@@ -289,15 +287,15 @@ class L2STU(DynamicSTU):
         stu_output: torch.Tensor,
     ) -> torch.Tensor:
         (
-            minus_l2_offsets,
-            minus_l2_x,
+            prefix_offsets,
+            prefix_x,
             l2_offsets,
         ) = _fx_unwrap_optional_tuple_tensor(self._saved_tensors)
         self._saved_tensors = None
         return hstu_concat_l2_embeddings(
-            max_minus_l2_len=self._runtime_minus_l2_len,
-            minus_l2_x=minus_l2_x,
-            minus_l2_offsets=minus_l2_offsets,
+            max_prefix_len=self._runtime_prefix_len,
+            prefix_x=prefix_x,
+            prefix_offsets=prefix_offsets,
             max_l2_len=self._runtime_max_l2_len,
             l2_x=stu_output,
             l2_offsets=l2_offsets,
