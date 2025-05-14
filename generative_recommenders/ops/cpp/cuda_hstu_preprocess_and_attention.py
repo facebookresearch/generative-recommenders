@@ -87,6 +87,8 @@ class _HSTUPreprocessAndAttentionFunction(torch.autograd.Function):
         v = v.view(-1, num_heads, hidden_dim)
         if silu_u:
             u = F.silu(u)
+        elif recompute_uvqk_in_backward:
+            u = u.clone()  # otherwise the whole uvqk will be saved
         out = torch.ops.hstu.hstu_mha_fwd(
             max_seq_len,
             alpha,
