@@ -239,6 +239,7 @@ class ContextualPreprocessor(InputPreprocessor):
                 ),
             ).transpose(0, 1)
             output_seq_embeddings = concat_2D_jagged(
+                max_seq_len=self._max_contextual_seq_len + output_max_seq_len,
                 values_left=fx_unwrap_optional_tensor(contextual_embeddings).reshape(
                     -1, self._output_embedding_dim
                 ),
@@ -250,6 +251,7 @@ class ContextualPreprocessor(InputPreprocessor):
                 kernel=self.hammer_kernel(),
             )
             output_seq_timestamps = concat_2D_jagged(
+                max_seq_len=self._max_contextual_seq_len + output_max_seq_len,
                 values_left=torch.zeros(
                     (output_seq_lengths.size(0) * self._max_contextual_seq_len, 1),
                     dtype=output_seq_timestamps.dtype,

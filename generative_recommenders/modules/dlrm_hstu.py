@@ -383,6 +383,7 @@ class DlrmHSTU(HammerModule):
                 else:
                     values_right = candidates_features[candidate_feature_name].values()
                 merged_values = concat_2D_jagged(
+                    max_seq_len=max_uih_len + max_num_candidates,
                     max_len_left=max_uih_len,
                     offsets_left=torch.ops.fbgemm.asynchronous_complete_cumsum(
                         uih_seq_lengths
@@ -446,6 +447,7 @@ class DlrmHSTU(HammerModule):
                 seq_embeddings[uih_feature_name] = SequenceEmbedding(
                     lengths=uih_seq_lengths + num_candidates,
                     embedding=concat_2D_jagged(
+                        max_seq_len=max_uih_len + max_num_candidates,
                         max_len_left=max_uih_len,
                         offsets_left=torch.ops.fbgemm.asynchronous_complete_cumsum(
                             uih_seq_lengths

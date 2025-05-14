@@ -97,6 +97,7 @@ class ActionEncoder(HammerModule):
         ).view(-1, self._num_action_types * self._action_embedding_dim)
         total_targets: int = seq_embeddings.size(0) - action_embeddings.size(0)
         action_embeddings = concat_2D_jagged(
+            max_seq_len=max_uih_len + max_targets,
             values_left=action_embeddings,
             values_right=self._target_action_embedding_table.tile(
                 total_targets,
