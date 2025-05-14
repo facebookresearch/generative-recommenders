@@ -233,6 +233,10 @@ class MetricsLogger:
                     )
         return all_computed_metrics
 
+    def reset(self):
+        for metric in self.all_metrics:
+            metric.reset()
+
 
 # the datasets we support
 SUPPORTED_DATASETS = [
