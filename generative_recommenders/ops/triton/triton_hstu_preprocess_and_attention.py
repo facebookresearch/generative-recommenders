@@ -134,6 +134,7 @@ class _HSTUPreprocessAndAttentionFunction(torch.autograd.Function):
         ctx.norm_num_warps = num_warps
         ctx.contextual_seq_len = contextual_seq_len
         ctx.sort_by_length = sort_by_length
+        ctx.enable_tma = enable_tma
         return silu_u, out
 
     @staticmethod
@@ -241,6 +242,7 @@ class _HSTUPreprocessAndAttentionFunction(torch.autograd.Function):
             alpha=ctx.attn_alpha,
             contextual_seq_len=ctx.contextual_seq_len,
             sort_by_length_indices=sort_by_length_indices,
+            enable_tma=ctx.enable_tma,
         )
         if dq.data_ptr() != _dq.data_ptr():
             dq.copy_(_dq)
