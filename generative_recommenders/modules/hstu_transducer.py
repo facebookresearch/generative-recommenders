@@ -95,12 +95,16 @@ class HSTUTransducer(HammerModule):
         self,
         max_uih_len: int,
         max_targets: int,
+        total_uih_len: int,
+        total_targets: int,
         seq_lengths: torch.Tensor,
         seq_timestamps: torch.Tensor,
         seq_embeddings: torch.Tensor,
         num_targets: torch.Tensor,
         seq_payloads: Dict[str, torch.Tensor],
     ) -> Tuple[
+        int,
+        int,
         int,
         torch.Tensor,
         torch.Tensor,
@@ -114,6 +118,8 @@ class HSTUTransducer(HammerModule):
         with record_function("hstu_input_preprocessor"):
             (
                 output_max_seq_len,
+                output_total_uih_len,
+                output_total_targets,
                 output_seq_lengths,
                 output_seq_offsets,
                 output_seq_timestamps,
@@ -123,6 +129,8 @@ class HSTUTransducer(HammerModule):
             ) = self._input_preprocessor(
                 max_uih_len=max_uih_len,
                 max_targets=max_targets,
+                total_uih_len=total_uih_len,
+                total_targets=total_targets,
                 seq_lengths=seq_lengths,
                 seq_timestamps=seq_timestamps,
                 seq_embeddings=seq_embeddings,
@@ -151,6 +159,8 @@ class HSTUTransducer(HammerModule):
 
         return (
             output_max_seq_len,
+            output_total_uih_len,
+            output_total_targets,
             output_seq_lengths,
             output_seq_offsets,
             output_seq_timestamps,
@@ -181,8 +191,9 @@ class HSTUTransducer(HammerModule):
     def _postprocess(
         self,
         max_seq_len: int,
+        total_uih_len: int,
+        total_targets: int,
         seq_lengths: torch.Tensor,
-        seq_offsets: torch.Tensor,
         seq_timestamps: torch.Tensor,
         seq_embeddings: torch.Tensor,
         num_targets: torch.Tensor,
@@ -204,6 +215,8 @@ class HSTUTransducer(HammerModule):
             _, candidate_embeddings = split_2D_jagged(
                 values=seq_embeddings,
                 max_seq_len=max_seq_len,
+                total_len_left=total_uih_len,
+                total_len_right=total_targets,
                 offsets_left=uih_offsets,
                 offsets_right=candidates_offsets,
                 kernel=self.hammer_kernel(),
@@ -217,6 +230,8 @@ class HSTUTransducer(HammerModule):
                 _, candidate_timestamps = split_2D_jagged(
                     values=seq_timestamps.unsqueeze(-1),
                     max_seq_len=max_seq_len,
+                    total_len_left=total_uih_len,
+                    total_len_right=total_targets,
                     offsets_left=uih_offsets,
                     offsets_right=candidates_offsets,
                     kernel=self.hammer_kernel(),
@@ -239,6 +254,8 @@ class HSTUTransducer(HammerModule):
         self,
         max_uih_len: int,
         max_targets: int,
+        total_uih_len: int,
+        total_targets: int,
         seq_lengths: torch.Tensor,
         seq_embeddings: torch.Tensor,
         seq_timestamps: torch.Tensor,
@@ -254,6 +271,8 @@ class HSTUTransducer(HammerModule):
 
         (
             max_seq_len,
+            total_uih_len,
+            total_targets,
             seq_lengths,
             seq_offsets,
             seq_timestamps,
@@ -263,6 +282,8 @@ class HSTUTransducer(HammerModule):
         ) = self._preprocess(
             max_uih_len=max_uih_len,
             max_targets=max_targets,
+            total_uih_len=total_uih_len,
+            total_targets=total_targets,
             seq_lengths=seq_lengths,
             seq_timestamps=seq_timestamps,
             seq_embeddings=seq_embeddings,
@@ -281,8 +302,9 @@ class HSTUTransducer(HammerModule):
 
         encoded_embeddings, encoded_candidate_embeddings = self._postprocess(
             max_seq_len=max_seq_len,
+            total_uih_len=total_uih_len,
+            total_targets=total_targets,
             seq_lengths=seq_lengths,
-            seq_offsets=seq_offsets,
             seq_embeddings=encoded_embeddings,
             seq_timestamps=seq_timestamps,
             num_targets=num_targets,

@@ -40,12 +40,16 @@ class InputPreprocessor(HammerModule):
         self,
         max_uih_len: int,
         max_targets: int,
+        total_uih_len: int,
+        total_targets: int,
         seq_lengths: torch.Tensor,
         seq_timestamps: torch.Tensor,
         seq_embeddings: torch.Tensor,
         num_targets: torch.Tensor,
         seq_payloads: Dict[str, torch.Tensor],
     ) -> Tuple[
+        int,
+        int,
         int,
         torch.Tensor,
         torch.Tensor,
@@ -56,7 +60,10 @@ class InputPreprocessor(HammerModule):
     ]:
         """
         Args:
-            max_seq_len: int
+            max_uih_len: int
+            max_targets: int
+            total_uih_len: int
+            total_targets: int
             seq_lengths: (B,)
             seq_embeddings: (L, D)
             seq_timestamps: (B, N)
@@ -64,7 +71,7 @@ class InputPreprocessor(HammerModule):
             seq_payloads: str-keyed tensors. Implementation specific.
 
         Returns:
-            (max_seq_len, lengths, offsets, timestamps, embeddings, num_targets, payloads) updated based on input preprocessor.
+            (max_seq_len, total_uih_len, total_targets, lengths, offsets, timestamps, embeddings, num_targets, payloads) updated based on input preprocessor.
         """
         pass
 
@@ -183,12 +190,16 @@ class ContextualPreprocessor(InputPreprocessor):
         self,
         max_uih_len: int,
         max_targets: int,
+        total_uih_len: int,
+        total_targets: int,
         seq_lengths: torch.Tensor,
         seq_timestamps: torch.Tensor,
         seq_embeddings: torch.Tensor,
         num_targets: torch.Tensor,
         seq_payloads: Dict[str, torch.Tensor],
     ) -> Tuple[
+        int,
+        int,
         int,
         torch.Tensor,
         torch.Tensor,
@@ -212,6 +223,8 @@ class ContextualPreprocessor(InputPreprocessor):
             )
 
         output_max_seq_len = max_seq_len
+        output_total_uih_len = total_uih_len
+        output_total_targets = total_targets
         output_seq_lengths = seq_lengths
         output_num_targets = num_targets
         output_seq_timestamps = seq_timestamps
@@ -269,9 +282,15 @@ class ContextualPreprocessor(InputPreprocessor):
             output_seq_offsets = torch.ops.fbgemm.asynchronous_complete_cumsum(
                 output_seq_lengths
             )
+            output_total_uih_len = (
+                output_total_uih_len
+                + self._max_contextual_seq_len * output_seq_lengths.size(0)
+            )
 
         return (
             output_max_seq_len,
+            output_total_uih_len,
+            output_total_targets,
             output_seq_lengths,
             output_seq_offsets,
             output_seq_timestamps,

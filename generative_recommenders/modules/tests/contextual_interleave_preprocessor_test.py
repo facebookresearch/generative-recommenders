@@ -155,6 +155,8 @@ class ContextualInterleavePreprocessorTest(unittest.TestCase):
         actions = [1, 3, 26, 30, 6, 4]
         (
             output_max_seq_len,
+            output_total_uih_len,
+            output_total_targets,
             output_seq_lengths,
             output_seq_offsets,
             output_seq_timestamps,
@@ -164,6 +166,8 @@ class ContextualInterleavePreprocessorTest(unittest.TestCase):
         ) = preprocessor(
             max_uih_len=4,
             max_targets=2,
+            total_uih_len=sum(seq_lengths) - sum(num_targets),
+            total_targets=sum(num_targets),
             seq_lengths=torch.tensor(seq_lengths, device=device),
             seq_timestamps=seq_timestamps,
             seq_embeddings=seq_embeddings,
@@ -313,7 +317,9 @@ class ContextualInterleavePreprocessorTest(unittest.TestCase):
         max_targets = 20
         max_seq_len = max_uih_len + max_targets
         seq_lengths = torch.randint(0, max_uih_len, (batch_size,), device=device)
+        total_uih_len = int(seq_lengths.sum().item())
         num_targets = torch.randint(1, max_targets, (batch_size,), device=device)
+        total_targets = int(num_targets.sum().item())
         seq_lengths = seq_lengths + num_targets
         seq_offsets = torch.zeros(
             (batch_size + 1,), dtype=torch.int64, device=torch.device("cuda")
@@ -334,13 +340,18 @@ class ContextualInterleavePreprocessorTest(unittest.TestCase):
         ).requires_grad_(True)
         (
             output_max_seq_len,
+            output_total_uih_len,
+            output_total_targets,
             output_seq_lengths,
             output_seq_offsets,
             output_seq_timestamps,
             output_seq_embeddings,
             output_num_targets,
         ) = preprocessor.combine_embeddings(
-            max_seq_len=max_seq_len,
+            max_uih_len=max_uih_len,
+            max_targets=max_targets,
+            total_uih_len=total_uih_len,
+            total_targets=total_targets,
             seq_lengths=seq_lengths,
             seq_timestamps=seq_timestamps,
             content_embeddings=content_embeddings,
@@ -355,6 +366,14 @@ class ContextualInterleavePreprocessorTest(unittest.TestCase):
                     output_max_seq_len,
                     max_seq_len * 2 + contextual_len,
                 )
+                self.assertEqual(
+                    output_total_uih_len,
+                    total_uih_len * 2 + contextual_len * batch_size,
+                )
+                self.assertEqual(
+                    output_total_targets,
+                    total_targets * 2,
+                )
                 torch.testing.assert_allclose(
                     output_seq_lengths, seq_lengths * 2 + contextual_len
                 )
@@ -362,7 +381,15 @@ class ContextualInterleavePreprocessorTest(unittest.TestCase):
             else:
                 self.assertEqual(
                     output_max_seq_len,
-                    int(torch.max(output_seq_lengths).item()),
+                    max_uih_len * 2 + max_targets + contextual_len,
+                )
+                self.assertEqual(
+                    output_total_uih_len,
+                    total_uih_len * 2 + contextual_len * batch_size,
+                )
+                self.assertEqual(
+                    output_total_targets,
+                    total_targets,
                 )
                 torch.testing.assert_allclose(
                     output_seq_lengths, seq_lengths * 2 - num_targets + contextual_len
@@ -372,6 +399,14 @@ class ContextualInterleavePreprocessorTest(unittest.TestCase):
             self.assertEqual(
                 output_max_seq_len,
                 max_seq_len + contextual_len,
+            )
+            self.assertEqual(
+                output_total_uih_len,
+                total_uih_len + contextual_len * batch_size,
+            )
+            self.assertEqual(
+                output_total_targets,
+                total_targets,
             )
             torch.testing.assert_allclose(
                 output_seq_lengths, seq_lengths + contextual_len
