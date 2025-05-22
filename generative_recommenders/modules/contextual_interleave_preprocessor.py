@@ -20,7 +20,7 @@ from math import sqrt
 from typing import Callable, Dict, Optional, Tuple
 
 import torch
-from generative_recommenders.common import fx_infer_max_len, fx_unwrap_optional_tensor
+from generative_recommenders.common import fx_unwrap_optional_tensor
 from generative_recommenders.modules.action_encoder import ActionEncoder
 from generative_recommenders.modules.content_encoder import ContentEncoder
 from generative_recommenders.modules.contextualize_mlps import (
@@ -100,7 +100,10 @@ class ContextualInterleavePreprocessor(InputPreprocessor):
 
     def combine_embeddings(
         self,
-        max_seq_len: int,
+        max_uih_len: int,
+        max_targets: int,
+        total_uih_len: int,
+        total_targets: int,
         seq_lengths: torch.Tensor,
         seq_timestamps: torch.Tensor,
         content_embeddings: torch.Tensor,
@@ -108,6 +111,8 @@ class ContextualInterleavePreprocessor(InputPreprocessor):
         contextual_embeddings: Optional[torch.Tensor],
         num_targets: torch.Tensor,
     ) -> Tuple[
+        int,
+        int,
         int,
         torch.Tensor,
         torch.Tensor,
@@ -122,15 +127,17 @@ class ContextualInterleavePreprocessor(InputPreprocessor):
             ).reshape(-1, self._output_embedding_dim)
             if self.interleave_targets():
                 output_seq_lengths = seq_lengths * 2
-                output_max_seq_len = max_seq_len * 2
+                output_max_seq_len = (max_uih_len + max_targets) * 2
                 output_num_targets = num_targets * 2
+                output_total_uih_len = total_uih_len * 2
+                output_total_targets = total_targets * 2
             else:
                 seq_lengths_by_2 = seq_lengths * 2
                 output_seq_lengths = seq_lengths_by_2 - num_targets
-                output_max_seq_len = fx_infer_max_len(output_seq_lengths)
-                indices = torch.arange(2 * max_seq_len, device=seq_lengths.device).view(
-                    1, -1
-                )
+                output_max_seq_len = 2 * max_uih_len + max_targets
+                indices = torch.arange(
+                    2 * (max_uih_len + max_targets), device=seq_lengths.device
+                ).view(1, -1)
                 valid_mask = torch.logical_and(
                     indices < seq_lengths_by_2.view(-1, 1),
                     torch.logical_or(
@@ -153,12 +160,16 @@ class ContextualInterleavePreprocessor(InputPreprocessor):
                 output_seq_embeddings = output_seq_embeddings[jagged_valid_mask]
                 output_seq_timestamps = output_seq_timestamps[jagged_valid_mask]
                 output_num_targets = num_targets
+                output_total_uih_len = total_uih_len * 2
+                output_total_targets = total_targets
         else:
-            output_max_seq_len = max_seq_len
+            output_max_seq_len = max_uih_len + max_targets
             output_seq_lengths = seq_lengths
             output_num_targets = num_targets
             output_seq_timestamps = seq_timestamps
             output_seq_embeddings = content_embeddings + action_embeddings
+            output_total_uih_len = total_uih_len
+            output_total_targets = total_targets
 
         # concat contextual embeddings
         output_seq_offsets = torch.ops.fbgemm.asynchronous_complete_cumsum(
@@ -192,6 +203,10 @@ class ContextualInterleavePreprocessor(InputPreprocessor):
                 kernel=self.hammer_kernel(),
             ).squeeze(-1)
             output_max_seq_len = output_max_seq_len + self._max_contextual_seq_len
+            output_total_uih_len = (
+                output_total_uih_len
+                + self._max_contextual_seq_len * output_seq_lengths.size(0)
+            )
             output_seq_lengths = output_seq_lengths + self._max_contextual_seq_len
             output_seq_offsets = torch.ops.fbgemm.asynchronous_complete_cumsum(
                 output_seq_lengths
@@ -199,6 +214,8 @@ class ContextualInterleavePreprocessor(InputPreprocessor):
 
         return (
             output_max_seq_len,
+            output_total_uih_len,
+            output_total_targets,
             output_seq_lengths,
             output_seq_offsets,
             output_seq_timestamps,
@@ -210,12 +227,16 @@ class ContextualInterleavePreprocessor(InputPreprocessor):
         self,
         max_uih_len: int,
         max_targets: int,
+        total_uih_len: int,
+        total_targets: int,
         seq_lengths: torch.Tensor,
         seq_timestamps: torch.Tensor,
         seq_embeddings: torch.Tensor,
         num_targets: torch.Tensor,
         seq_payloads: Dict[str, torch.Tensor],
     ) -> Tuple[
+        int,
+        int,
         int,
         torch.Tensor,
         torch.Tensor,
@@ -300,13 +321,18 @@ class ContextualInterleavePreprocessor(InputPreprocessor):
 
             (
                 output_max_seq_len,
+                output_total_uih_len,
+                output_total_targets,
                 output_seq_lengths,
                 output_seq_offsets,
                 output_seq_timestamps,
                 output_seq_embeddings,
                 output_num_targets,
             ) = self.combine_embeddings(
-                max_seq_len=max_seq_len,
+                max_uih_len=max_uih_len,
+                max_targets=max_targets,
+                total_uih_len=total_uih_len,
+                total_targets=total_targets,
                 seq_lengths=seq_lengths,
                 seq_timestamps=seq_timestamps,
                 content_embeddings=content_embeddings,
@@ -317,6 +343,8 @@ class ContextualInterleavePreprocessor(InputPreprocessor):
 
         return (
             output_max_seq_len,
+            output_total_uih_len,
+            output_total_targets,
             output_seq_lengths,
             output_seq_offsets,
             output_seq_timestamps,
