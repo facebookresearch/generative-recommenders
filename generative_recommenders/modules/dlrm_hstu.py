@@ -288,9 +288,12 @@ class DlrmHSTU(HammerModule):
         source_timestamps = payload_features[
             self._hstu_configs.uih_action_time_feature_name
         ]
+        total_targets = int(num_candidates.sum().item())
         candidates_user_embeddings, _ = self._hstu_transducer(
             max_uih_len=max_uih_len,
             max_targets=max_candidates,
+            total_uih_len=source_timestamps.numel() - total_targets,
+            total_targets=total_targets,
             seq_embeddings=seq_embeddings[
                 self._hstu_configs.uih_post_id_feature_name
             ].embedding,
