@@ -1357,12 +1357,6 @@ def _get_bw_configs() -> List[triton.Config]:
             pre_hook=_bwd_pre_hook,
         ),
         triton.Config(
-            {"BLOCK_M": 32, "BLOCK_N": 128, "SEQUENCE_PARALLEL": False, "UNROLL": 2},
-            num_stages=2,
-            num_warps=8,
-            pre_hook=_bwd_pre_hook,
-        ),
-        triton.Config(
             {"BLOCK_M": 32, "BLOCK_N": 128, "SEQUENCE_PARALLEL": False, "UNROLL": 4},
             num_stages=2,
             num_warps=8,
@@ -1441,6 +1435,17 @@ def _get_bw_configs() -> List[triton.Config]:
                 {"BLOCK_M": 32, "BLOCK_N": 64, "SEQUENCE_PARALLEL": True, "UNROLL": 1},
                 num_stages=2,
                 num_warps=4,
+                pre_hook=_bwd_pre_hook,
+            ),
+            triton.Config(
+                {
+                    "BLOCK_M": 32,
+                    "BLOCK_N": 128,
+                    "SEQUENCE_PARALLEL": False,
+                    "UNROLL": 2,
+                },
+                num_stages=2,
+                num_warps=8,
                 pre_hook=_bwd_pre_hook,
             ),
         ]
