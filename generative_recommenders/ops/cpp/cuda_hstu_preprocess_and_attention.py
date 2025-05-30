@@ -19,6 +19,12 @@
 from typing import Optional, Tuple
 
 import torch
+from generative_recommenders.fb.ultra.ops.fp8.fp8_addmm import (
+    fp8_addmm_fwd_rowwise_fused,
+)
+from generative_recommenders.fb.ultra.ops.fp8.layer_norm_quantization import (
+    triton_weighted_layer_norm_quantization_fwd,
+)
 
 torch.ops.load_library(
     "//generative_recommenders/ops/cpp/hstu_attention:hstu_flash_attention"
@@ -62,17 +68,29 @@ class _HSTUPreprocessAndAttentionFunction(torch.autograd.Function):
         max_attn_len: Optional[int] = None,
         full_attn_size: Optional[int] = None,
         silu_u: bool = True,
+        fp8_in_addmm_fwd: bool = False,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         max_attn_len = max_attn_len or 0
         full_attn_size = full_attn_size or 0
-
-        normed_x, x_mean, x_rstd, BLOCK_D, num_warps = triton_weighted_layer_norm_fwd(
-            x=x,
-            weight=norm_weight,
-            bias=norm_bias,
-            eps=norm_eps,
+        normed_x, x_mean, x_rstd, BLOCK_D, num_warps, x_scale, normed_x_fp8 = (
+            triton_weighted_layer_norm_quantization_fwd(
+                x=x,
+                weight=norm_weight,
+                bias=norm_bias,
+                eps=norm_eps,
+                quantize_output=fp8_in_addmm_fwd,
+            )
         )
-        uvqk = triton_addmm_fwd(x=normed_x, w=uvqk_weight, y=uvqk_bias).contiguous()
+        if fp8_in_addmm_fwd:
+            assert x_scale is not None and normed_x_fp8 is not None
+            uvqk = fp8_addmm_fwd_rowwise_fused(
+                x_fp8=normed_x_fp8,
+                w=uvqk_weight,
+                y=uvqk_bias,
+                x_scale=x_scale,
+            ).contiguous()
+        else:
+            uvqk = triton_addmm_fwd(x=normed_x, w=uvqk_weight, y=uvqk_bias).contiguous()
         u, v, q, k = uvqk.split(
             [
                 hidden_dim * num_heads,
@@ -125,6 +143,9 @@ class _HSTUPreprocessAndAttentionFunction(torch.autograd.Function):
             saved_tensors.append(normed_x)
         if recompute_uvqk_in_backward:
             saved_tensors.append(uvqk_bias)
+            if fp8_in_addmm_fwd:
+                saved_tensors.append(x_scale)  # pyre-ignore
+                saved_tensors.append(normed_x_fp8)  # pyre-ignore
         else:
             saved_tensors.append(uvqk)
         ctx.save_for_backward(*saved_tensors)
@@ -147,6 +168,7 @@ class _HSTUPreprocessAndAttentionFunction(torch.autograd.Function):
         ctx.contextual_seq_len = contextual_seq_len
         ctx.sort_by_length = sort_by_length
         ctx.silu_u = silu_u
+        ctx.fp8_in_addmm_fwd = fp8_in_addmm_fwd
         return u, out
 
     @staticmethod
@@ -178,6 +200,7 @@ class _HSTUPreprocessAndAttentionFunction(torch.autograd.Function):
         None,
         None,
         None,
+        None,
     ]:
         x, norm_weight, norm_bias, x_mean, x_rstd, uvqk_weight, seq_offsets = (
             ctx.saved_tensors[:7]
@@ -194,21 +217,32 @@ class _HSTUPreprocessAndAttentionFunction(torch.autograd.Function):
         else:
             attn_scale = None
         if ctx.recompute_normed_x_in_backward:
-            normed_x, _, _, _, _ = triton_weighted_layer_norm_fwd(
+            normed_x, _, _, _, _, _, _ = triton_weighted_layer_norm_quantization_fwd(
                 x=x,
                 weight=norm_weight,
                 bias=norm_bias,
                 eps=ctx.norm_eps,
                 mean=x_mean,
                 rstd=x_rstd,
+                quantize_output=ctx.fp8_in_addmm_fwd,
             )
         else:
             normed_x = ctx.saved_tensors[idx]
             idx += 1
         if ctx.recompute_uvqk_in_backward:
             uvqk_bias = ctx.saved_tensors[idx]
-            uvqk = triton_addmm_fwd(x=normed_x, w=uvqk_weight, y=uvqk_bias)
             idx += 1
+            if ctx.fp8_in_addmm_fwd:
+                x_scale, normed_x_fp8 = ctx.saved_tensors[idx : idx + 2]
+                uvqk = fp8_addmm_fwd_rowwise_fused(
+                    x_fp8=normed_x_fp8,
+                    w=uvqk_weight,
+                    y=uvqk_bias,
+                    x_scale=x_scale,
+                )
+                idx += 2
+            else:
+                uvqk = triton_addmm_fwd(x=normed_x, w=uvqk_weight, y=uvqk_bias)
         else:
             uvqk = ctx.saved_tensors[idx]
             idx += 1
@@ -313,9 +347,11 @@ class _HSTUPreprocessAndAttentionFunction(torch.autograd.Function):
             None,
             None,
             None,
+            None,
         )
 
 
+@torch.fx.wrap
 def cuda_hstu_preprocess_and_attention(
     x: torch.Tensor,
     norm_weight: torch.Tensor,
@@ -339,6 +375,7 @@ def cuda_hstu_preprocess_and_attention(
     max_attn_len: Optional[int] = None,
     full_attn_size: Optional[int] = None,
     silu_u: bool = True,
+    fp8_in_addmm_fwd: bool = False,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     return _HSTUPreprocessAndAttentionFunction.apply(
         x,
@@ -363,4 +400,57 @@ def cuda_hstu_preprocess_and_attention(
         max_attn_len,
         full_attn_size,
         silu_u,
+        fp8_in_addmm_fwd,
+    )
+
+
+def cuda_hstu_preprocess_and_attention_wrapper(
+    x: torch.Tensor,
+    norm_weight: torch.Tensor,
+    norm_bias: torch.Tensor,
+    norm_eps: float,
+    num_heads: int,
+    attn_dim: int,
+    hidden_dim: int,
+    uvqk_weight: torch.Tensor,
+    uvqk_bias: torch.Tensor,
+    max_seq_len: int,
+    seq_offsets: torch.Tensor,
+    alpha: float,
+    invalid_attn_mask_type: str,
+    num_targets: Optional[torch.Tensor],
+    attn_scale: Optional[torch.Tensor] = None,
+    recompute_uvqk_in_backward: bool = False,
+    recompute_normed_x_in_backward: bool = False,
+    contextual_seq_len: int = 0,
+    sort_by_length: bool = False,
+    max_attn_len: Optional[int] = None,
+    full_attn_size: Optional[int] = None,
+    silu_u: bool = True,
+    fp8_in_addmm_fwd: bool = False,
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    return cuda_hstu_preprocess_and_attention(
+        x,
+        norm_weight,
+        norm_bias,
+        norm_eps,
+        num_heads,
+        attn_dim,
+        hidden_dim,
+        uvqk_weight,
+        uvqk_bias,
+        max_seq_len,
+        seq_offsets,
+        alpha,
+        invalid_attn_mask_type,
+        num_targets,
+        attn_scale,
+        recompute_uvqk_in_backward,
+        recompute_normed_x_in_backward,
+        contextual_seq_len,
+        sort_by_length,
+        max_attn_len,
+        full_attn_size,
+        silu_u,
+        fp8_in_addmm_fwd,
     )
