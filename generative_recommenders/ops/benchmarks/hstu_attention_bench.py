@@ -13,7 +13,14 @@ from generative_recommenders.common import (
     generate_sparse_seq_len,
     HammerKernel,
 )
+from generative_recommenders.ops.cpp.cuda_hstu_attention import cuda_hstu_mha
 from generative_recommenders.ops.hstu_attention import delta_hstu_mha, hstu_mha
+
+try:
+    from hammer.ops.ragged_hstu_attention import ragged_hstu_mha
+    from hammer.utils import HammerKernel as HammerKernel2
+except ImportError:
+    pass
 
 
 def _get_kernel(provider: str) -> HammerKernel:
@@ -73,9 +80,10 @@ def _flops(
 @click.option("--report-flops", type=bool, default=False)
 @click.option("--return-result", type=bool, default=False)
 @click.option("--max-attn-len", type=int, default=0)
+@click.option("--min-full-attn-seq-len", type=int, default=0)
 @click.option("--contextual-seq-len", type=int, default=0)
 @click.option("--sampling-alpha", type=float, default=2.0)
-@click.option("--enable-tma", type=bool, default=False)
+@click.option("--triton-enable-tma", type=bool, default=False)
 def main(  # noqa: C901
     batch_size: int,
     heads: int,
@@ -93,9 +101,10 @@ def main(  # noqa: C901
     report_flops: bool,
     return_result: bool,
     max_attn_len: int,
+    min_full_attn_seq_len: int,
     contextual_seq_len: int,
     sampling_alpha: float,
-    enable_tma: bool,
+    triton_enable_tma: bool,
 ) -> Optional[Tuple[List[triton.testing.Benchmark], List[pd.DataFrame]]]:
     torch.backends.cudnn.allow_tf32 = True
     torch.backends.cuda.matmul.allow_tf32 = True
@@ -108,9 +117,9 @@ def main(  # noqa: C901
     else:
         raise ValueError(f"Unsupported data type: {data_type}.")
 
-    line_vals = ["triton"]
-    line_names = ["Triton"]
-    styles = [("red", "-")]
+    line_vals = ["triton", "flash_cuda_jagged"]
+    line_names = ["triton", "flash_cuda_jagged"]
+    styles = [("blue", "-"), ("green", "-")]
     if bench_pytorch:
         line_vals.append("pytorch")
         line_names.append("PyTorch")
@@ -133,7 +142,7 @@ def main(  # noqa: C901
             line_names=line_names,
             styles=styles,
             ylabel="ms",
-            plot_name=f"hstu-attn-b{batch_size}-h{heads}-d{attn_dim}-v{hidden_dim}--sparsity{seq_sparsity}-{mode}-{dtype}-target{target_size}-mattn{max_attn_len}-c{contextual_seq_len}-sl_alpha{sampling_alpha}",
+            plot_name=f"hstu-attn-b{batch_size}-h{heads}-d{attn_dim}-v{hidden_dim}--sparsity{seq_sparsity}-{mode}-{dtype}-target{target_size}-mattn{max_attn_len}-full{min_full_attn_seq_len}-c{contextual_seq_len}-sl_alpha{sampling_alpha}-triton_tma{triton_enable_tma}",
             args={
                 "batch_size": batch_size,
                 "heads": heads,
@@ -148,9 +157,10 @@ def main(  # noqa: C901
                 "bench_backward": bench_backward,
                 "report_flops": report_flops,
                 "max_attn_len": max_attn_len,
+                "min_full_attn_seq_len": min_full_attn_seq_len,
                 "contextual_seq_len": contextual_seq_len,
                 "sampling_alpha": sampling_alpha,
-                "enable_tma": enable_tma,
+                "triton_enable_tma": triton_enable_tma,
             },
         )
         for mode in modes
@@ -173,9 +183,10 @@ def main(  # noqa: C901
         bench_backward: bool,
         report_flops: bool,
         max_attn_len: int,
+        min_full_attn_seq_len: int,
         contextual_seq_len: int,
         sampling_alpha: float,
-        enable_tma: bool,
+        triton_enable_tma: bool,
     ) -> float:
         assert mode in ["fwd", "bwd"]
         warmup = 25
@@ -205,7 +216,9 @@ def main(  # noqa: C901
                     device=lengths.device,
                     dtype=lengths.dtype,
                 )
-                num_targets = torch.where(num_targets > lengths, lengths, num_targets)
+                num_targets = torch.where(
+                    num_targets > lengths, lengths, num_targets
+                ).to(torch.int32)
         max_attn_len = max_attn_len if max_attn_len < seq_len else seq_len
         seq_offsets = torch.zeros(
             (batch_size + 1,), dtype=torch.int64, device=torch.device("cuda")
@@ -233,7 +246,7 @@ def main(  # noqa: C901
             q = q.requires_grad_(True)
             k = k.requires_grad_(True)
             v = v.requires_grad_(True)
-        assert provider in ["triton", "pytorch"]
+        assert provider in ["triton", "pytorch", "flash_cuda_jagged", "flash_cuda"]
         if has_delta_q:
             fn = lambda: delta_hstu_mha(  # noqa E731
                 max_seq_len=seq_len,
@@ -246,23 +259,84 @@ def main(  # noqa: C901
                 kernel=_get_kernel(provider),
             )
         else:
-            fn = lambda: hstu_mha(  # noqa E73
-                max_seq_len=seq_len,
-                alpha=alpha,
-                q=q,
-                k=k,
-                v=v,
-                seq_offsets=seq_offsets,
-                causal=causal,
-                dropout_pr=0.0,
-                training=True,
-                num_targets=num_targets,
-                max_attn_len=max_attn_len,
-                contextual_seq_len=contextual_seq_len,
-                sort_by_length=True,
-                kernel=_get_kernel(provider),
-                enable_tma=enable_tma,
-            )
+            if provider == "flash_cuda_jagged":
+                fn = lambda: cuda_hstu_mha(  # noqa E731
+                    q=q,
+                    k=k,
+                    v=v,
+                    alpha=alpha,
+                    causal=True,
+                    seq_offsets=seq_offsets.to(torch.int32),
+                    max_seq_len=seq_len,
+                    max_attn_len=max_attn_len,
+                    min_full_attn_seq_len=min_full_attn_seq_len,
+                    contextual_seq_len=contextual_seq_len,
+                    num_targets=num_targets,
+                    sort_by_length=False,
+                )
+            elif provider == "flash_cuda":
+                q, k, v = [
+                    torch.randn(
+                        batch_size,
+                        seq_len,
+                        heads,
+                        attn_dim,
+                        device="cuda",
+                        dtype=dtype,
+                        requires_grad=True,
+                    )
+                    for _ in range(3)
+                ]
+                fn = lambda: cuda_hstu_mha(  # noqa E731
+                    q=q,
+                    k=k,
+                    v=v,
+                    alpha=alpha,
+                    causal=True,
+                    max_seq_len=seq_len,
+                    max_attn_len=max_attn_len,
+                    min_full_attn_seq_len=min_full_attn_seq_len,
+                    contextual_seq_len=contextual_seq_len,
+                    num_targets=num_targets,
+                    sort_by_length=False,
+                )
+            else:
+                if min_full_attn_seq_len > 0:
+                    fn = lambda: ragged_hstu_mha(  # noqa E73
+                        max_seq_len=seq_len,
+                        alpha=alpha,
+                        q=q,
+                        k=k,
+                        v=v,
+                        seq_offsets=seq_offsets,
+                        dropout_pr=0.0,
+                        training=True,
+                        invalid_attn_mask_type="lower_triangular",
+                        num_targets=num_targets,
+                        max_attn_len=max_attn_len,
+                        contextual_seq_len=contextual_seq_len,
+                        full_attn_size=min_full_attn_seq_len,
+                        sort_by_length=True,
+                        kernel=HammerKernel2.TRITON,
+                    )
+                else:
+                    fn = lambda: hstu_mha(  # noqa E73
+                        max_seq_len=seq_len,
+                        alpha=alpha,
+                        q=q,
+                        k=k,
+                        v=v,
+                        seq_offsets=seq_offsets,
+                        causal=causal,
+                        dropout_pr=0.0,
+                        training=True,
+                        num_targets=num_targets,
+                        max_attn_len=max_attn_len,
+                        contextual_seq_len=contextual_seq_len,
+                        sort_by_length=True,
+                        kernel=_get_kernel(provider),
+                        enable_tma=triton_enable_tma,
+                    )
         if mode == "bwd":
             o = fn()
             do = torch.randn_like(o)
