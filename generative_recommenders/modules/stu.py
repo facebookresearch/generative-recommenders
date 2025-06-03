@@ -457,6 +457,9 @@ class STUStack(STU):
         kv_caching_lengths: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         for layer in self._stu_layers:
+            # pyre-fixme[29]: Call error [29]:
+            # `typing.Union[torch._tensor.Tensor,
+            # torch.nn.modules.module.Module]` is not a function.
             delta_x = layer.cached_forward(
                 delta_x=delta_x,
                 num_targets=num_targets,
