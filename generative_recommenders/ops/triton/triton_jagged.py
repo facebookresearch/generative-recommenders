@@ -1345,3 +1345,206 @@ def triton_jagged_dense_broadcast_add(
     return _JaggedDenseBroadcastAddFunction.apply(
         max_seq_len, seq_offsets, jagged, dense
     )
+
+
+@triton.jit
+def add_last_n_with_jagged_kernel(
+    OffsetsLeft,
+    ValuesLeft,
+    OffsetsRight,
+    ValuesRight,
+    Out,
+    D,
+    stride_left_d,
+    stride_right_d,
+    stride_out_d,
+    BLOCK_D: tl.constexpr,
+):
+    off_b = tl.program_id(0)
+    off_n = tl.program_id(1)
+
+    seq_start_left = tl.load(OffsetsLeft + off_b)
+    seq_end_left = tl.load(OffsetsLeft + off_b + 1)
+    seq_len_left = seq_end_left - seq_start_left
+
+    seq_start_right = tl.load(OffsetsRight + off_b)
+    seq_end_right = tl.load(OffsetsRight + off_b + 1)
+    seq_len_right = seq_end_right - seq_start_right
+
+    if off_n >= seq_len_left:
+        return
+
+    pos_in_left = off_n + seq_start_left
+
+    is_add_position = off_n >= (seq_len_left - seq_len_right)
+
+    # Load values from left sequence
+    offs_d = tl.arange(0, BLOCK_D)
+    left_ptrs = ValuesLeft + pos_in_left.to(tl.int64) * stride_left_d + offs_d
+    left_values = tl.load(left_ptrs, mask=offs_d < D)
+
+    # Initialize output with left values
+    out_values = left_values
+
+    # If this is a position where we need to add values from the right sequence
+    if is_add_position:
+        # Calculate position in the right sequence
+        right_idx = off_n - (seq_len_left - seq_len_right)
+        pos_in_right = seq_start_right + right_idx
+
+        # Load values from right sequence
+        right_ptrs = ValuesRight + pos_in_right.to(tl.int64) * stride_right_d + offs_d
+        right_values = tl.load(right_ptrs, mask=offs_d < D)
+
+        # Add values
+        out_values = left_values + right_values
+
+    # Store result
+    out_ptrs = Out + pos_in_left.to(tl.int64) * stride_out_d + offs_d
+    tl.store(out_ptrs, out_values, mask=offs_d < D)
+
+
+@triton.jit
+def extract_right_grads_kernel(
+    OffsetsLeft,
+    OffsetsRight,
+    GradOut,
+    GradRight,
+    D,
+    stride_grad_out_d,
+    stride_grad_right_d,
+    BLOCK_D: tl.constexpr,
+):
+    off_b = tl.program_id(0)
+    off_n = tl.program_id(1)
+
+    seq_start_left = tl.load(OffsetsLeft + off_b)
+    seq_end_left = tl.load(OffsetsLeft + off_b + 1)
+    seq_len_left = seq_end_left - seq_start_left
+
+    seq_start_right = tl.load(OffsetsRight + off_b)
+    seq_end_right = tl.load(OffsetsRight + off_b + 1)
+    seq_len_right = seq_end_right - seq_start_right
+
+    if off_n >= seq_len_right:
+        return
+
+    pos_in_left = seq_start_left + (seq_len_left - seq_len_right) + off_n
+    pos_in_right = seq_start_right + off_n
+
+    # Load gradients from d_out
+    offs_d = tl.arange(0, BLOCK_D)
+    grad_out_ptrs = GradOut + pos_in_left.to(tl.int64) * stride_grad_out_d + offs_d
+    grad_values = tl.load(grad_out_ptrs, mask=offs_d < D)
+
+    # Store to d_values_right
+    grad_right_ptrs = (
+        GradRight + pos_in_right.to(tl.int64) * stride_grad_right_d + offs_d
+    )
+    tl.store(grad_right_ptrs, grad_values, mask=offs_d < D)
+
+
+class _AddLastNWithJaggedFunction(torch.autograd.Function):
+    @staticmethod
+    # pyre-ignore[14]
+    def forward(
+        ctx,
+        max_seq_len_left: int,
+        offsets_left: torch.Tensor,
+        values_left: torch.Tensor,
+        offsets_right: torch.Tensor,
+        values_right: torch.Tensor,
+    ):
+        values_left = switch_to_contiguous_if_needed(values_left)
+        values_right = switch_to_contiguous_if_needed(values_right)
+        B = offsets_left.shape[0] - 1
+        _, D = values_left.shape
+
+        out = torch.empty_like(values_left)
+
+        BLOCK_D = triton.next_power_of_2(D) if D < 64 else 64
+
+        grid = (B, max_seq_len_left)
+        add_last_n_with_jagged_kernel[grid](
+            OffsetsLeft=offsets_left,
+            ValuesLeft=values_left,
+            OffsetsRight=offsets_right,
+            ValuesRight=values_right,
+            Out=out,
+            D=D,
+            stride_left_d=values_left.stride(0),
+            stride_right_d=values_right.stride(0),
+            stride_out_d=out.stride(0),
+            BLOCK_D=BLOCK_D,
+        )
+
+        ctx.save_for_backward(offsets_left, offsets_right)
+        ctx.max_seq_len_left = max_seq_len_left
+        ctx.D = D
+
+        return out
+
+    @staticmethod
+    # pyre-ignore[14]
+    def backward(
+        ctx, d_out: torch.Tensor
+    ) -> Tuple[None, None, torch.Tensor, None, torch.Tensor]:
+        offsets_left, offsets_right = ctx.saved_tensors
+        B = offsets_left.shape[0] - 1
+        D = ctx.D
+
+        # For left tensor, all gradients flow back
+        d_values_left = d_out
+
+        # For right tensor, we need to extract only the gradients where values were added
+        # Get sequence length for right tensor with compiler-friendly code
+        if torch.compiler.is_compiling():
+            offsets_right_last_idx = torch.tensor(offsets_right.size(0) - 1).to(
+                offsets_right.device, non_blocking=True
+            )
+            seq_len_right = offsets_right.index_select(
+                dim=0, index=offsets_right_last_idx
+            )
+            seq_len_right_val = seq_len_right.item()
+        else:
+            seq_len_right = int(offsets_right[-1].item())
+            seq_len_right_val = seq_len_right
+
+        d_values_right = torch.empty(
+            (seq_len_right_val, D), device=d_out.device, dtype=d_out.dtype
+        )
+
+        BLOCK_D = triton.next_power_of_2(D) if D < 64 else 64
+
+        if torch.compiler.is_compiling():
+            max_seq_len_right = torch.max(offsets_right[1:] - offsets_right[:-1])
+            max_seq_len_right_val = max_seq_len_right.item()
+        else:
+            lengths_right = offsets_right[1:] - offsets_right[:-1]
+            max_seq_len_right_val = int(torch.max(lengths_right).item())
+
+        grid = (B, max_seq_len_right_val)
+        extract_right_grads_kernel[grid](
+            OffsetsLeft=offsets_left,
+            OffsetsRight=offsets_right,
+            GradOut=d_out,
+            GradRight=d_values_right,
+            D=D,
+            stride_grad_out_d=d_out.stride(0),
+            stride_grad_right_d=d_values_right.stride(0),
+            BLOCK_D=BLOCK_D,
+        )
+
+        return None, None, d_values_left, None, d_values_right
+
+
+def triton_add_last_n_with_jagged(
+    max_seq_len_left: int,
+    offsets_left: torch.Tensor,
+    values_left: torch.Tensor,
+    offsets_right: torch.Tensor,
+    values_right: torch.Tensor,
+) -> torch.Tensor:
+    return _AddLastNWithJaggedFunction.apply(
+        max_seq_len_left, offsets_left, values_left, offsets_right, values_right
+    )

@@ -221,3 +221,35 @@ def pytorch_replace_last_n_with_jagged(
         [offsets_left],
     )[0]
     return jagged_a
+
+
+def pytorch_add_last_n_with_jagged(
+    max_seq_len_left: int,
+    offsets_left: torch.Tensor,
+    values_left: torch.Tensor,
+    offsets_right: torch.Tensor,
+    values_right: torch.Tensor,
+) -> torch.Tensor:
+    B = offsets_left.shape[0] - 1
+    lengths_a = offsets_left[1:] - offsets_left[:-1]
+    lengths_b = offsets_right[1:] - offsets_right[:-1]
+    dense_a = torch.ops.fbgemm.jagged_to_padded_dense(
+        values=values_left,
+        offsets=[offsets_left],
+        max_lengths=[max_seq_len_left],
+        padding_value=0.0,
+    )
+    raw_mask = torch.arange(max_seq_len_left, device=offsets_left.device).expand(
+        B, max_seq_len_left
+    )
+    mask = torch.logical_and(
+        raw_mask >= (lengths_a - lengths_b).unsqueeze(1),
+        raw_mask < lengths_a.unsqueeze(1),
+    )
+    dense_result = dense_a.clone()
+    dense_result[mask] = dense_a[mask] + values_right
+    jagged_result = torch.ops.fbgemm.dense_to_jagged(
+        dense_result,
+        [offsets_left],
+    )[0]
+    return jagged_result
