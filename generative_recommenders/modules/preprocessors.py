@@ -210,12 +210,16 @@ class ContextualPreprocessor(InputPreprocessor):
     ]:
         output_seq_embeddings = self._content_embedding_mlp(seq_embeddings)
         max_seq_len = max_uih_len + max_targets
+        target_offsets = torch.ops.fbgemm.asynchronous_complete_cumsum(num_targets)
+        seq_offsets = torch.ops.fbgemm.asynchronous_complete_cumsum(seq_lengths)
+        uih_offsets = seq_offsets - target_offsets
         if self._action_weights is not None:
             action_embeddings = self._action_encoder(
-                max_seq_len=max_seq_len,
-                seq_lengths=seq_lengths,
-                seq_offsets=torch.ops.fbgemm.asynchronous_complete_cumsum(seq_lengths),
-                num_targets=num_targets,
+                max_uih_len=max_uih_len,
+                max_targets=max_targets,
+                uih_offsets=uih_offsets,
+                target_offsets=target_offsets,
+                seq_embeddings=seq_embeddings,
                 seq_payloads=seq_payloads,
             )
             output_seq_embeddings = output_seq_embeddings + self._action_embedding_mlp(

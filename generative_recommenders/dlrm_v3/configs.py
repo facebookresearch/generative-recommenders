@@ -61,6 +61,7 @@ def get_hstu_configs(dataset: str = "debug") -> DlrmHSTUConfig:
         ]
         hstu_config.uih_post_id_feature_name = "movie_id"
         hstu_config.uih_action_time_feature_name = "action_timestamp"
+        hstu_config.candidates_querytime_feature_name = "item_query_time"
         hstu_config.candidates_weight_feature_name = "item_dummy_weights"
         hstu_config.candidates_watchtime_feature_name = "item_dummy_watchtime"
         hstu_config.contextual_feature_to_max_length = (
@@ -146,6 +147,7 @@ def get_hstu_configs(dataset: str = "debug") -> DlrmHSTUConfig:
         ]
         hstu_config.uih_post_id_feature_name = "video_id"
         hstu_config.uih_action_time_feature_name = "action_timestamp"
+        hstu_config.candidates_querytime_feature_name = "item_query_time"
         hstu_config.uih_weight_feature_name = "action_weight"
         hstu_config.candidates_weight_feature_name = "item_action_weight"
         hstu_config.candidates_watchtime_feature_name = "item_target_watchtime"
@@ -238,6 +240,7 @@ def get_hstu_configs(dataset: str = "debug") -> DlrmHSTUConfig:
         ]
         hstu_config.uih_post_id_feature_name = "uih_post_id"
         hstu_config.uih_action_time_feature_name = "uih_action_time"
+        hstu_config.candidates_querytime_feature_name = "item_query_time"
         hstu_config.candidates_weight_feature_name = "item_action_weight"
         hstu_config.candidates_watchtime_feature_name = "item_target_watchtime"
         hstu_config.contextual_feature_to_max_length = {

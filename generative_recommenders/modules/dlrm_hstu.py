@@ -79,6 +79,7 @@ class DlrmHSTUConfig:
     contextual_feature_to_min_uih_length: Dict[str, int] = field(default_factory=dict)
     candidates_weight_feature_name: str = ""
     candidates_watchtime_feature_name: str = ""
+    candidates_querytime_feature_name: str = ""
     causal_multitask_weights: float = 0.2
     multitask_configs: List[TaskConfig] = field(default_factory=list)
     user_embedding_feature_names: List[str] = field(default_factory=list)
@@ -285,9 +286,20 @@ class DlrmHSTU(HammerModule):
         source_lengths = seq_embeddings[
             self._hstu_configs.uih_post_id_feature_name
         ].lengths
-        source_timestamps = payload_features[
-            self._hstu_configs.uih_action_time_feature_name
-        ]
+        source_timestamps = concat_2D_jagged(
+            max_seq_len=max_uih_len + max_candidates,
+            max_len_left=max_uih_len,
+            offsets_left=payload_features["uih_offsets"],
+            values_left=payload_features[
+                self._hstu_configs.uih_action_time_feature_name
+            ].unsqueeze(-1),
+            max_len_right=max_candidates,
+            offsets_right=payload_features["candidate_offsets"],
+            values_right=payload_features[
+                self._hstu_configs.candidates_querytime_feature_name
+            ].unsqueeze(-1),
+            kernel=self.hammer_kernel(),
+        ).squeeze(-1)
         total_targets = int(num_candidates.sum().item())
         candidates_user_embeddings, _ = self._hstu_transducer(
             max_uih_len=max_uih_len,
@@ -385,26 +397,13 @@ class DlrmHSTU(HammerModule):
                     )
                 else:
                     values_right = candidates_features[candidate_feature_name].values()
-                merged_values = concat_2D_jagged(
-                    max_seq_len=max_uih_len + max_num_candidates,
-                    max_len_left=max_uih_len,
-                    offsets_left=torch.ops.fbgemm.asynchronous_complete_cumsum(
-                        uih_seq_lengths
-                    ),
-                    values_left=values_left.unsqueeze(-1),
-                    max_len_right=max_num_candidates,
-                    offsets_right=torch.ops.fbgemm.asynchronous_complete_cumsum(
-                        num_candidates
-                    ),
-                    values_right=values_right.unsqueeze(-1),
-                    kernel=HammerKernel.PYTORCH
-                    if self._is_inference
-                    else self.hammer_kernel(),
-                ).squeeze(-1)
-                payload_features[uih_feature_name] = merged_values
+                payload_features[uih_feature_name] = values_left
                 payload_features[candidate_feature_name] = values_right
-        payload_features["offsets"] = torch.ops.fbgemm.asynchronous_complete_cumsum(
-            uih_seq_lengths + num_candidates
+        payload_features["uih_offsets"] = torch.ops.fbgemm.asynchronous_complete_cumsum(
+            uih_seq_lengths
+        )
+        payload_features["candidate_offsets"] = (
+            torch.ops.fbgemm.asynchronous_complete_cumsum(num_candidates)
         )
 
         seq_embeddings = {
