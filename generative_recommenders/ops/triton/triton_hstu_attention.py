@@ -1248,7 +1248,7 @@ def _get_bw_configs() -> List[triton.Config]:
     if torch.version.hip:
         configs = []
         for BLOCK_M in [32, 64]:
-            for BLOCK_N in [32, 64]:
+            for BLOCK_N in [32, 64, 128]:
                 for num_stages in [1, 2]:
                     for num_warps in [4, 8]:
                         for matrix_instr_nonkdim in [16, 32]:
