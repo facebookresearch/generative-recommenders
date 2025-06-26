@@ -1515,6 +1515,7 @@ def _hstu_attn_bwd(  # noqa C901
     HAS_SORT_BY_LENGTH_INDICES: tl.constexpr,
     ENABLE_TMA: tl.constexpr,
     TMA_DESC_SIZE: tl.constexpr,
+    ENABLE_BUFFER_OPS_ASSUMES: tl.constexpr,
 ):
     off_hz = tl.program_id(0)
     off_z = off_hz // H
@@ -1529,6 +1530,26 @@ def _hstu_attn_bwd(  # noqa C901
         n_targets = tl.load(num_targets + off_z).to(tl.int32)
     else:
         n_targets = None
+    if ENABLE_BUFFER_OPS_ASSUMES:
+        tl.assume(off_hz >= 0)
+        tl.assume(off_z >= 0)
+        tl.assume(off_h >= 0)
+        tl.assume(seq_start >= 0)
+        tl.assume(stride_qm >= 0)
+        tl.assume(stride_qh >= 0)
+        tl.assume(stride_kn >= 0)
+        tl.assume(stride_kh >= 0)
+        tl.assume(stride_vn >= 0)
+        tl.assume(stride_vh >= 0)
+        tl.assume(stride_dom >= 0)
+        tl.assume(stride_doh >= 0)
+        tl.assume(stride_dqm >= 0)
+        tl.assume(stride_dqh >= 0)
+        tl.assume(stride_dkn >= 0)
+        tl.assume(stride_dkh >= 0)
+        tl.assume(stride_dvn >= 0)
+        tl.assume(stride_dvh >= 0)
+
     # offset pointers for batch/head
     Q = Q + seq_start * stride_qm
     K = K + seq_start * stride_kn
@@ -1873,6 +1894,8 @@ def triton_hstu_attention_bwd(
             dtype=torch.uint8,
             device="cuda",
         )
+    # Enable BufferOps on AMD
+    ENABLE_BUFFER_OPS_ASSUMES = torch.version.hip is not None
     _hstu_attn_bwd[grid](
         Q=q,
         K=k,
@@ -1919,6 +1942,7 @@ def triton_hstu_attention_bwd(
         HAS_SORT_BY_LENGTH_INDICES=sort_by_length_indices is not None,
         ENABLE_TMA=enable_tma,
         TMA_DESC_SIZE=TMA_DESC_SIZE,
+        ENABLE_BUFFER_OPS_ASSUMES=ENABLE_BUFFER_OPS_ASSUMES,
     )
 
     return dq, dk, dv
